@@ -1,7 +1,10 @@
-const CACHE_VERSION = "v1.0.0";
+const CACHE_VERSION = "v1.1.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
+const TILE_CACHE = "bike-tracker-tiles-v1";
+const TILE_CACHE_MAX = 500;
+const STADIA_CACHE = "bike-tracker-stadia-v1";
 
 const ASSETS = [
   "./",
@@ -15,6 +18,9 @@ const ASSETS = [
   "./vendor/leaflet/marker-icon.png",
   "./vendor/leaflet/marker-icon-2x.png",
   "./vendor/leaflet/marker-shadow.png",
+  "./vendor/maplibre/maplibre-gl.css",
+  "./vendor/maplibre/maplibre-gl.js",
+  "./vendor/maplibre/leaflet-maplibre-gl.js",
 ];
 
 const SHELL_ASSET_SUFFIXES = [
@@ -28,6 +34,9 @@ const SHELL_ASSET_SUFFIXES = [
   "/vendor/leaflet/marker-icon.png",
   "/vendor/leaflet/marker-icon-2x.png",
   "/vendor/leaflet/marker-shadow.png",
+  "/vendor/maplibre/maplibre-gl.css",
+  "/vendor/maplibre/maplibre-gl.js",
+  "/vendor/maplibre/leaflet-maplibre-gl.js",
 ];
 
 const UPDATE_WATCH_SUFFIXES = [
@@ -37,6 +46,8 @@ const UPDATE_WATCH_SUFFIXES = [
   "/manifest.webmanifest",
   "/vendor/leaflet/leaflet.css",
   "/vendor/leaflet/leaflet.js",
+  "/vendor/maplibre/maplibre-gl.js",
+  "/vendor/maplibre/leaflet-maplibre-gl.js",
 ];
 
 let updateNotified = false;
@@ -52,6 +63,8 @@ self.addEventListener("activate", (event) => {
         keys
           .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
           .concat(keys.filter((key) => key.startsWith("bike-tracker-runtime-") && key !== RUNTIME_CACHE))
+          .concat(keys.filter((key) => key.startsWith("bike-tracker-tiles-") && key !== TILE_CACHE))
+          .concat(keys.filter((key) => key.startsWith("bike-tracker-stadia-") && key !== STADIA_CACHE))
           .map((key) => caches.delete(key)),
       ),
     ),
@@ -73,7 +86,11 @@ self.addEventListener("fetch", (event) => {
 
   if (url.origin !== self.location.origin) {
     if (request.url.includes("tile.openstreetmap.org") || request.url.includes("tiles.stadiamaps.com")) {
-      event.respondWith(networkFirst(request, RUNTIME_CACHE));
+      if (request.url.includes("tiles.stadiamaps.com")) {
+        event.respondWith(stadiaFirst(request));
+      } else {
+        event.respondWith(tileFirst(request));
+      }
     }
     return;
   }
@@ -117,6 +134,50 @@ async function networkFirst(request, cacheName, notifyOnChange = false) {
   } catch {
     if (cached) return cached;
     throw new Error("Network unavailable and no cached response");
+  }
+}
+
+async function stadiaFirst(request) {
+  const cache = await caches.open(STADIA_CACHE);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      await limitTileCache(cache);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    if (cached) return cached; // serve stale on network failure
+    throw new Error("Stadia tile unavailable offline and not cached");
+  }
+}
+
+async function tileFirst(request) {
+  const cache = await caches.open(TILE_CACHE);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      await limitTileCache(cache);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    throw new Error("Tile unavailable offline and not cached");
+  }
+}
+
+async function limitTileCache(cache) {
+  const keys = await cache.keys();
+  if (keys.length < TILE_CACHE_MAX) return;
+  const overflow = keys.length - TILE_CACHE_MAX + 1;
+  for (let i = 0; i < overflow; i += 1) {
+    await cache.delete(keys[i]);
   }
 }
 

@@ -106,6 +106,10 @@ strong {
   box-shadow: var(--shadow);
 }
 
+.settings-card{
+  padding: 1em;
+}
+
 .toggle-card {
   padding: 10px;
   display: flex;
@@ -185,6 +189,15 @@ input {
   height: 44px;
   padding: 0;
   font-size: 1.2rem;
+}
+
+
+#openSettingsBtn {
+  border: 0 none;
+  background: none;
+  font-size: 3em;
+  align-self: start;
+  line-height: 0;
 }
 
 .sessions-card {

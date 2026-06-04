@@ -773,17 +773,25 @@ function createTileLayer(onFallback) {
 
   if (hasStadia) {
     const dark = state.prefs.theme === "dark";
-    const style = dark ? "alidade_smooth_dark" : "alidade_smooth";
-    const layer = L.tileLayer(
-      `https://tiles.stadiamaps.com/tiles/${style}/{z}/{x}/{y}{r}.png?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`,
-      {
-        maxZoom: 20,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
-      },
-    );
+    const styleName = dark ? "alidade_smooth_dark" : "alidade_smooth";
+    const styleUrl = `https://tiles.stadiamaps.com/styles/${styleName}.json?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`;
+    const useVector = typeof L.maplibreGL === "function";
+    const layer = useVector
+      ? L.maplibreGL({
+          style: styleUrl,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
+        })
+      : L.tileLayer(
+          `https://tiles.stadiamaps.com/tiles/${styleName}/{z}/{x}/{y}{r}.png?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`,
+          {
+            maxZoom: 20,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
+          },
+        );
 
     let failedOver = false;
-    layer.on("tileerror", () => {
+    const errorEvent = useVector ? "error" : "tileerror";
+    layer.on(errorEvent, () => {
       if (failedOver) return;
       failedOver = true;
       const fallback = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
