@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b5d3b">
+  <meta name="description" content="Offline bike ride tracker PWA">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="app.css">
+  <title>Bike Tracker</title>
+</head>
+<body>
+  <div id="installBanner" class="install-banner hidden" role="dialog" aria-live="polite">
+    <p id="installMessage">Add Bike Tracker to your home screen for quick, full-screen access.</p>
+    <div class="row">
+      <button id="installBtn" class="btn primary">Add to Home Screen</button>
+      <button id="dismissInstallBtn" class="btn ghost">Not Now</button>
+    </div>
+  </div>
+
+  <main id="appRoot">
+    <section id="homeScreen" class="screen active">
+      <header class="home-header">
+        <div>
+          <h1>Bike Tracker</h1>
+          <p class="sub">Offline-first ride logging</p>
+        </div>
+        <button id="openSettingsBtn" class="icon-btn" aria-label="Open settings">⚙</button>
+      </header>
+
+      <div class="top-controls">
+        <button id="startRideBtn" class="btn primary large">Start New Ride</button>
+      </div>
+
+      <section class="sessions-card">
+        <h2>Past Rides</h2>
+        <ul id="sessionsList" class="sessions-list"></ul>
+        <p id="sessionsEmpty" class="empty">No rides yet. Start your first ride above.</p>
+      </section>
+    </section>
+
+    <section id="countdownScreen" class="screen center hidden">
+      <div class="countdown-wrap">
+        <div id="countdownNumber" class="countdown-number">5</div>
+        <p id="countdownStatus" class="sub">Getting GPS lock...</p>
+        <button id="retryCountdownBtn" class="btn primary hidden">Try Again</button>
+        <button id="cancelCountdownBtn" class="btn ghost">Cancel</button>
+      </div>
+    </section>
+
+    <section id="activeScreen" class="activescreen screen hidden">
+      <div class="active-layout">
+        <div class="stats-panel">
+          <div class="stat primary">
+            <span>Current Speed</span>
+            <strong id="currentSpeed">0.0</strong>
+          </div>
+          <div class="stat secondary">
+            <span>Distance</span>
+            <strong id="distanceValue">0.00</strong>
+          </div>
+          <div class="stat">
+            <span>Avg Speed</span>
+            <strong id="avgSpeed">0.0</strong>
+          </div>
+          <div class="stat">
+            <span>Elapsed</span>
+            <strong id="elapsedTime">00:00</strong>
+          </div>
+          <div class="control-bar">
+            <button id="pauseBtn" class="btn warn">Pause</button>
+            <button id="stopBtn" class="btn danger">Stop</button>
+          </div>
+        </div>
+
+        <div class="map-panel">
+          <div id="liveMap" class="map"></div>
+          <button id="recenterBtn" class="btn recenter">Re-center</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="postScreen" class="screen hidden">
+      <header class="post-header">
+        <h2 id="postTitle">Ride Summary</h2>
+      </header>
+
+      <div class="summary-grid">
+        <div><span>Distance</span><strong id="postDistance">-</strong></div>
+        <div><span>Moving Time</span><strong id="postTime">-</strong></div>
+        <div><span>Max Speed</span><strong id="postMaxSpeed">-</strong></div>
+        <div><span>Avg Speed</span><strong id="postAvgSpeed">-</strong></div>
+        <div class="full"><span>Elevation</span><strong id="postElevation">-</strong></div>
+      </div>
+
+      <div id="postMap" class="map post-map"></div>
+
+      <section class="chart-card">
+        <div class="chart-header">
+          <h3>Elevation Over Ride</h3>
+          <p class="muted">Line color reflects speed at that point, from red to green.</p>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="elevationChart" aria-label="Elevation over ride chart" role="img"></canvas>
+        </div>
+        <div class="chart-legend">
+          <span><i class="swatch slow"></i> Slower</span>
+          <span><i class="swatch fast"></i> Faster</span>
+        </div>
+      </section>
+
+      <section class="segments">
+        <h3>Segment Breakdown</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Segment</th>
+              <th>Time</th>
+              <th>Avg Speed</th>
+            </tr>
+          </thead>
+          <tbody id="segmentsBody"></tbody>
+        </table>
+      </section>
+
+      <div class="row actions">
+        <button id="exportGpxBtn" class="btn">Export GPX</button>
+        <button id="deleteRideBtn" class="btn danger">Delete Ride</button>
+        <button id="backHomeBtn" class="btn primary">Back to Home</button>
+      </div>
+    </section>
+
+    <section id="settingsScreen" class="screen hidden center">
+      <div class="settings-card">
+        <h2>Settings</h2>
+        <div class="toggle-card" role="group" aria-label="Units">
+          <span>Units</span>
+          <div class="toggle-pill" id="unitToggle">
+            <button data-unit="imperial" class="toggle-option">Imperial</button>
+            <button data-unit="metric" class="toggle-option">Metric</button>
+          </div>
+        </div>
+
+        <div class="toggle-card" role="group" aria-label="Theme">
+          <span>Theme</span>
+          <div class="toggle-pill" id="themeToggle">
+            <button data-theme="light" class="toggle-option">Light</button>
+            <button data-theme="dark" class="toggle-option">Dark</button>
+          </div>
+        </div>
+
+        <label for="stadiaKeyInput">Stadia Maps API Key (optional)</label>
+        <input id="stadiaKeyInput" type="text" placeholder="Paste API key">
+        <p class="muted">With a key, map tiles switch to Alidade Smooth in light mode and Alidade Smooth Dark in dark mode.</p>
+        <div class="row">
+          <button id="saveSettingsBtn" class="btn primary">Save</button>
+          <button id="closeSettingsBtn" class="btn ghost">Close</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="modalBackdrop" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalMessage">
+      <h3 id="modalTitle">Confirm</h3>
+      <p id="modalMessage"></p>
+      <p id="modalCountdown" class="muted hidden"></p>
+      <div class="row">
+        <button id="modalCancelBtn" class="btn ghost">Cancel</button>
+        <button id="modalConfirmBtn" class="btn primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

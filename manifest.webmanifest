@@ -1,0 +1,17 @@
+{
+  "name": "Bike Tracker",
+  "short_name": "Bike",
+  "description": "Offline bike tracking PWA",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f2f7f3",
+  "theme_color": "#0b5d3b",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
