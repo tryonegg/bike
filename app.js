@@ -13,16 +13,20 @@ const state = {
     unit: "imperial",
     theme: "light",
     stadiaKey: "",
+    guideContrast: "high",
+    markerSize: "medium",
     installDismissed: false,
   },
   deferredInstallPrompt: null,
   liveMap: null,
   liveTileLayer: null,
   routeLine: null,
+  guideLineHalo: null,
   guideLine: null,
   markerLayer: null,
   postMap: null,
   postTileLayer: null,
+  postMarkerLayer: null,
   elevationChart: null,
   currentSession: null,
   currentPostSession: null,
@@ -59,6 +63,8 @@ const el = {
   closeSettingsBtn: document.getElementById("closeSettingsBtn"),
   saveSettingsBtn: document.getElementById("saveSettingsBtn"),
   stadiaKeyInput: document.getElementById("stadiaKeyInput"),
+  guideContrastSelect: document.getElementById("guideContrastSelect"),
+  markerSizeSelect: document.getElementById("markerSizeSelect"),
   countdownNumber: document.getElementById("countdownNumber"),
   countdownStatus: document.getElementById("countdownStatus"),
   retryCountdownBtn: document.getElementById("retryCountdownBtn"),
@@ -136,16 +142,29 @@ function wireEvents() {
 
   el.openSettingsBtn.addEventListener("click", () => {
     el.stadiaKeyInput.value = state.prefs.stadiaKey;
+    el.guideContrastSelect.value = state.prefs.guideContrast;
+    el.markerSizeSelect.value = state.prefs.markerSize;
     navigateToScreen("settings");
   });
 
-  el.closeSettingsBtn.addEventListener("click", () => navigateToScreen("home"));
+  el.guideContrastSelect.addEventListener("change", previewSettingsMapVisuals);
+  el.markerSizeSelect.addEventListener("change", previewSettingsMapVisuals);
+
+  el.closeSettingsBtn.addEventListener("click", () => {
+    applyMapVisualPrefs();
+    navigateToScreen("home");
+  });
 
   el.saveSettingsBtn.addEventListener("click", async () => {
     state.prefs.stadiaKey = el.stadiaKeyInput.value.trim();
+    state.prefs.guideContrast = el.guideContrastSelect.value;
+    state.prefs.markerSize = el.markerSizeSelect.value;
     await setPref("stadiaKey", state.prefs.stadiaKey);
+    await setPref("guideContrast", state.prefs.guideContrast);
+    await setPref("markerSize", state.prefs.markerSize);
     navigateToScreen("home");
     rebuildMapTiles();
+    applyMapVisualPrefs();
   });
 
   el.pauseBtn.addEventListener("click", togglePauseSession);
@@ -285,16 +304,20 @@ async function applyHistoryState(targetState, mode = "none", savedSession = null
 
     if (targetState.screen === "settings") {
       el.stadiaKeyInput.value = state.prefs.stadiaKey;
+      el.guideContrastSelect.value = state.prefs.guideContrast;
+      el.markerSizeSelect.value = state.prefs.markerSize;
       navigateToScreen("settings", mode);
       return;
     }
 
     if (targetState.screen === "countdown") {
+      applyMapVisualPrefs();
       navigateToScreen("home", mode);
       return;
     }
 
     if (targetState.screen === "active") {
+      applyMapVisualPrefs();
       if (state.currentSession) {
         navigateToScreen("active", mode);
       } else {
@@ -303,6 +326,7 @@ async function applyHistoryState(targetState, mode = "none", savedSession = null
       return;
     }
 
+    applyMapVisualPrefs();
     navigateToScreen("home", mode);
   } finally {
     state.handlingPopstate = false;
@@ -530,7 +554,7 @@ function updateSegments(point) {
       avgSpeed: segAvgSpeed,
     });
 
-    const markerLabel = `${segmentLabel(segmentNumber, state.prefs.unit)} - ${formatDuration(elapsed)}`;
+    const markerLabel = segmentDistanceLabel(segmentNumber, state.prefs.unit);
     session.segmentMarkers.push({
       lat: point.lat,
       lng: point.lng,
@@ -539,12 +563,7 @@ function updateSegments(point) {
     });
 
     if (state.markerLayer) {
-      L.marker([point.lat, point.lng], {
-        icon: L.divIcon({
-          className: "mile-marker",
-          html: markerLabel,
-        }),
-      }).addTo(state.markerLayer);
+      addSegmentMarkerToLayer(state.markerLayer, point.lat, point.lng, markerLabel);
     }
 
     session.segmentStartElapsed = elapsed;
@@ -559,12 +578,14 @@ function updateLiveMap(point, heading, speedMps) {
     state.routeLine.addLatLng([point.lat, point.lng]);
   }
 
-  if (state.guideLine && state.currentSession?.points?.length) {
+  if ((state.guideLine || state.guideLineHalo) && state.currentSession?.points?.length) {
     const startPoint = state.currentSession.points[0];
-    state.guideLine.setLatLngs([
+    const line = [
       [startPoint.lat, startPoint.lng],
       [point.lat, point.lng],
-    ]);
+    ];
+    if (state.guideLineHalo) state.guideLineHalo.setLatLngs(line);
+    if (state.guideLine) state.guideLine.setLatLngs(line);
   }
 
   const threshold = state.prefs.unit === "imperial" ? 3 / MPS_TO_MPH : 5 / MPS_TO_KPH;
@@ -712,11 +733,21 @@ function initLiveMap(lat, lng) {
     weight: 5,
   }).addTo(state.liveMap);
 
+  const guideStyle = getGuideLineStyle(state.prefs.guideContrast);
+
+  state.guideLineHalo = L.polyline([], {
+    color: guideStyle.haloColor,
+    weight: guideStyle.haloWeight,
+    opacity: guideStyle.haloOpacity,
+    dashArray: guideStyle.dashArray,
+    lineCap: "round",
+  }).addTo(state.liveMap);
+
   state.guideLine = L.polyline([], {
-    color: "#f4f7fb",
-    weight: 3,
-    opacity: 0.9,
-    dashArray: "8 10",
+    color: guideStyle.lineColor,
+    weight: guideStyle.lineWeight,
+    opacity: guideStyle.lineOpacity,
+    dashArray: guideStyle.dashArray,
     lineCap: "round",
   }).addTo(state.liveMap);
 
@@ -755,15 +786,11 @@ function initPostMap(session) {
     state.postMap.setView([0, 0], 2);
   }
 
-  const markerLayer = L.layerGroup().addTo(state.postMap);
-  for (const marker of session.segmentMarkers || []) {
-    L.marker([marker.lat, marker.lng], {
-      icon: L.divIcon({
-        className: "mile-marker",
-        html: marker.label,
-      }),
-    }).addTo(markerLayer);
+  if (state.postMarkerLayer) {
+    state.postMap.removeLayer(state.postMarkerLayer);
   }
+  state.postMarkerLayer = L.layerGroup().addTo(state.postMap);
+  renderSegmentMarkers(state.postMarkerLayer, session.segmentMarkers || []);
 
   setTimeout(() => state.postMap?.invalidateSize(), 150);
 }
@@ -1313,6 +1340,144 @@ function segmentLabel(number, unit) {
   return unit === "imperial" ? `Mile ${number}` : `Km ${number}`;
 }
 
+function segmentDistanceLabel(number, unit) {
+  return unit === "imperial" ? `${number} mi` : `${number} km`;
+}
+
+function createSegmentMarkerIcon(label, markerSizeValue = state.prefs.markerSize) {
+  const safeLabel = escapeHtml(label);
+  const markerSize = getMarkerSizeConfig(markerSizeValue);
+  return L.divIcon({
+    className: "segment-flag-wrapper",
+    html: `<div class="segment-flag-marker ${markerSize.className}"><img src="icons/flag.svg" alt="" aria-hidden="true"><span>${safeLabel}</span></div>`,
+    iconSize: markerSize.iconSize,
+    iconAnchor: markerSize.iconAnchor,
+  });
+}
+
+function getMarkerSizeConfig(size) {
+  if (size === "small") {
+    return {
+      className: "small",
+      iconSize: [56, 44],
+      iconAnchor: [15, 39],
+    };
+  }
+
+  if (size === "large") {
+    return {
+      className: "large",
+      iconSize: [82, 62],
+      iconAnchor: [22, 56],
+    };
+  }
+
+  return {
+    className: "medium",
+    iconSize: [68, 52],
+    iconAnchor: [18, 46],
+  };
+}
+
+function getGuideLineStyle(contrast) {
+  if (contrast === "low") {
+    return {
+      lineColor: "#ffffff",
+      lineWeight: 2,
+      lineOpacity: 0.85,
+      haloColor: "#1f2d23",
+      haloWeight: 5,
+      haloOpacity: 0.55,
+      dashArray: "8 10",
+    };
+  }
+
+  if (contrast === "medium") {
+    return {
+      lineColor: "#fff48a",
+      lineWeight: 3,
+      lineOpacity: 0.95,
+      haloColor: "#16231a",
+      haloWeight: 6,
+      haloOpacity: 0.72,
+      dashArray: "9 11",
+    };
+  }
+
+  return {
+    lineColor: "#f6ff61",
+    lineWeight: 3,
+    lineOpacity: 1,
+    haloColor: "#132017",
+    haloWeight: 7,
+    haloOpacity: 0.85,
+    dashArray: "10 12",
+  };
+}
+
+function addSegmentMarkerToLayer(layer, lat, lng, label, markerSizeValue = state.prefs.markerSize) {
+  L.marker([lat, lng], {
+    icon: createSegmentMarkerIcon(label, markerSizeValue),
+  }).addTo(layer);
+}
+
+function renderSegmentMarkers(layer, markers, markerSizeValue = state.prefs.markerSize) {
+  for (const marker of markers) {
+    addSegmentMarkerToLayer(layer, marker.lat, marker.lng, marker.label, markerSizeValue);
+  }
+}
+
+function applyMapVisualPrefs(preview = null) {
+  const guideContrast = preview?.guideContrast ?? state.prefs.guideContrast;
+  const markerSize = preview?.markerSize ?? state.prefs.markerSize;
+  const guideStyle = getGuideLineStyle(guideContrast);
+
+  if (state.guideLineHalo) {
+    state.guideLineHalo.setStyle({
+      color: guideStyle.haloColor,
+      weight: guideStyle.haloWeight,
+      opacity: guideStyle.haloOpacity,
+      dashArray: guideStyle.dashArray,
+    });
+  }
+
+  if (state.guideLine) {
+    state.guideLine.setStyle({
+      color: guideStyle.lineColor,
+      weight: guideStyle.lineWeight,
+      opacity: guideStyle.lineOpacity,
+      dashArray: guideStyle.dashArray,
+    });
+  }
+
+  if (state.markerLayer) {
+    state.markerLayer.clearLayers();
+    renderSegmentMarkers(state.markerLayer, state.currentSession?.segmentMarkers || [], markerSize);
+  }
+
+  if (state.postMarkerLayer) {
+    state.postMarkerLayer.clearLayers();
+    renderSegmentMarkers(state.postMarkerLayer, state.currentPostSession?.segmentMarkers || [], markerSize);
+  }
+}
+
+function previewSettingsMapVisuals() {
+  if (state.currentScreen !== "settings") return;
+  applyMapVisualPrefs({
+    guideContrast: el.guideContrastSelect.value,
+    markerSize: el.markerSizeSelect.value,
+  });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function formatDistance(meters, unit) {
   if (unit === "imperial") return `${(meters / METERS_PER_MILE).toFixed(2)}`;
   return `${(meters / METERS_PER_KM).toFixed(2)}`;
@@ -1425,6 +1590,8 @@ async function loadPrefs() {
   state.prefs.unit = await getPref("unit", "imperial");
   state.prefs.theme = await getPref("theme", "light");
   state.prefs.stadiaKey = await getPref("stadiaKey", "");
+  state.prefs.guideContrast = await getPref("guideContrast", "high");
+  state.prefs.markerSize = await getPref("markerSize", "medium");
   state.prefs.installDismissed = await getPref("installDismissed", false);
 }
 

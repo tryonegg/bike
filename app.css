@@ -4,6 +4,7 @@
   --bg-grad-b: #d5e6f6;
   --surface: #ffffff;
   --text: #17211a;
+  --link: #15b371;
   --muted: #4a5f54;
   --primary: #0b5d3b;
   --primary-contrast: #f5fff9;
@@ -21,6 +22,7 @@
   --bg-grad-b: #000000;
   --surface: #172019;
   --text: #f3fff7;
+  --link: #fff;
   --muted: #b7d5c1;
   --primary: #8de3b9;
   --primary-contrast: #052714;
@@ -28,6 +30,11 @@
   --warn: lightblue;
   --border: #2f493c;
   --shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+}
+
+
+a{
+  color: var(--link);
 }
 
 * {
@@ -43,6 +50,7 @@ body {
     var(--bg);
   color: var(--text);
   font-family: var(--font-body);
+  min-height: 100vh;
 }
 
 body {
@@ -94,7 +102,6 @@ strong {
   gap: 12px;
 }
 
-.toggle-card,
 .sessions-card,
 .settings-card,
 .summary-grid,
@@ -111,7 +118,8 @@ strong {
 }
 
 .toggle-card {
-  padding: 10px;
+  margin: 1em 0;
+  padding: 10px 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -141,7 +149,8 @@ strong {
 
 .btn,
 .icon-btn,
-input {
+input,
+select {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 14px;
@@ -322,15 +331,55 @@ input {
   background: var(--surface);
 }
 
-.mile-marker {
-  background: var(--primary);
-  color: var(--primary-contrast);
-  border: 2px solid color-mix(in srgb, var(--primary) 50%, black);
-  border-radius: 12px;
-  padding: 4px 6px;
-  font-size: 0.75rem;
-  font-weight: 700;
+.segment-flag-wrapper {
+  background: transparent;
+  border: 0;
+}
+
+.segment-flag-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+}
+
+.segment-flag-marker img {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.segment-flag-marker.small img {
+  width: 22px;
+  height: 22px;
+}
+
+.segment-flag-marker.large img {
+  width: 34px;
+  height: 34px;
+}
+
+.segment-flag-marker span {
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 86%, white);
+  border: 1px solid color-mix(in srgb, var(--text) 24%, transparent);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
   white-space: nowrap;
+}
+
+.segment-flag-marker.small span {
+  font-size: 0.78rem;
+  padding: 2px 6px;
+}
+
+.segment-flag-marker.large span {
+  font-size: 1rem;
+  padding: 4px 10px;
 }
 
 .post-header,

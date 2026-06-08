@@ -26,7 +26,6 @@
       <header class="home-header">
         <div>
           <h1>Bike Tracker</h1>
-          <p class="sub">Offline-first ride logging</p>
         </div>
         <button id="openSettingsBtn" class="icon-btn" aria-label="Open settings">⚙</button>
       </header>
@@ -154,7 +153,22 @@
 
         <label for="stadiaKeyInput">Stadia Maps API Key (optional)</label>
         <input id="stadiaKeyInput" type="text" placeholder="Paste API key">
-        <p class="muted">With a key, map tiles switch to Alidade Smooth in light mode and Alidade Smooth Dark in dark mode.</p>
+        <p class="muted">With a key, map tiles switch to Alidade Smooth in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API Key here.</a></p>
+
+        <label for="guideContrastSelect">Guide Line Contrast</label>
+        <select id="guideContrastSelect">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+
+        <label for="markerSizeSelect">Distance Marker Size</label>
+        <select id="markerSizeSelect">
+          <option value="small">Small</option>
+          <option value="medium">Medium</option>
+          <option value="large">Large</option>
+        </select>
+
         <div class="row">
           <button id="saveSettingsBtn" class="btn primary">Save</button>
           <button id="closeSettingsBtn" class="btn ghost">Close</button>
