@@ -1349,7 +1349,7 @@ function createSegmentMarkerIcon(label, markerSizeValue = state.prefs.markerSize
   const markerSize = getMarkerSizeConfig(markerSizeValue);
   return L.divIcon({
     className: "segment-flag-wrapper",
-    html: `<div class="segment-flag-marker ${markerSize.className}"><img src="icons/flag.svg" alt="" aria-hidden="true"><span>${safeLabel}</span></div>`,
+    html: `<div class="segment-flag-marker ${markerSize.className}"><span>${safeLabel}</span></div>`,
     iconSize: markerSize.iconSize,
     iconAnchor: markerSize.iconAnchor,
   });
@@ -1359,23 +1359,23 @@ function getMarkerSizeConfig(size) {
   if (size === "small") {
     return {
       className: "small",
-      iconSize: [56, 44],
-      iconAnchor: [15, 39],
+      iconSize: [56, 28],
+      iconAnchor: [28, 14],
     };
   }
 
   if (size === "large") {
     return {
       className: "large",
-      iconSize: [82, 62],
-      iconAnchor: [22, 56],
+      iconSize: [88, 40],
+      iconAnchor: [44, 20],
     };
   }
 
   return {
     className: "medium",
-    iconSize: [68, 52],
-    iconAnchor: [18, 46],
+    iconSize: [72, 34],
+    iconAnchor: [36, 17],
   };
 }
 
