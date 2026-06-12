@@ -58,6 +58,11 @@ const state = {
 	currentHeadingDegrees: 0,
 	estimatedPointsDuringGap: [],
 	velocityEstimate: 0,
+	// Elevation chart interaction
+	chartPointsCache: [],
+	highlightedPointIndex: -1,
+	chartHighlightMarker: null,
+	isChartDragging: false,
 };
 
 const el = {
@@ -145,6 +150,7 @@ function wireEvents() {
 		syncToggles();
 		await renderSessionsList();
 		updateLiveStats();
+		applyMapVisualPrefs();
 		if (state.currentPostSession) {
 			renderPostSummary(state.currentPostSession);
 			renderElevationChart(state.currentPostSession);
@@ -222,6 +228,7 @@ function wireEvents() {
 	el.exportGpxBtn.addEventListener("click", exportCurrentGpx);
 	el.deleteRideBtn.addEventListener("click", deleteCurrentRide);
 	el.backHomeBtn.addEventListener("click", async () => {
+		clearChartHighlight();
 		state.currentPostSession = null;
 		navigateToScreen("home");
 		await renderSessionsList();
@@ -830,11 +837,10 @@ function updateSegments(point) {
 			avgSpeed: segAvgSpeed,
 		});
 
-		const markerLabel = segmentDistanceLabel(segmentNumber, state.prefs.unit);
 		session.segmentMarkers.push({
 			lat: point.lat,
 			lng: point.lng,
-			label: markerLabel,
+			segmentNumber,
 			elapsed,
 		});
 
@@ -1053,11 +1059,24 @@ function initPostMap(session) {
 
 	const coords = session.points.map((p) => [p.lat, p.lng]);
 	if (coords.length) {
-		const poly = L.polyline(coords, {
-			color: "#0b5d3b",
-			weight: 5,
-		}).addTo(state.postMap);
-		state.postMap.fitBounds(poly.getBounds().pad(0.12));
+		const polyGroup = L.layerGroup().addTo(state.postMap);
+		const maxSpeed = Math.max(...session.points.map((p) => p.speed || 0), 0.0001);
+
+		// Draw polyline segments with speed-based coloring
+		for (let i = 1; i < session.points.length; i++) {
+			const prev = session.points[i - 1];
+			const curr = session.points[i];
+			const midSpeed = (prev.speed + curr.speed) / 2;
+			const segmentColor = speedToColor(midSpeed, maxSpeed);
+
+			L.polyline([[prev.lat, prev.lng], [curr.lat, curr.lng]], {
+				color: segmentColor,
+				weight: 5,
+			}).addTo(polyGroup);
+		}
+
+		const bounds = L.latLngBounds(coords);
+		state.postMap.fitBounds(bounds.pad(0.12));
 	} else {
 		state.postMap.setView([0, 0], 2);
 	}
@@ -1066,9 +1085,112 @@ function initPostMap(session) {
 		state.postMap.removeLayer(state.postMarkerLayer);
 	}
 	state.postMarkerLayer = L.layerGroup().addTo(state.postMap);
-	renderSegmentMarkers(state.postMarkerLayer, session.segmentMarkers || []);
+	
+	// Recalculate segment markers based on current unit settings
+	const segmentMarkers = recalculateSegmentMarkers(session);
+	renderSegmentMarkers(state.postMarkerLayer, segmentMarkers);
 
 	setTimeout(() => state.postMap?.invalidateSize(), 150);
+}
+
+function recalculateSegmentMarkers(session) {
+	if (!session.points || !session.points.length) return [];
+
+	const segmentMarkers = [];
+	const stepDistance = getSegmentLengthMeters(state.prefs.unit);
+	
+	// Calculate cumulative distance for each point
+	let cumulativeDistance = 0;
+	const pointDistances = session.points.map((point, index) => {
+		if (index > 0) {
+			const prev = session.points[index - 1];
+			cumulativeDistance += haversineMeters(prev.lat, prev.lng, point.lat, point.lng);
+		}
+		return cumulativeDistance;
+	});
+
+	// Find segment boundaries and nearest points
+	let nextSegmentDistance = stepDistance;
+	let segmentNumber = 1;
+
+	for (let i = 1; i < pointDistances.length; i++) {
+		const distance = pointDistances[i];
+		
+		while (distance >= nextSegmentDistance) {
+			// Find the closest point to this segment boundary
+			let closestIndex = i - 1;
+			let closestDelta = Math.abs(pointDistances[i - 1] - nextSegmentDistance);
+
+			for (let j = Math.max(0, i - 5); j < i; j++) {
+				const delta = Math.abs(pointDistances[j] - nextSegmentDistance);
+				if (delta < closestDelta) {
+					closestDelta = delta;
+					closestIndex = j;
+				}
+			}
+
+			const point = session.points[closestIndex];
+			segmentMarkers.push({
+				lat: point.lat,
+				lng: point.lng,
+				segmentNumber,
+			});
+
+			segmentNumber++;
+			nextSegmentDistance += stepDistance;
+		}
+	}
+
+	return segmentMarkers;
+}
+
+function recalculateSegments(session) {
+	if (!session.points || !session.points.length) return [];
+
+	const segments = [];
+	const stepDistance = getSegmentLengthMeters(state.prefs.unit);
+	
+	// Calculate cumulative distance and time for each point
+	let cumulativeDistance = 0;
+	let cumulativeTime = 0;
+	const pointData = session.points.map((point, index) => {
+		if (index > 0) {
+			const prev = session.points[index - 1];
+			cumulativeDistance += haversineMeters(prev.lat, prev.lng, point.lat, point.lng);
+			cumulativeTime += (point.timestamp - prev.timestamp);
+		}
+		return {
+			distance: cumulativeDistance,
+			time: cumulativeTime,
+		};
+	});
+
+	// Find segment boundaries
+	let nextSegmentDistance = stepDistance;
+	let segmentNumber = 1;
+	let segmentStartTime = 0;
+
+	for (let i = 1; i < pointData.length; i++) {
+		const data = pointData[i];
+		
+		while (data.distance >= nextSegmentDistance) {
+			// Calculate time and average speed for this segment
+			const segmentTime = data.time - segmentStartTime;
+			const segmentAvgSpeed = segmentTime > 0 ? stepDistance / (segmentTime / 1000) : 0; // m/s
+
+			segments.push({
+				segmentNumber,
+				duration: segmentTime,
+				avgSpeed: segmentAvgSpeed,
+			});
+
+			segmentNumber++;
+			segmentStartTime = data.time;
+			nextSegmentDistance += stepDistance;
+		}
+	}
+
+	return segments;
 }
 
 function createTileLayer(onFallback) {
@@ -1165,7 +1287,9 @@ function renderPostSummary(session) {
 	el.postElevation.textContent = `↑ ${gain} gained / ↓ ${drop} dropped`;
 
 	el.segmentsBody.innerHTML = "";
-	for (const seg of session.segments || []) {
+	// Recalculate segments based on current unit settings
+	const segments = recalculateSegments(session);
+	for (const seg of segments) {
 		const tr = document.createElement("tr");
 		tr.innerHTML = `
 			<td>${segmentLabel(seg.segmentNumber, state.prefs.unit)}</td>
@@ -1180,11 +1304,18 @@ function renderElevationChart(session) {
 	const canvas = el.elevationChart;
 	if (!canvas) return;
 
+	// Clear any existing highlight when rendering new chart
+	clearChartHighlight();
+
 	const points = buildChartPoints(session);
 	if (!points.length) {
 		drawEmptyChart(canvas, "No elevation data available");
 		return;
 	}
+
+	// Cache points for interaction handling
+	state.chartPointsCache = points;
+	state.highlightedPointIndex = -1;
 
 	const ctx = canvas.getContext("2d");
 	if (!ctx) return;
@@ -1239,6 +1370,136 @@ function renderElevationChart(session) {
 	}
 
 	drawChartAxes(ctx, cssWidth, cssHeight, padding, minElevation, maxElevation, session, displayUnit, totalDistance);
+
+	// Add event listeners for chart interaction
+	setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor);
+}
+
+function setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor) {
+	// Remove old listeners if any
+	canvas.removeEventListener("mousemove", handleChartMouseMove);
+	canvas.removeEventListener("mouseleave", handleChartMouseLeave);
+	canvas.removeEventListener("mousedown", handleChartMouseDown);
+	canvas.removeEventListener("mouseup", handleChartMouseUp);
+	canvas.removeEventListener("touchstart", handleChartTouchStart);
+	canvas.removeEventListener("touchmove", handleChartTouchMove);
+	canvas.removeEventListener("touchend", handleChartTouchEnd);
+
+	// Store context for event handlers
+	canvas.chartContext = { session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance };
+
+	canvas.addEventListener("mousemove", handleChartMouseMove);
+	canvas.addEventListener("mouseleave", handleChartMouseLeave);
+	canvas.addEventListener("mousedown", handleChartMouseDown);
+	canvas.addEventListener("mouseup", handleChartMouseUp);
+	canvas.addEventListener("touchstart", handleChartTouchStart);
+	canvas.addEventListener("touchmove", handleChartTouchMove);
+	canvas.addEventListener("touchend", handleChartTouchEnd);
+}
+
+function handleChartMouseDown(event) {
+	state.isChartDragging = true;
+	updateChartHighlight(event, this);
+}
+
+function handleChartMouseMove(event) {
+	if (!state.isChartDragging && event.buttons === 0) return;
+	updateChartHighlight(event, this);
+}
+
+function handleChartMouseUp() {
+	state.isChartDragging = false;
+}
+
+function handleChartMouseLeave() {
+	if (!state.isChartDragging) {
+		clearChartHighlight();
+	}
+}
+
+function handleChartTouchStart(event) {
+	state.isChartDragging = true;
+	updateChartHighlight(event.touches[0], this);
+}
+
+function handleChartTouchMove(event) {
+	if (!state.isChartDragging) return;
+	updateChartHighlight(event.touches[0], this);
+}
+
+function handleChartTouchEnd() {
+	state.isChartDragging = false;
+	clearChartHighlight();
+}
+
+function updateChartHighlight(event, canvas) {
+	const context = canvas?.chartContext;
+	if (!context || !state.postMap) return;
+
+	const rect = canvas.getBoundingClientRect();
+	const x = event.clientX - rect.left;
+
+	// Calculate which point in the chart
+	const padding = context.padding;
+	const chartWidth = context.cssWidth - padding.left - padding.right;
+	const totalDistance = context.totalDistance;
+	const points = context.points;
+
+	if (x < padding.left || x > context.cssWidth - padding.right) {
+		clearChartHighlight();
+		return;
+	}
+
+	// Map X position to distance
+	const relativeX = x - padding.left;
+	const distanceRatio = relativeX / chartWidth;
+	const targetDistance = distanceRatio * totalDistance;
+
+	// Find the closest point with distance <= targetDistance
+	let closestIndex = 0;
+	let closestDelta = Math.abs(points[0].distance - targetDistance);
+
+	for (let i = 1; i < points.length; i++) {
+		const delta = Math.abs(points[i].distance - targetDistance);
+		if (delta < closestDelta) {
+			closestDelta = delta;
+			closestIndex = i;
+		}
+	}
+
+	if (closestIndex !== state.highlightedPointIndex) {
+		state.highlightedPointIndex = closestIndex;
+		highlightPointOnMap(context.session, closestIndex);
+	}
+}
+
+function highlightPointOnMap(session, pointIndex) {
+	if (!state.postMap || !session.points || !session.points[pointIndex]) return;
+
+	const point = session.points[pointIndex];
+
+	// Remove old marker if exists
+	if (state.chartHighlightMarker) {
+		state.postMap.removeLayer(state.chartHighlightMarker);
+	}
+
+	// Create highlight marker
+	state.chartHighlightMarker = L.circleMarker([point.lat, point.lng], {
+		radius: 8,
+		fillColor: "#ff6b35",
+		color: "#fff",
+		weight: 3,
+		opacity: 1,
+		fillOpacity: 0.8,
+	}).addTo(state.postMap);
+}
+
+function clearChartHighlight() {
+	if (state.chartHighlightMarker) {
+		state.postMap?.removeLayer(state.chartHighlightMarker);
+		state.chartHighlightMarker = null;
+	}
+	state.highlightedPointIndex = -1;
 }
 
 function buildChartPoints(session) {
@@ -1699,7 +1960,20 @@ function addSegmentMarkerToLayer(layer, lat, lng, label, markerSizeValue = state
 
 function renderSegmentMarkers(layer, markers, markerSizeValue = state.prefs.markerSize) {
 	for (const marker of markers) {
-		addSegmentMarkerToLayer(layer, marker.lat, marker.lng, marker.label, markerSizeValue);
+		// Support both old format (with label) and new format (with segmentNumber)
+		let label;
+		if (marker.label) {
+			// Old format - use stored label for backward compatibility
+			label = marker.label;
+		} else if (marker.segmentNumber) {
+			// New format - compute label on-the-fly based on current units
+			label = segmentDistanceLabel(marker.segmentNumber, state.prefs.unit);
+		} else {
+			// Fallback - try to infer segment number from array position
+			const segmentNumber = markers.indexOf(marker) + 1;
+			label = segmentDistanceLabel(segmentNumber, state.prefs.unit);
+		}
+		addSegmentMarkerToLayer(layer, marker.lat, marker.lng, label, markerSizeValue);
 	}
 }
 
@@ -1733,7 +2007,10 @@ function applyMapVisualPrefs(preview = null) {
 
 	if (state.postMarkerLayer) {
 		state.postMarkerLayer.clearLayers();
-		renderSegmentMarkers(state.postMarkerLayer, state.currentPostSession?.segmentMarkers || [], markerSize);
+		if (state.currentPostSession) {
+			const segmentMarkers = recalculateSegmentMarkers(state.currentPostSession);
+			renderSegmentMarkers(state.postMarkerLayer, segmentMarkers, markerSize);
+		}
 	}
 }
 
