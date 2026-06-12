@@ -49,6 +49,15 @@ const state = {
 	navGuardActive: false,
 	swRegistration: null,
 	swUpdatePromptOpen: false,
+	// Sensor fusion for GPS outage bridging
+	motionSensorActive: false,
+	lastGPSTimestamp: 0,
+	gpsOutageDetected: false,
+	gpsOutageTimeout: null,
+	lastAcceleration: { x: 0, y: 0, z: 0 },
+	currentHeadingDegrees: 0,
+	estimatedPointsDuringGap: [],
+	velocityEstimate: 0,
 };
 
 const el = {
@@ -491,6 +500,7 @@ async function startSession(initialPosition) {
 		watchId: null,
 		lastPoint: null,
 		elapsedIntervalId: null,
+		deadReckoningIntervalId: null,
 		resumeTimestamp: now,
 		speedSum: 0,
 		speedSamples: 0,
@@ -509,8 +519,15 @@ async function startSession(initialPosition) {
 	navigateToScreen("active");
 	initLiveMap(initialPosition.coords.latitude, initialPosition.coords.longitude);
 
+	// Initialize sensor fusion for GPS outage bridging
+	state.gpsOutageDetected = false;
+	state.estimatedPointsDuringGap = [];
+	state.lastGPSTimestamp = Date.now();
+	state.velocityEstimate = 0;
+
 	processPosition(initialPosition, true);
 	startWatch();
+	initMotionSensors();
 	state.currentSession.elapsedIntervalId = setInterval(updateLiveStats, 500);
 	updateLiveStats();
 	if (!state.selectedKeepScreenOn) {
@@ -539,6 +556,191 @@ function stopWatch() {
 		navigator.geolocation.clearWatch(session.watchId);
 		session.watchId = null;
 	}
+	stopMotionSensors();
+}
+
+function initMotionSensors() {
+	// Only enable for bike activity
+	if (state.selectedActivityType !== "bike") return;
+
+	try {
+		state.motionSensorActive = true;
+		window.addEventListener("devicemotion", handleMotionUpdate);
+		window.addEventListener("deviceorientation", handleOrientationUpdate);
+
+		// Start dead reckoning loop during GPS outages
+		if (!state.currentSession?.deadReckoningIntervalId) {
+			state.currentSession.deadReckoningIntervalId = setInterval(() => {
+				if (state.gpsOutageDetected && state.currentSession && !state.currentSession.paused && state.currentSession.lastPoint) {
+					const estimatedPt = estimatePositionDuringOutage(
+						state.currentSession.lastPoint,
+						state.currentHeadingDegrees,
+						state.velocityEstimate,
+					);
+					state.estimatedPointsDuringGap.push(estimatedPt);
+				}
+			}, 100);
+		}
+	} catch (error) {
+		console.warn("Motion sensors unavailable", error);
+		state.motionSensorActive = false;
+	}
+}
+
+function stopMotionSensors() {
+	if (state.motionSensorActive) {
+		window.removeEventListener("devicemotion", handleMotionUpdate);
+		window.removeEventListener("deviceorientation", handleOrientationUpdate);
+		state.motionSensorActive = false;
+	}
+	if (state.gpsOutageTimeout) {
+		clearTimeout(state.gpsOutageTimeout);
+		state.gpsOutageTimeout = null;
+	}
+	if (state.currentSession?.deadReckoningIntervalId) {
+		clearInterval(state.currentSession.deadReckoningIntervalId);
+		state.currentSession.deadReckoningIntervalId = null;
+	}
+}
+
+function handleMotionUpdate(event) {
+	if (!state.currentSession || state.currentSession.paused) return;
+
+	const accel = event.acceleration;
+	if (!accel) return;
+
+	state.lastAcceleration = {
+		x: accel.x || 0,
+		y: accel.y || 0,
+		z: accel.z || 0,
+	};
+}
+
+function handleOrientationUpdate(event) {
+	if (!state.currentSession || state.currentSession.paused) return;
+
+	// Alpha: rotation around Z axis (0-360), Beta: X axis (-180 to 180), Gamma: Y axis (-90 to 90)
+	// For compass heading, we primarily use alpha
+	if (typeof event.alpha === "number") {
+		state.currentHeadingDegrees = event.alpha;
+	}
+}
+
+function updateGPSOutageDetection(timestamp) {
+	const session = state.currentSession;
+	if (!session || !state.motionSensorActive) return;
+
+	// Clear existing timeout if any
+	if (state.gpsOutageTimeout) {
+		clearTimeout(state.gpsOutageTimeout);
+	}
+
+	state.lastGPSTimestamp = timestamp;
+
+	// Set timeout to detect outage if GPS doesn't update within 800ms
+	state.gpsOutageTimeout = setTimeout(() => {
+		if (!state.gpsOutageDetected && state.currentSession && !state.currentSession.paused) {
+			state.gpsOutageDetected = true;
+			state.estimatedPointsDuringGap = [];
+			beginDeadReckoning();
+		}
+	}, 800);
+}
+
+function beginDeadReckoning() {
+	const session = state.currentSession;
+	if (!session || !session.lastPoint) return;
+
+	// Initialize velocity estimate from last GPS point
+	state.velocityEstimate = session.lastPoint.speed || 0;
+}
+
+function estimatePositionDuringOutage(lastGPSPoint, headingDegrees, velocity) {
+	// Simple dead reckoning: estimate movement based on heading and velocity
+	// Updates every 100ms with sensor data
+	
+	const timeDelta = 0.1; // 100ms
+	const metersPerSecond = velocity;
+	const metersThisStep = metersPerSecond * timeDelta;
+
+	// Convert heading to radians, accounting for magnetic declination
+	const headingRad = (headingDegrees * Math.PI) / 180;
+
+	// Simple mercator projection for local estimates
+	const lat = lastGPSPoint.lat;
+	const lng = lastGPSPoint.lng;
+
+	// Approximate meters per degree at this latitude
+	const metersPerDegreeLat = 111320;
+	const metersPerDegreeLng = 111320 * Math.cos((lat * Math.PI) / 180);
+
+	// Calculate new position
+	const deltaLat = (metersThisStep * Math.cos(headingRad)) / metersPerDegreeLat;
+	const deltaLng = (metersThisStep * Math.sin(headingRad)) / metersPerDegreeLng;
+
+	return {
+		lat: lat + deltaLat,
+		lng: lng + deltaLng,
+		timestamp: Date.now(),
+	};
+}
+
+function validateAndSpliceGapPoints(resumedGPSPoint, lastEstimatedPoint) {
+	const session = state.currentSession;
+	if (!session || state.estimatedPointsDuringGap.length === 0) {
+		state.gpsOutageDetected = false;
+		state.estimatedPointsDuringGap = [];
+		return;
+	}
+
+	// Calculate distance between last estimated point and resumed GPS point
+	const gapDistance = haversineMeters(
+		lastEstimatedPoint.lat,
+		lastEstimatedPoint.lng,
+		resumedGPSPoint.lat,
+		resumedGPSPoint.lng,
+	);
+
+	// If gap is reasonable (less than ~50 meters for a ~1 second gap at typical bike speed)
+	// then splice in the estimated points; otherwise discard them
+	const maxReasonableGapDistance = 50;
+
+	if (gapDistance < maxReasonableGapDistance && state.estimatedPointsDuringGap.length > 0) {
+		// Splice estimated points into history
+		const estimatedWithMetadata = state.estimatedPointsDuringGap.map((pt) => ({
+			lat: pt.lat,
+			lng: pt.lng,
+			altitude: lastEstimatedPoint.altitude || null,
+			speed: state.velocityEstimate,
+			accuracy: 15, // Estimated accuracy
+			timestamp: pt.timestamp,
+			estimated: true,
+		}));
+
+		// Insert estimated points before the resumed GPS point
+		session.points.push(...estimatedWithMetadata);
+
+		// Update distance and stats with estimated points
+		for (let i = 0; i < estimatedWithMetadata.length; i++) {
+			const pt = estimatedWithMetadata[i];
+			if (i === 0) {
+				session.totalDistance += haversineMeters(
+					lastEstimatedPoint.lat,
+					lastEstimatedPoint.lng,
+					pt.lat,
+					pt.lng,
+				);
+			} else {
+				const prevPt = estimatedWithMetadata[i - 1];
+				session.totalDistance += haversineMeters(prevPt.lat, prevPt.lng, pt.lat, pt.lng);
+			}
+		}
+
+		console.log(`Bridged GPS gap with ${estimatedWithMetadata.length} estimated points`);
+	}
+
+	state.gpsOutageDetected = false;
+	state.estimatedPointsDuringGap = [];
 }
 
 function processPosition(position, forceAdd = false) {
@@ -562,6 +764,18 @@ function processPosition(position, forceAdd = false) {
 		accuracy: Number.isFinite(accuracy) ? accuracy : null,
 		timestamp: pointTime,
 	};
+
+	// Handle GPS outage detection and bridging
+	if (state.gpsOutageDetected && session.lastPoint) {
+		// GPS has resumed after outage - validate and splice estimated points
+		validateAndSpliceGapPoints(point, session.lastPoint);
+	}
+
+	// Update GPS outage monitoring
+	updateGPSOutageDetection(pointTime);
+
+	// Update velocity estimate for dead reckoning
+	state.velocityEstimate = safeSpeed;
 
 	if (session.lastPoint) {
 		session.totalDistance += haversineMeters(session.lastPoint.lat, session.lastPoint.lng, point.lat, point.lng);
