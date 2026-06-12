@@ -50,6 +50,26 @@
       </div>
     </section>
 
+    <section id="activitySelectScreen" class="screen center hidden">
+      <div class="activity-select-wrap">
+        <h2>Select Activity</h2>
+        <div class="activity-buttons">
+          <button class="activity-btn" data-activity="bike">🚴 Bike</button>
+          <button class="activity-btn" data-activity="walk">🚶 Walk</button>
+          <button class="activity-btn" data-activity="hike">🥾 Hike</button>
+          <button class="activity-btn" data-activity="kayak">🛶 Kayak</button>
+        </div>
+        <div class="toggle-card" role="group" aria-label="Screen preference">
+          <label for="keepScreenOnToggle">Keep Screen On</label>
+          <input id="keepScreenOnToggle" type="checkbox">
+        </div>
+        <div class="row">
+          <button id="startActivityBtn" class="btn primary">Start Activity</button>
+          <button id="cancelActivityBtn" class="btn ghost">Cancel</button>
+        </div>
+      </div>
+    </section>
+
     <section id="activeScreen" class="activescreen screen hidden">
       <div class="active-layout">
         <div class="stats-panel">
@@ -150,28 +170,37 @@
             <button data-theme="dark" class="toggle-option">Dark</button>
           </div>
         </div>
-
-        <label for="stadiaKeyInput">Stadia Maps API Key (optional)</label>
-        <input id="stadiaKeyInput" type="text" placeholder="Paste API key">
-        <p class="muted">With a key, map tiles switch to Alidade Smooth in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API Key here.</a></p>
-
-        <label for="guideContrastSelect">Guide Line Contrast</label>
-        <select id="guideContrastSelect">
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-
-        <label for="markerSizeSelect">Distance Marker Size</label>
-        <select id="markerSizeSelect">
-          <option value="small">Small</option>
-          <option value="medium">Medium</option>
-          <option value="large">Large</option>
-        </select>
+        <div class="row">
+          <label for="stadiaKeyInput">Stadia Maps API Key (optional)</label>
+          <input id="stadiaKeyInput" type="text" placeholder="Paste API key">
+        </div>
+          <p class="muted">With a key, map tiles switch to Alidade Smooth in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API Key here.</a></p>
 
         <div class="row">
+          <label for="guideContrastSelect">Guide Line Contrast</label>
+          <select id="guideContrastSelect">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="markerSizeSelect">Distance Marker Size</label>
+          <select id="markerSizeSelect">
+            <option value="small">Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <button id="exportDataBtn" class="btn">Export Data</button>
+          <button id="importDataBtn" class="btn">Import Data</button>
+          <input id="importFileInput" type="file" accept=".json" style="display: none;">
+        </div>
+        
+        <div class="row">
           <button id="saveSettingsBtn" class="btn primary">Save</button>
-          <button id="closeSettingsBtn" class="btn ghost">Close</button>
         </div>
       </div>
     </section>

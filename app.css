@@ -558,3 +558,73 @@ body:has(.activescreen.active){
     opacity: 1;
   }
 }
+
+.activity-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 2rem 1rem;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+.activity-select-wrap h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 1.5rem;
+}
+
+.activity-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.activity-btn {
+  padding: 1rem;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.activity-btn:hover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 5%, var(--surface));
+}
+
+.activity-btn.active {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
+}
+
+.toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  gap: 1rem;
+}
+
+.toggle-card label {
+  margin: 0;
+  font-weight: 500;
+}
+
+.toggle-card input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
