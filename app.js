@@ -898,6 +898,12 @@ function rotateLiveMap(heading) {
 	const mapElement = document.getElementById("liveMap");
 	mapElement.style.transformOrigin = "50% 50%";
 	mapElement.style.transform = `rotate(${-heading}deg)`;
+
+	// Counter-rotate all segment markers to keep text upright
+	const markers = document.querySelectorAll(".segment-flag-marker");
+	markers.forEach((marker) => {
+		marker.style.transform = `rotate(${heading}deg)`;
+	});
 }
 
 function recenterLiveMap() {
@@ -1890,6 +1896,7 @@ function createSegmentMarkerIcon(label, markerSizeValue = state.prefs.markerSize
 		html: `<div class="segment-flag-marker ${markerSize.className}"><span>${safeLabel}</span></div>`,
 		iconSize: markerSize.iconSize,
 		iconAnchor: markerSize.iconAnchor,
+		rotationAngle: 0,
 	});
 }
 
