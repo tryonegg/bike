@@ -837,6 +837,7 @@ function updateSegments(point) {
 			avgSpeed: segAvgSpeed,
 		});
 
+		const markerLabel = segmentDistanceLabel(segmentNumber, state.prefs.unit);
 		session.segmentMarkers.push({
 			lat: point.lat,
 			lng: point.lng,
