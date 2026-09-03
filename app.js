@@ -3,10 +3,28 @@ const DB_VERSION = 1;
 const SESSION_STORE = "sessions";
 const PREF_STORE = "preferences";
 
+// Shared IndexedDB connection, opened once by openDB(). Declared here because
+// init() reaches openDB() well before the function's own definition is evaluated.
+let dbPromise = null;
+
 const METERS_PER_MILE = 1609.344;
 const METERS_PER_KM = 1000;
 const MPS_TO_MPH = 2.236936;
 const MPS_TO_KPH = 3.6;
+
+// watchPosition normally delivers roughly one fix per second, so the dropout
+// threshold must sit well clear of that interval.
+const GPS_OUTAGE_THRESHOLD_MS = 3500;
+const DEAD_RECKONING_STEP_MS = 250;
+const MAX_DEAD_RECKONING_DRIFT_METERS = 50;
+
+// An in-progress ride lives in memory, so it is checkpointed to IndexedDB and
+// recovered on the next launch if the tab is evicted or the app is reloaded.
+const ACTIVE_SESSION_KEY = "activeSession";
+const CHECKPOINT_INTERVAL_MS = 10000;
+
+// Number of discrete colors in the speed ramp used by the route line and chart.
+const SPEED_BANDS = 16;
 
 const ACTIVITIES = {
 	bike: { label: "Bike", icon: "🚴" },
@@ -54,8 +72,8 @@ const state = {
 	lastGPSTimestamp: 0,
 	gpsOutageDetected: false,
 	gpsOutageTimeout: null,
-	lastAcceleration: { x: 0, y: 0, z: 0 },
-	currentHeadingDegrees: 0,
+	travelHeadingDegrees: null,
+	compassHeadingDegrees: null,
 	estimatedPointsDuringGap: [],
 	velocityEstimate: 0,
 	// Elevation chart interaction
@@ -63,6 +81,7 @@ const state = {
 	highlightedPointIndex: -1,
 	chartHighlightMarker: null,
 	isChartDragging: false,
+	lastCheckpointAt: 0,
 };
 
 const el = {
@@ -137,6 +156,7 @@ async function init() {
 	wireEvents();
 	history.replaceState({ screen: "home" }, "");
 	await renderSessionsList();
+	await maybeRecoverSession();
 	registerServiceWorker();
 	maybeShowInstallBanner();
 }
@@ -265,7 +285,10 @@ function wireEvents() {
 	});
 
 	window.addEventListener("resize", () => {
-		if (state.liveMap) state.liveMap.invalidateSize();
+		if (state.liveMap) {
+			sizeLiveMapForRotation();
+			state.liveMap.invalidateSize();
+		}
 		if (state.postMap) state.postMap.invalidateSize();
 		if (state.currentPostSession) renderElevationChart(state.currentPostSession);
 	});
@@ -274,10 +297,17 @@ function wireEvents() {
 		const session = state.currentSession;
 		if (!session) return;
 		if (document.hidden) {
+			// Backgrounding is when a mobile browser is most likely to evict the tab,
+			// so flush the ride before giving up the wake lock.
+			await saveActiveSessionCheckpoint();
 			await releaseWakeLock();
 		} else if (!session.paused) {
 			await requestWakeLock();
 		}
+	});
+
+	window.addEventListener("pagehide", () => {
+		if (state.currentSession) saveActiveSessionCheckpoint();
 	});
 
 	window.addEventListener("popstate", async (event) => {
@@ -440,6 +470,8 @@ function cancelActivityAndReturnHome() {
 }
 
 async function startActivityCountdown() {
+	if (state.selectedActivityType === "bike") requestOrientationPermission();
+
 	const runToken = Date.now();
 	state.countdownRunToken = runToken;
 	navigateToScreen("countdown");
@@ -509,8 +541,6 @@ async function startSession(initialPosition) {
 		elapsedIntervalId: null,
 		deadReckoningIntervalId: null,
 		resumeTimestamp: now,
-		speedSum: 0,
-		speedSamples: 0,
 		altitudeSamples: [],
 		smoothAltitudePrev: null,
 		nextSegmentDistance: getSegmentLengthMeters(state.prefs.unit),
@@ -519,9 +549,7 @@ async function startSession(initialPosition) {
 		currentHeading: 0,
 	};
 
-	if (state.selectedKeepScreenOn && "wakeLock" in navigator) {
-		await requestWakeLock();
-	}
+	await requestWakeLock();
 
 	navigateToScreen("active");
 	initLiveMap(initialPosition.coords.latitude, initialPosition.coords.longitude);
@@ -531,15 +559,15 @@ async function startSession(initialPosition) {
 	state.estimatedPointsDuringGap = [];
 	state.lastGPSTimestamp = Date.now();
 	state.velocityEstimate = 0;
+	state.travelHeadingDegrees = null;
+	state.compassHeadingDegrees = null;
+	state.lastCheckpointAt = Date.now();
 
 	processPosition(initialPosition, true);
 	startWatch();
 	initMotionSensors();
 	state.currentSession.elapsedIntervalId = setInterval(updateLiveStats, 500);
 	updateLiveStats();
-	if (!state.selectedKeepScreenOn) {
-		await requestWakeLock();
-	}
 }
 
 function startWatch() {
@@ -559,7 +587,7 @@ function startWatch() {
 
 function stopWatch() {
 	const session = state.currentSession;
-	if (session?.watchId !== null) {
+	if (session && session.watchId !== null) {
 		navigator.geolocation.clearWatch(session.watchId);
 		session.watchId = null;
 	}
@@ -567,36 +595,39 @@ function stopWatch() {
 }
 
 function initMotionSensors() {
-	// Only enable for bike activity
-	if (state.selectedActivityType !== "bike") return;
+	// Dead reckoning only bridges bike rides; at walking or paddling speeds a
+	// dropped fix costs so little distance that inventing points is a net loss.
+	if (state.currentSession?.activityType !== "bike") return;
+	if (state.motionSensorActive) return;
 
-	try {
-		state.motionSensorActive = true;
-		window.addEventListener("devicemotion", handleMotionUpdate);
-		window.addEventListener("deviceorientation", handleOrientationUpdate);
+	state.motionSensorActive = true;
+	window.addEventListener("deviceorientationabsolute", handleOrientationUpdate);
+	window.addEventListener("deviceorientation", handleOrientationUpdate);
 
-		// Start dead reckoning loop during GPS outages
-		if (!state.currentSession?.deadReckoningIntervalId) {
-			state.currentSession.deadReckoningIntervalId = setInterval(() => {
-				if (state.gpsOutageDetected && state.currentSession && !state.currentSession.paused && state.currentSession.lastPoint) {
-					const estimatedPt = estimatePositionDuringOutage(
-						state.currentSession.lastPoint,
-						state.currentHeadingDegrees,
-						state.velocityEstimate,
-					);
-					state.estimatedPointsDuringGap.push(estimatedPt);
-				}
-			}, 100);
-		}
-	} catch (error) {
-		console.warn("Motion sensors unavailable", error);
-		state.motionSensorActive = false;
+	if (!state.currentSession.deadReckoningIntervalId) {
+		state.currentSession.deadReckoningIntervalId = setInterval(() => {
+			const session = state.currentSession;
+			if (!state.gpsOutageDetected || !session || session.paused || !session.lastPoint) return;
+
+			const heading = getDeadReckoningHeading();
+			if (heading == null) return;
+
+			// Chain each step off the previous estimate. Measuring every step from
+			// the last real fix instead would stack them all in one spot.
+			const origin = state.estimatedPointsDuringGap.length
+				? state.estimatedPointsDuringGap[state.estimatedPointsDuringGap.length - 1]
+				: session.lastPoint;
+
+			state.estimatedPointsDuringGap.push(
+				estimatePositionDuringOutage(origin, heading, state.velocityEstimate, DEAD_RECKONING_STEP_MS / 1000),
+			);
+		}, DEAD_RECKONING_STEP_MS);
 	}
 }
 
 function stopMotionSensors() {
 	if (state.motionSensorActive) {
-		window.removeEventListener("devicemotion", handleMotionUpdate);
+		window.removeEventListener("deviceorientationabsolute", handleOrientationUpdate);
 		window.removeEventListener("deviceorientation", handleOrientationUpdate);
 		state.motionSensorActive = false;
 	}
@@ -608,82 +639,90 @@ function stopMotionSensors() {
 		clearInterval(state.currentSession.deadReckoningIntervalId);
 		state.currentSession.deadReckoningIntervalId = null;
 	}
+	state.gpsOutageDetected = false;
+	state.estimatedPointsDuringGap = [];
 }
 
-function handleMotionUpdate(event) {
-	if (!state.currentSession || state.currentSession.paused) return;
-
-	const accel = event.acceleration;
-	if (!accel) return;
-
-	state.lastAcceleration = {
-		x: accel.x || 0,
-		y: accel.y || 0,
-		z: accel.z || 0,
-	};
+function requestOrientationPermission() {
+	// iOS gates orientation events behind a grant that must originate in a user
+	// gesture, so this runs straight off the Start button and is not awaited.
+	const OrientationEvent = window.DeviceOrientationEvent;
+	if (typeof OrientationEvent?.requestPermission !== "function") return;
+	OrientationEvent.requestPermission().catch((error) => {
+		console.warn("Orientation permission unavailable", error);
+	});
 }
 
 function handleOrientationUpdate(event) {
 	if (!state.currentSession || state.currentSession.paused) return;
 
-	// Alpha: rotation around Z axis (0-360), Beta: X axis (-180 to 180), Gamma: Y axis (-90 to 90)
-	// For compass heading, we primarily use alpha
-	if (typeof event.alpha === "number") {
-		state.currentHeadingDegrees = event.alpha;
+	// Only a north-referenced heading is usable. Safari exposes a true compass
+	// bearing directly; elsewhere alpha runs counter-clockwise from north and has
+	// to be inverted to become a clockwise bearing. A relative alpha is discarded.
+	if (Number.isFinite(event.webkitCompassHeading)) {
+		state.compassHeadingDegrees = ((event.webkitCompassHeading % 360) + 360) % 360;
+		return;
 	}
+
+	if (event.absolute === true && typeof event.alpha === "number") {
+		state.compassHeadingDegrees = ((360 - event.alpha) % 360 + 360) % 360;
+	}
+}
+
+function getDeadReckoningHeading() {
+	// Travel bearing between the last two fixes is the better estimator: it
+	// measures where the rider is going, not where the handset is pointing.
+	if (state.travelHeadingDegrees != null) return state.travelHeadingDegrees;
+	return state.compassHeadingDegrees;
+}
+
+function updateTravelHeading(session) {
+	const points = session.points;
+	if (points.length < 2) return;
+	const a = points[points.length - 2];
+	const b = points[points.length - 1];
+	if (haversineMeters(a.lat, a.lng, b.lat, b.lng) < 2) return;
+	state.travelHeadingDegrees = bearingDegrees(a.lat, a.lng, b.lat, b.lng);
 }
 
 function updateGPSOutageDetection(timestamp) {
 	const session = state.currentSession;
 	if (!session || !state.motionSensorActive) return;
 
-	// Clear existing timeout if any
 	if (state.gpsOutageTimeout) {
 		clearTimeout(state.gpsOutageTimeout);
 	}
 
 	state.lastGPSTimestamp = timestamp;
 
-	// Set timeout to detect outage if GPS doesn't update within 800ms
 	state.gpsOutageTimeout = setTimeout(() => {
 		if (!state.gpsOutageDetected && state.currentSession && !state.currentSession.paused) {
 			state.gpsOutageDetected = true;
 			state.estimatedPointsDuringGap = [];
 			beginDeadReckoning();
 		}
-	}, 800);
+	}, GPS_OUTAGE_THRESHOLD_MS);
 }
 
 function beginDeadReckoning() {
 	const session = state.currentSession;
 	if (!session || !session.lastPoint) return;
 
-	// Initialize velocity estimate from last GPS point
+	// Carry the last known GPS speed through the gap.
 	state.velocityEstimate = session.lastPoint.speed || 0;
 }
 
-function estimatePositionDuringOutage(lastGPSPoint, headingDegrees, velocity) {
-	// Simple dead reckoning: estimate movement based on heading and velocity
-	// Updates every 100ms with sensor data
-	
-	const timeDelta = 0.1; // 100ms
-	const metersPerSecond = velocity;
-	const metersThisStep = metersPerSecond * timeDelta;
-
-	// Convert heading to radians, accounting for magnetic declination
+function estimatePositionDuringOutage(origin, headingDegrees, velocity, timeDeltaSeconds) {
+	const metersThisStep = velocity * timeDeltaSeconds;
 	const headingRad = (headingDegrees * Math.PI) / 180;
 
-	// Simple mercator projection for local estimates
-	const lat = lastGPSPoint.lat;
-	const lng = lastGPSPoint.lng;
+	const { lat, lng } = origin;
 
-	// Approximate meters per degree at this latitude
 	const metersPerDegreeLat = 111320;
 	const metersPerDegreeLng = 111320 * Math.cos((lat * Math.PI) / 180);
 
-	// Calculate new position
 	const deltaLat = (metersThisStep * Math.cos(headingRad)) / metersPerDegreeLat;
-	const deltaLng = (metersThisStep * Math.sin(headingRad)) / metersPerDegreeLng;
+	const deltaLng = metersPerDegreeLng > 1 ? (metersThisStep * Math.sin(headingRad)) / metersPerDegreeLng : 0;
 
 	return {
 		lat: lat + deltaLat,
@@ -692,62 +731,41 @@ function estimatePositionDuringOutage(lastGPSPoint, headingDegrees, velocity) {
 	};
 }
 
-function validateAndSpliceGapPoints(resumedGPSPoint, lastEstimatedPoint) {
+function validateAndSpliceGapPoints(resumedGPSPoint) {
 	const session = state.currentSession;
-	if (!session || state.estimatedPointsDuringGap.length === 0) {
-		state.gpsOutageDetected = false;
-		state.estimatedPointsDuringGap = [];
-		return;
-	}
-
-	// Calculate distance between last estimated point and resumed GPS point
-	const gapDistance = haversineMeters(
-		lastEstimatedPoint.lat,
-		lastEstimatedPoint.lng,
-		resumedGPSPoint.lat,
-		resumedGPSPoint.lng,
-	);
-
-	// If gap is reasonable (less than ~50 meters for a ~1 second gap at typical bike speed)
-	// then splice in the estimated points; otherwise discard them
-	const maxReasonableGapDistance = 50;
-
-	if (gapDistance < maxReasonableGapDistance && state.estimatedPointsDuringGap.length > 0) {
-		// Splice estimated points into history
-		const estimatedWithMetadata = state.estimatedPointsDuringGap.map((pt) => ({
-			lat: pt.lat,
-			lng: pt.lng,
-			altitude: lastEstimatedPoint.altitude || null,
-			speed: state.velocityEstimate,
-			accuracy: 15, // Estimated accuracy
-			timestamp: pt.timestamp,
-			estimated: true,
-		}));
-
-		// Insert estimated points before the resumed GPS point
-		session.points.push(...estimatedWithMetadata);
-
-		// Update distance and stats with estimated points
-		for (let i = 0; i < estimatedWithMetadata.length; i++) {
-			const pt = estimatedWithMetadata[i];
-			if (i === 0) {
-				session.totalDistance += haversineMeters(
-					lastEstimatedPoint.lat,
-					lastEstimatedPoint.lng,
-					pt.lat,
-					pt.lng,
-				);
-			} else {
-				const prevPt = estimatedWithMetadata[i - 1];
-				session.totalDistance += haversineMeters(prevPt.lat, prevPt.lng, pt.lat, pt.lng);
-			}
-		}
-
-		console.log(`Bridged GPS gap with ${estimatedWithMetadata.length} estimated points`);
-	}
+	const estimated = state.estimatedPointsDuringGap;
 
 	state.gpsOutageDetected = false;
 	state.estimatedPointsDuringGap = [];
+
+	if (!session || !session.lastPoint || !estimated.length) return;
+
+	// Compare the end of the dead-reckoned path against the fix that ended the
+	// outage: that is the drift the bridging actually introduced. Measuring from
+	// the last real fix instead only measures ordinary travel, so it always passed.
+	const lastEstimated = estimated[estimated.length - 1];
+	const drift = haversineMeters(lastEstimated.lat, lastEstimated.lng, resumedGPSPoint.lat, resumedGPSPoint.lng);
+	if (drift > MAX_DEAD_RECKONING_DRIFT_METERS) return;
+
+	let previous = session.lastPoint;
+	for (const pt of estimated) {
+		const point = {
+			lat: pt.lat,
+			lng: pt.lng,
+			altitude: previous.altitude ?? null,
+			speed: state.velocityEstimate,
+			accuracy: null,
+			timestamp: pt.timestamp,
+			estimated: true,
+		};
+		session.totalDistance += haversineMeters(previous.lat, previous.lng, point.lat, point.lng);
+		session.points.push(point);
+		previous = point;
+	}
+
+	// Advance lastPoint to the end of the bridged path so processPosition measures
+	// only the remaining leg. Leaving it behind counted the gap twice.
+	session.lastPoint = previous;
 }
 
 function processPosition(position, forceAdd = false) {
@@ -772,10 +790,9 @@ function processPosition(position, forceAdd = false) {
 		timestamp: pointTime,
 	};
 
-	// Handle GPS outage detection and bridging
-	if (state.gpsOutageDetected && session.lastPoint) {
-		// GPS has resumed after outage - validate and splice estimated points
-		validateAndSpliceGapPoints(point, session.lastPoint);
+	// GPS has resumed after an outage - validate and splice the estimated points
+	if (state.gpsOutageDetected) {
+		validateAndSpliceGapPoints(point);
 	}
 
 	// Update GPS outage monitoring
@@ -790,16 +807,19 @@ function processPosition(position, forceAdd = false) {
 
 	session.points.push(point);
 	session.lastPoint = point;
+	updateTravelHeading(session);
 
 	session.maxSpeed = Math.max(session.maxSpeed, safeSpeed);
-	session.speedSum += safeSpeed;
-	session.speedSamples += 1;
-	session.avgSpeed = session.speedSamples ? session.speedSum / session.speedSamples : 0;
 
 	updateElevationTotals(point.altitude);
 	updateSegments(point);
 	updateLiveMap(point, heading, safeSpeed);
 	updateLiveStats();
+
+	if (Date.now() - state.lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
+		state.lastCheckpointAt = Date.now();
+		saveActiveSessionCheckpoint();
+	}
 }
 
 function updateElevationTotals(rawAltitude) {
@@ -896,8 +916,16 @@ function updateLiveMap(point, heading, speedMps) {
 
 function rotateLiveMap(heading) {
 	const mapElement = document.getElementById("liveMap");
+	if (!mapElement) return;
 	mapElement.style.transformOrigin = "50% 50%";
 	mapElement.style.transform = `rotate(${-heading}deg)`;
+
+	// The control container shares the map's centre, so an equal counter-rotation
+	// leaves the zoom buttons and attribution upright and in place.
+	const controls = mapElement.querySelector(".leaflet-control-container");
+	if (controls) {
+		controls.style.transform = `rotate(${heading}deg)`;
+	}
 
 	// Counter-rotate all segment markers to keep text upright
 	const markers = document.querySelectorAll(".segment-flag-marker");
@@ -919,6 +947,10 @@ function updateLiveStats() {
 
 	const elapsed = getElapsedMs();
 	const currentSpeed = session.lastPoint ? session.lastPoint.speed : 0;
+
+	// Distance over moving time - the same definition the saved ride summary uses.
+	// An unweighted mean of instantaneous fixes disagreed with the post-ride figure.
+	session.avgSpeed = elapsed > 0 ? session.totalDistance / (elapsed / 1000) : 0;
 
 	el.currentSpeed.innerHTML = formatSpeedMarkup(currentSpeed, state.prefs.unit);
 	el.distanceValue.innerHTML = formatDistanceMarkup(session.totalDistance, state.prefs.unit);
@@ -943,6 +975,7 @@ async function togglePauseSession() {
 		stopWatch();
 		el.pauseBtn.textContent = "Resume";
 		await releaseWakeLock();
+		await saveActiveSessionCheckpoint();
 		updateLiveStats();
 		return;
 	}
@@ -950,6 +983,7 @@ async function togglePauseSession() {
 	session.paused = false;
 	session.resumeTimestamp = Date.now();
 	startWatch();
+	initMotionSensors();
 	el.pauseBtn.textContent = "Pause";
 	await requestWakeLock();
 }
@@ -984,6 +1018,8 @@ async function finalizeSession() {
 	const saved = {
 		date: session.date,
 		unit: session.unit,
+		activityType: session.activityType || "bike",
+		keepScreenOn: Boolean(session.keepScreenOn),
 		points: session.points,
 		totalDistance: session.totalDistance,
 		movingTime: session.movingTime,
@@ -997,9 +1033,143 @@ async function finalizeSession() {
 
 	const id = await addSession(saved);
 	saved.id = id;
+	await clearActiveSessionCheckpoint();
 	state.currentSession = null;
 	el.pauseBtn.textContent = "Pause";
 	return saved;
+}
+
+async function saveActiveSessionCheckpoint() {
+	const session = state.currentSession;
+	if (!session) return;
+
+	try {
+		await setPref(ACTIVE_SESSION_KEY, {
+			date: session.date,
+			unit: session.unit,
+			activityType: session.activityType,
+			keepScreenOn: Boolean(session.keepScreenOn),
+			points: session.points,
+			totalDistance: session.totalDistance,
+			movingTime: getElapsedMs(),
+			maxSpeed: session.maxSpeed,
+			avgSpeed: session.avgSpeed,
+			elevationGain: session.elevationGain,
+			elevationDrop: session.elevationDrop,
+			segments: session.segments,
+			segmentMarkers: session.segmentMarkers,
+			altitudeSamples: session.altitudeSamples,
+			smoothAltitudePrev: session.smoothAltitudePrev,
+			nextSegmentDistance: session.nextSegmentDistance,
+			segmentStartElapsed: session.segmentStartElapsed,
+			checkpointedAt: Date.now(),
+		});
+	} catch (error) {
+		console.warn("Ride checkpoint failed", error);
+	}
+}
+
+async function clearActiveSessionCheckpoint() {
+	try {
+		await setPref(ACTIVE_SESSION_KEY, null);
+	} catch (error) {
+		console.warn("Clearing ride checkpoint failed", error);
+	}
+}
+
+function restoreSessionFromCheckpoint(checkpoint) {
+	const points = Array.isArray(checkpoint.points) ? checkpoint.points : [];
+
+	return {
+		date: checkpoint.date,
+		unit: checkpoint.unit || state.prefs.unit,
+		activityType: checkpoint.activityType || "bike",
+		keepScreenOn: Boolean(checkpoint.keepScreenOn),
+		points,
+		totalDistance: checkpoint.totalDistance || 0,
+		movingTime: checkpoint.movingTime || 0,
+		maxSpeed: checkpoint.maxSpeed || 0,
+		avgSpeed: checkpoint.avgSpeed || 0,
+		elevationGain: checkpoint.elevationGain || 0,
+		elevationDrop: checkpoint.elevationDrop || 0,
+		segments: checkpoint.segments || [],
+		segmentMarkers: checkpoint.segmentMarkers || [],
+		paused: false,
+		watchId: null,
+		lastPoint: points.length ? points[points.length - 1] : null,
+		elapsedIntervalId: null,
+		deadReckoningIntervalId: null,
+		// The interrupted stretch is not moving time, so the clock restarts from now.
+		resumeTimestamp: Date.now(),
+		altitudeSamples: checkpoint.altitudeSamples || [],
+		smoothAltitudePrev: checkpoint.smoothAltitudePrev ?? null,
+		nextSegmentDistance: checkpoint.nextSegmentDistance || getSegmentLengthMeters(state.prefs.unit),
+		segmentStartElapsed: checkpoint.segmentStartElapsed || 0,
+		shouldRecenter: true,
+		currentHeading: 0,
+	};
+}
+
+async function maybeRecoverSession() {
+	let checkpoint = null;
+	try {
+		checkpoint = await getPref(ACTIVE_SESSION_KEY, null);
+	} catch (error) {
+		console.warn("Reading ride checkpoint failed", error);
+		return;
+	}
+
+	if (!checkpoint || !Array.isArray(checkpoint.points) || checkpoint.points.length < 2) {
+		if (checkpoint) await clearActiveSessionCheckpoint();
+		return;
+	}
+
+	const restored = restoreSessionFromCheckpoint(checkpoint);
+	const unitLabel = state.prefs.unit === "imperial" ? "mi" : "km";
+	const distanceText = `${formatDistance(restored.totalDistance, state.prefs.unit)} ${unitLabel}`;
+	const resume = await confirmWithModal({
+		title: "Unfinished Ride Found",
+		message: `A ride from ${new Date(restored.date).toLocaleString()} was interrupted with ${distanceText} recorded. Resume it, or save it and open the summary?`,
+		confirmText: "Resume",
+		cancelText: "Save & Finish",
+	});
+
+	if (resume) {
+		await resumeCheckpointedSession(restored);
+		return;
+	}
+
+	state.currentSession = restored;
+	const saved = await finalizeSession();
+	await renderSessionsList();
+	if (saved) await openPostSession(saved.id, saved, "replace");
+}
+
+async function resumeCheckpointedSession(restored) {
+	state.currentSession = restored;
+	state.gpsOutageDetected = false;
+	state.estimatedPointsDuringGap = [];
+	state.velocityEstimate = 0;
+	state.travelHeadingDegrees = null;
+	state.compassHeadingDegrees = null;
+	state.lastGPSTimestamp = Date.now();
+	state.lastCheckpointAt = Date.now();
+
+	navigateToScreen("active", "replace");
+	initLiveMap(restored.lastPoint.lat, restored.lastPoint.lng);
+
+	if (state.routeLine) {
+		state.routeLine.setLatLngs(restored.points.map((point) => [point.lat, point.lng]));
+	}
+	if (state.markerLayer) {
+		renderSegmentMarkers(state.markerLayer, restored.segmentMarkers || []);
+	}
+
+	await requestWakeLock();
+	startWatch();
+	initMotionSensors();
+	restored.elapsedIntervalId = setInterval(updateLiveStats, 500);
+	updateLiveStats();
 }
 
 function initLiveMap(lat, lng) {
@@ -1046,7 +1216,52 @@ function initLiveMap(lat, lng) {
 		if (state.currentSession) state.currentSession.shouldRecenter = false;
 	});
 
-	setTimeout(() => state.liveMap?.invalidateSize(), 150);
+	sizeLiveMapForRotation();
+	setTimeout(() => {
+		sizeLiveMapForRotation();
+		state.liveMap?.invalidateSize();
+	}, 150);
+}
+
+// The live map rotates to match heading. Leaflet only renders tiles for the
+// element's own box, so rotating an element the size of its panel sweeps empty
+// corners into view. Sizing it to a square whose side is the panel's diagonal
+// guarantees coverage at every angle, because that square contains the panel's
+// circumscribed circle.
+function sizeLiveMapForRotation() {
+	const mapElement = document.getElementById("liveMap");
+	const panel = mapElement?.parentElement;
+	if (!mapElement || !panel) return;
+
+	const width = panel.clientWidth;
+	const height = panel.clientHeight;
+	if (!width || !height) return;
+
+	// Plus a couple of pixels so sub-pixel rounding can never expose a hairline
+	// gap at the 45-degree worst case.
+	const side = Math.ceil(Math.hypot(width, height)) + 2;
+	const offsetX = Math.round((width - side) / 2);
+	const offsetY = Math.round((height - side) / 2);
+
+	mapElement.style.position = "absolute";
+	mapElement.style.minHeight = "0";
+	mapElement.style.width = `${side}px`;
+	mapElement.style.height = `${side}px`;
+	mapElement.style.left = `${offsetX}px`;
+	mapElement.style.top = `${offsetY}px`;
+
+	// Leaflet's controls live inside the map element, so the oversize would push
+	// the zoom buttons and the required OSM attribution outside the visible area.
+	// Pin their container back over the visible rect; rotateLiveMap keeps it upright.
+	const controls = mapElement.querySelector(".leaflet-control-container");
+	if (controls) {
+		controls.style.position = "absolute";
+		controls.style.left = `${-offsetX}px`;
+		controls.style.top = `${-offsetY}px`;
+		controls.style.width = `${width}px`;
+		controls.style.height = `${height}px`;
+		controls.style.transformOrigin = "50% 50%";
+	}
 }
 
 function initPostMap(session) {
@@ -1067,17 +1282,46 @@ function initPostMap(session) {
 	const coords = session.points.map((p) => [p.lat, p.lng]);
 	if (coords.length) {
 		const polyGroup = L.layerGroup().addTo(state.postMap);
-		const maxSpeed = Math.max(...session.points.map((p) => p.speed || 0), 0.0001);
+		const maxSpeed = Math.max(maxOf(session.points, (p) => p.speed || 0), 0.0001);
 
-		// Draw polyline segments with speed-based coloring
+		// One layer per speed band, not one per point pair. A two-hour ride is
+		// thousands of pairs, and a Leaflet layer for each locks up this screen.
+		// Each band renders as a single multi-polyline, so no detail is lost.
+		const bands = new Map();
 		for (let i = 1; i < session.points.length; i++) {
 			const prev = session.points[i - 1];
 			const curr = session.points[i];
-			const midSpeed = (prev.speed + curr.speed) / 2;
-			const segmentColor = speedToColor(midSpeed, maxSpeed);
+			const midSpeed = ((prev.speed || 0) + (curr.speed || 0)) / 2;
+			const band = speedBand(midSpeed, maxSpeed);
 
-			L.polyline([[prev.lat, prev.lng], [curr.lat, curr.lng]], {
-				color: segmentColor,
+			let runs = bands.get(band);
+			if (!runs) {
+				runs = [];
+				bands.set(band, runs);
+			}
+
+			// Extend the previous run when this pair continues it, so a steady
+			// stretch becomes one subpath rather than many.
+			const lastRun = runs.length ? runs[runs.length - 1] : null;
+			if (lastRun && lastRun.endIndex === i - 1) {
+				lastRun.latlngs.push([curr.lat, curr.lng]);
+				lastRun.endIndex = i;
+			} else {
+				runs.push({
+					latlngs: [
+						[prev.lat, prev.lng],
+						[curr.lat, curr.lng],
+					],
+					endIndex: i,
+				});
+			}
+		}
+
+		// Draw slower bands first so the faster stretches stay visible where a route
+		// crosses itself.
+		for (const [band, runs] of [...bands].sort((a, b) => a[0] - b[0])) {
+			L.polyline(runs.map((run) => run.latlngs), {
+				color: speedBandColor(band),
 				weight: 5,
 			}).addTo(polyGroup);
 		}
@@ -1349,11 +1593,9 @@ function renderElevationChart(session) {
 	const displayUnit = state.prefs.unit;
 	const totalDistance = Math.max(points[points.length - 1].distance, 1);
 
-	const elevations = points.map((point) => point.elevation);
-	const speeds = points.map((point) => point.speed);
-	const minElevation = Math.min(...elevations);
-	const maxElevation = Math.max(...elevations);
-	const maxSpeed = Math.max(...speeds, 0.0001);
+	const minElevation = minOf(points, (point) => point.elevation);
+	const maxElevation = maxOf(points, (point) => point.elevation);
+	const maxSpeed = Math.max(maxOf(points, (point) => point.speed), 0.0001);
 
 	const xFor = (distance) => padding.left + (distance / totalDistance) * chartWidth;
 	const yFor = (elevation) => {
@@ -1363,18 +1605,33 @@ function renderElevationChart(session) {
 
 	drawChartBackground(ctx, cssWidth, cssHeight, padding, minElevation, maxElevation, session, displayUnit, totalDistance);
 
+	ctx.lineWidth = 3;
+	ctx.lineCap = "round";
+	// Batched paths have joins where per-segment paths had none, and the canvas
+	// default of "miter" throws long spikes wherever noisy elevation data doubles
+	// back on itself. Round joins match how the per-segment version looked.
+	ctx.lineJoin = "round";
+
+	// Stroke one path per contiguous run of the same speed band instead of one
+	// path per point pair.
+	let currentBand = -1;
 	for (let index = 1; index < points.length; index += 1) {
 		const previous = points[index - 1];
 		const current = points[index];
 		const midSpeed = (previous.speed + current.speed) / 2;
-		ctx.beginPath();
-		ctx.lineWidth = 3;
-		ctx.lineCap = "round";
-		ctx.strokeStyle = speedToColor(midSpeed, maxSpeed);
-		ctx.moveTo(xFor(previous.distance), yFor(previous.elevation));
+		const band = speedBand(midSpeed, maxSpeed);
+
+		if (band !== currentBand) {
+			if (currentBand !== -1) ctx.stroke();
+			ctx.beginPath();
+			ctx.strokeStyle = speedBandColor(band);
+			ctx.moveTo(xFor(previous.distance), yFor(previous.elevation));
+			currentBand = band;
+		}
+
 		ctx.lineTo(xFor(current.distance), yFor(current.elevation));
-		ctx.stroke();
 	}
+	if (currentBand !== -1) ctx.stroke();
 
 	drawChartAxes(ctx, cssWidth, cssHeight, padding, minElevation, maxElevation, session, displayUnit, totalDistance);
 
@@ -1607,6 +1864,35 @@ function speedToColor(speed, maxSpeed) {
 	return `hsl(${hue} 75% 48%)`;
 }
 
+function speedBand(speed, maxSpeed) {
+	const clamped = Math.max(0, Math.min(1, speed / maxSpeed));
+	return Math.min(SPEED_BANDS - 1, Math.floor(clamped * SPEED_BANDS));
+}
+
+function speedBandColor(band) {
+	// Sample the ramp mid-band so the bands stay evenly spaced across it.
+	return speedToColor((band + 0.5) / SPEED_BANDS, 1);
+}
+
+function maxOf(items, pick) {
+	// Spreading a long ride's points into Math.max risks a call-stack overflow.
+	let max = -Infinity;
+	for (const item of items) {
+		const value = pick(item);
+		if (value > max) max = value;
+	}
+	return max;
+}
+
+function minOf(items, pick) {
+	let min = Infinity;
+	for (const item of items) {
+		const value = pick(item);
+		if (value < min) min = value;
+	}
+	return min;
+}
+
 async function deleteCurrentRide() {
 	if (!state.currentPostSession) return;
 	const ok = await confirmWithModal({
@@ -1652,7 +1938,9 @@ function showModal({
 	timeoutMs,
 	timeoutLabel = "Auto cancel",
 }) {
-	closeModal("cancel", true);
+	// Settle any modal this one supersedes instead of dropping its resolver on the
+	// floor - an unsettled promise left callers (the nav guard) awaiting forever.
+	closeModal("cancel");
 
 	el.modalTitle.textContent = title;
 	el.modalMessage.textContent = message;
@@ -1682,7 +1970,7 @@ function showModal({
 	});
 }
 
-function closeModal(result = "cancel", silent = false) {
+function closeModal(result = "cancel") {
 	if (state.modalTimer) {
 		clearTimeout(state.modalTimer);
 		state.modalTimer = null;
@@ -1696,13 +1984,11 @@ function closeModal(result = "cancel", silent = false) {
 	el.modalBackdrop.setAttribute("aria-hidden", "true");
 	el.modalCountdown.classList.add("hidden");
 
-	if (state.modalResolver && !silent) {
-		const resolver = state.modalResolver;
-		state.modalResolver = null;
-		resolver(result);
-	} else if (silent) {
-		state.modalResolver = null;
-	}
+	// Clear the resolver before settling so a continuation that opens another modal
+	// cannot see this one still pending.
+	const resolver = state.modalResolver;
+	state.modalResolver = null;
+	if (resolver) resolver(result);
 }
 
 function exportCurrentGpx() {
@@ -1758,12 +2044,15 @@ function maybeShowInstallBanner() {
 
 async function requestWakeLock() {
 	if (!("wakeLock" in navigator)) return;
+	// Single gate for every caller: the ride's own preference decides, so resuming
+	// from pause or returning to the foreground can never re-arm a lock the user declined.
+	if (!state.currentSession?.keepScreenOn) return;
 	try {
 		if (state.wakeLockSentinel && !state.wakeLockSentinel.released) return;
 		state.wakeLockSentinel = await navigator.wakeLock.request("screen");
 		state.wakeLockSentinel.addEventListener("release", () => {
 			state.wakeLockSentinel = null;
-			if (state.currentSession?.paused === false) {
+			if (state.currentSession?.paused === false && !document.hidden) {
 				requestWakeLock();
 			}
 		});
@@ -1799,6 +2088,8 @@ function registerServiceWorker() {
 
 function setupServiceWorkerUpdateChecks(registration) {
 	const promptRefresh = async (message) => {
+		// Never interrupt a ride in progress: reloading would drop the live session.
+		if (state.currentSession) return;
 		if (state.swUpdatePromptOpen) return;
 		state.swUpdatePromptOpen = true;
 		const shouldUpdate = await confirmWithModal({
@@ -1848,11 +2139,15 @@ function setupServiceWorkerUpdateChecks(registration) {
 	let hasRefreshed = false;
 	navigator.serviceWorker.addEventListener("controllerchange", () => {
 		if (hasRefreshed) return;
+		// A mid-ride reload here would discard the active session; the new worker
+		// simply takes effect on the next natural load instead.
+		if (state.currentSession) return;
 		hasRefreshed = true;
 		window.location.reload();
 	});
 
 	const triggerUpdateCheck = () => {
+		if (state.currentSession) return;
 		registration.update().catch((error) => {
 			console.warn("Service worker update check failed", error);
 		});
@@ -2113,6 +2408,9 @@ async function exportAllData() {
 		const prefs = await withStore(PREF_STORE, "readonly", (store) => store.getAll());
 		const prefsObj = {};
 		prefs.forEach((pref) => {
+			// The in-progress ride checkpoint is machine-local scratch state, not a
+			// preference; exporting it would resurrect a stranger's ride on import.
+			if (pref.key === ACTIVE_SESSION_KEY) return;
 			prefsObj[pref.key] = pref.value;
 		});
 
@@ -2157,14 +2455,11 @@ async function importAllData(event) {
 			return;
 		}
 
-		const confirmed = await new Promise((resolve) => {
-			state.modalResolver = resolve;
-			el.modalTitle.textContent = "Import Confirmation";
-			el.modalMessage.textContent = `This will import ${data.sessions.length} session(s) and overwrite your preferences. Continue?`;
-			el.modalCountdown.classList.add("hidden");
-			el.modalCancelBtn.textContent = "Cancel";
-			el.modalConfirmBtn.textContent = "Import";
-			el.modalBackdrop.classList.remove("hidden");
+		const confirmed = await confirmWithModal({
+			title: "Import Confirmation",
+			message: `This will import ${data.sessions.length} session(s) and overwrite your preferences. Continue?`,
+			confirmText: "Import",
+			cancelText: "Cancel",
 		});
 
 		el.importFileInput.value = "";
@@ -2172,10 +2467,14 @@ async function importAllData(event) {
 		if (!confirmed) return;
 
 		for (const session of data.sessions) {
-			await addSession(session);
+			// Drop the exported primary key so the autoIncrement store assigns a fresh
+			// one; re-adding a colliding id throws ConstraintError mid-loop.
+			const { id, ...rest } = session;
+			await addSession(rest);
 		}
 
 		for (const [key, value] of Object.entries(data.preferences)) {
+			if (key === ACTIVE_SESSION_KEY) continue;
 			await setPref(key, value);
 		}
 
@@ -2188,8 +2487,12 @@ async function importAllData(event) {
 	}
 }
 
+// One connection is shared by every store operation. Opening a fresh one per call
+// leaked a live IDBDatabase each time and would block any future version upgrade.
 function openDB() {
-	return new Promise((resolve, reject) => {
+	if (dbPromise) return dbPromise;
+
+	const pending = new Promise((resolve, reject) => {
 		const request = indexedDB.open(DB_NAME, DB_VERSION);
 
 		request.onupgradeneeded = () => {
@@ -2202,9 +2505,29 @@ function openDB() {
 			}
 		};
 
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
+		// Drop the cached handle if this connection goes away, so the next call
+		// reopens instead of reusing a dead database.
+		const forget = () => {
+			if (dbPromise === pending) dbPromise = null;
+		};
+
+		request.onsuccess = () => {
+			const db = request.result;
+			db.onclose = forget;
+			db.onversionchange = () => {
+				db.close();
+				forget();
+			};
+			resolve(db);
+		};
+		request.onerror = () => {
+			forget();
+			reject(request.error);
+		};
 	});
+
+	dbPromise = pending;
+	return pending;
 }
 
 async function withStore(storeName, mode, fn) {
