@@ -713,7 +713,8 @@ function buildSessionRow(session, date) {
 
 	const when = document.createElement("span");
 	when.className = "session-when";
-	when.textContent = `${activityIcon} ${formatSessionDay(date)}${dayPart ? ` · ${dayPart}` : ""}`;
+	// when.textContent = `${activityIcon} ${formatSessionDay(date)}${dayPart ? ` · ${dayPart}` : ""}`;
+	when.textContent = `${formatSessionDay(date)}${dayPart ? ` · ${dayPart}` : ""}`;
 
 	const stats = document.createElement("span");
 	stats.className = "session-stats";
