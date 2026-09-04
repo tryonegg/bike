@@ -26,6 +26,9 @@ const CHECKPOINT_INTERVAL_MS = 10000;
 // Number of discrete colors in the speed ramp used by the route line and chart.
 const SPEED_BANDS = 16;
 
+// The pre-ride countdown, which also bounds how long the initial GPS fix gets.
+const COUNTDOWN_SECONDS = 5;
+
 const ACTIVITIES = {
 	bike: { label: "Bike", icon: "🚴" },
 	walk: { label: "Walk", icon: "🚶" },
@@ -40,8 +43,12 @@ const state = {
 		stadiaKey: "",
 		guideContrast: "high",
 		markerSize: "medium",
+		ridesView: "list",
 		installDismissed: false,
 	},
+	// Which month the calendar view is paged to, as the 1st at local midnight.
+	// Null until the first calendar render picks a starting month from the rides.
+	calendarMonth: null,
 	deferredInstallPrompt: null,
 	liveMap: null,
 	liveTileLayer: null,
@@ -101,6 +108,13 @@ const el = {
 	themeToggle: document.getElementById("themeToggle"),
 	sessionsList: document.getElementById("sessionsList"),
 	sessionsEmpty: document.getElementById("sessionsEmpty"),
+	ridesViewToggle: document.getElementById("ridesViewToggle"),
+	ridesCalendar: document.getElementById("ridesCalendar"),
+	calPrevBtn: document.getElementById("calPrevBtn"),
+	calNextBtn: document.getElementById("calNextBtn"),
+	calMonthLabel: document.getElementById("calMonthLabel"),
+	calWeekdayRow: document.getElementById("calWeekdayRow"),
+	calBody: document.getElementById("calBody"),
 	startRideBtn: document.getElementById("startRideBtn"),
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
 	// closeSettingsBtn: document.getElementById("closeSettingsBtn"),
@@ -155,7 +169,7 @@ async function init() {
 	syncToggles();
 	wireEvents();
 	history.replaceState({ screen: "home" }, "");
-	await renderSessionsList();
+	await renderPastRides();
 	await maybeRecoverSession();
 	registerServiceWorker();
 	maybeShowInstallBanner();
@@ -168,7 +182,7 @@ function wireEvents() {
 		state.prefs.unit = btn.dataset.unit;
 		await setPref("unit", state.prefs.unit);
 		syncToggles();
-		await renderSessionsList();
+		await renderPastRides();
 		updateLiveStats();
 		applyMapVisualPrefs();
 		if (state.currentPostSession) {
@@ -187,8 +201,22 @@ function wireEvents() {
 		rebuildMapTiles();
 	});
 
+	el.ridesViewToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-rides-view]");
+		if (!btn) return;
+		state.prefs.ridesView = btn.dataset.ridesView;
+		await setPref("ridesView", state.prefs.ridesView);
+		syncToggles();
+		await renderPastRides();
+	});
+
+	el.calPrevBtn.addEventListener("click", () => shiftCalendarMonth(-1));
+	el.calNextBtn.addEventListener("click", () => shiftCalendarMonth(1));
+
 	el.startRideBtn.addEventListener("click", startCountdownFlow);
-	el.retryCountdownBtn.addEventListener("click", startCountdownFlow);
+	// Retry re-runs the countdown with the activity already chosen. Routing it back
+	// through startCountdownFlow reset the selection to Bike on every failed lock.
+	el.retryCountdownBtn.addEventListener("click", () => startActivityCountdown({ retry: true }));
 	el.cancelCountdownBtn.addEventListener("click", cancelCountdownAndReturnHome);
 
 	document.querySelectorAll(".activity-btn").forEach((btn) => {
@@ -251,7 +279,7 @@ function wireEvents() {
 		clearChartHighlight();
 		state.currentPostSession = null;
 		navigateToScreen("home");
-		await renderSessionsList();
+		await renderPastRides();
 	});
 
 	el.modalCancelBtn.addEventListener("click", () => closeModal("cancel"));
@@ -349,6 +377,13 @@ function syncToggles() {
 
 	const themeButtons = el.themeToggle.querySelectorAll("button");
 	themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
+
+	const viewButtons = el.ridesViewToggle.querySelectorAll("button");
+	viewButtons.forEach((btn) => {
+		const on = btn.dataset.ridesView === state.prefs.ridesView;
+		btn.classList.toggle("active", on);
+		btn.setAttribute("aria-pressed", String(on));
+	});
 }
 
 function applyTheme() {
@@ -418,37 +453,309 @@ async function applyHistoryState(targetState, mode = "none", savedSession = null
 	}
 }
 
-async function renderSessionsList() {
+async function renderPastRides() {
 	const sessions = await getAllSessions();
 	sessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-	el.sessionsList.innerHTML = "";
+	const showCalendar = state.prefs.ridesView === "calendar";
 
 	if (!sessions.length) {
+		el.sessionsList.innerHTML = "";
+		el.sessionsList.classList.add("hidden");
+		el.ridesCalendar.classList.add("hidden");
 		el.sessionsEmpty.classList.remove("hidden");
 		return;
 	}
 
 	el.sessionsEmpty.classList.add("hidden");
+	el.sessionsList.classList.toggle("hidden", showCalendar);
+	el.ridesCalendar.classList.toggle("hidden", !showCalendar);
+
+	// Only the visible view is built; the other stays as it was until it is shown.
+	if (showCalendar) {
+		renderRidesCalendar(sessions);
+	} else {
+		renderRidesList(sessions);
+	}
+}
+
+function renderRidesList(sessions) {
+	el.sessionsList.innerHTML = "";
+
+	// Sorted newest first, so the year changes at most once per group and can be
+	// hoisted into a heading instead of being repeated on every row.
+	let currentYear;
+	let yearList = null;
 
 	for (const session of sessions) {
-		const li = document.createElement("li");
-		const button = document.createElement("button");
-		button.className = "btn";
-		button.type = "button";
-
 		const date = new Date(session.date);
-		const dateText = date.toLocaleString();
-		const distText = formatDistance(session.totalDistance || 0, state.prefs.unit);
-		const timeText = formatDuration(session.movingTime || 0);
-		const activityType = session.activityType || "bike";
-		const activityIcon = ACTIVITIES[activityType]?.icon || "🚴";
+		const year = Number.isNaN(date.getTime()) ? null : date.getFullYear();
 
-		button.innerHTML = `<span>${activityIcon} ${dateText}</span><span>${distText} • ${timeText}</span>`;
-		button.addEventListener("click", () => openPostSession(session.id, null, "push"));
-		li.appendChild(button);
-		el.sessionsList.appendChild(li);
+		if (year !== currentYear) {
+			currentYear = year;
+			const group = document.createElement("li");
+			group.className = "sessions-year";
+
+			const heading = document.createElement("h3");
+			heading.textContent = year == null ? "Undated" : String(year);
+
+			yearList = document.createElement("ul");
+			group.append(heading, yearList);
+			el.sessionsList.appendChild(group);
+		}
+
+		yearList.appendChild(buildSessionRow(session, date));
 	}
+}
+
+// Weeks run Sunday-first. The column labels themselves come from the locale.
+const WEEK_START_DAY = 0;
+
+function startOfMonth(date) {
+	return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+async function shiftCalendarMonth(delta) {
+	const month = state.calendarMonth;
+	if (!month) return;
+	// renderRidesCalendar clamps, so an out-of-range step cannot get through even if
+	// the buttons have not caught up with a change to the stored rides.
+	state.calendarMonth = new Date(month.getFullYear(), month.getMonth() + delta, 1);
+	await renderPastRides();
+}
+
+// Paging runs from the earliest recorded ride to the current month. The current
+// month is always inside the range so today stays reachable, and a ride somehow
+// dated ahead of the clock extends the top rather than being made unreachable.
+function calendarMonthBounds(sessions) {
+	const thisMonth = startOfMonth(new Date()).getTime();
+	let earliest = thisMonth;
+	let latest = thisMonth;
+
+	for (const session of sessions) {
+		const date = new Date(session.date);
+		if (Number.isNaN(date.getTime())) continue;
+		const time = startOfMonth(date).getTime();
+		if (time < earliest) earliest = time;
+		if (time > latest) latest = time;
+	}
+
+	return { min: earliest, max: latest };
+}
+
+// Open on the month of the most recent ride so a calendar is not blank after a
+// break from riding. Falls back to the current month when there is nothing newer.
+function defaultCalendarMonth(sessions) {
+	let latest = null;
+
+	for (const session of sessions) {
+		const date = new Date(session.date);
+		if (Number.isNaN(date.getTime())) continue;
+		const month = startOfMonth(date);
+		if (!latest || month.getTime() > latest.getTime()) latest = month;
+	}
+
+	return latest || startOfMonth(new Date());
+}
+
+function clampCalendarMonth(month, bounds) {
+	const time = month.getTime();
+	if (time < bounds.min) return new Date(bounds.min);
+	if (time > bounds.max) return new Date(bounds.max);
+	return month;
+}
+
+function dayKey(date) {
+	return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function renderRidesCalendar(sessions) {
+	const bounds = calendarMonthBounds(sessions);
+	if (!state.calendarMonth) state.calendarMonth = defaultCalendarMonth(sessions);
+	// Re-clamp every render: a delete or an import can move the ends of the range.
+	state.calendarMonth = clampCalendarMonth(state.calendarMonth, bounds);
+
+	const month = state.calendarMonth;
+	const year = month.getFullYear();
+	const monthIndex = month.getMonth();
+
+	el.calMonthLabel.textContent = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+	el.calPrevBtn.disabled = month.getTime() <= bounds.min;
+	el.calNextBtn.disabled = month.getTime() >= bounds.max;
+
+	renderCalendarWeekdays();
+
+	const byDay = new Map();
+	for (const session of sessions) {
+		const date = new Date(session.date);
+		if (Number.isNaN(date.getTime())) continue;
+		if (date.getFullYear() !== year || date.getMonth() !== monthIndex) continue;
+		const key = dayKey(date);
+		if (!byDay.has(key)) byDay.set(key, []);
+		byDay.get(key).push(session);
+	}
+
+	// Blanks before the 1st, then the month, padded out to whole weeks.
+	const leadingBlanks = (new Date(year, monthIndex, 1).getDay() - WEEK_START_DAY + 7) % 7;
+	const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+	const weeks = Math.ceil((leadingBlanks + daysInMonth) / 7);
+	const todayKey = dayKey(new Date());
+
+	el.calBody.innerHTML = "";
+
+	for (let week = 0; week < weeks; week += 1) {
+		const tr = document.createElement("tr");
+
+		for (let column = 0; column < 7; column += 1) {
+			const dayNumber = week * 7 + column - leadingBlanks + 1;
+			const td = document.createElement("td");
+
+			if (dayNumber < 1 || dayNumber > daysInMonth) {
+				td.className = "calendar-empty";
+				tr.appendChild(td);
+				continue;
+			}
+
+			const cellDate = new Date(year, monthIndex, dayNumber);
+			const key = dayKey(cellDate);
+			const rides = byDay.get(key) || [];
+
+			td.className = "calendar-day";
+			if (rides.length) td.classList.add("has-ride");
+			if (key === todayKey) td.classList.add("is-today");
+
+			const number = document.createElement("span");
+			number.className = "calendar-day-number";
+			number.textContent = String(dayNumber);
+			td.appendChild(number);
+
+			// Oldest first within a day, so the entries read in the order they happened.
+			for (const session of [...rides].reverse()) {
+				td.appendChild(buildCalendarRide(session, cellDate));
+			}
+
+			tr.appendChild(td);
+		}
+
+		el.calBody.appendChild(tr);
+	}
+}
+
+function renderCalendarWeekdays() {
+	el.calWeekdayRow.innerHTML = "";
+
+	// 2024-09-01 was a Sunday, so it anchors the week without hard-coding names.
+	for (let index = 0; index < 7; index += 1) {
+		const sample = new Date(2024, 8, 1 + ((WEEK_START_DAY + index) % 7));
+		const th = document.createElement("th");
+		th.scope = "col";
+		th.textContent = sample.toLocaleDateString(undefined, { weekday: "narrow" });
+		th.setAttribute("aria-label", sample.toLocaleDateString(undefined, { weekday: "long" }));
+		el.calWeekdayRow.appendChild(th);
+	}
+}
+
+function buildCalendarRide(session, cellDate) {
+	const unit = state.prefs.unit;
+	const activityType = session.activityType || "bike";
+	const activityIcon = ACTIVITIES[activityType]?.icon || "🚴";
+
+	const durationText = formatDurationMinutes(session.movingTime || 0);
+	const distanceText = `${formatDistance(session.totalDistance || 0, unit)} ${distanceUnitLabel(unit)}`;
+	const speedText = `${formatSpeed(session.avgSpeed || 0, unit)} ${speedUnitLabel(unit)}`;
+
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "calendar-ride";
+	// The cell shows abbreviations in a very small type size, so spell the whole
+	// entry out for anyone reading it aloud.
+	button.setAttribute(
+		"aria-label",
+		`${ACTIVITIES[activityType]?.label || "Ride"} on ${cellDate.toLocaleDateString(undefined, { month: "long", day: "numeric" })}, ${durationText}, ${distanceText}, ${speedText} average`,
+	);
+
+	// The icon and the two stats are separate elements so the stylesheet can drop
+	// the icon and stack the stats once a cell is too narrow to hold them inline.
+	const icon = document.createElement("span");
+	icon.className = "calendar-ride-icon";
+	icon.textContent = activityIcon;
+	icon.setAttribute("aria-hidden", "true");
+
+	const duration = document.createElement("span");
+	duration.className = "calendar-ride-time";
+	duration.append(icon, document.createTextNode(durationText));
+
+	const distance = document.createElement("span");
+	distance.className = "calendar-ride-distance";
+	distance.textContent = distanceText;
+
+	const speed = document.createElement("span");
+	speed.className = "calendar-ride-speed";
+	speed.textContent = speedText;
+
+	const stats = document.createElement("span");
+	stats.className = "calendar-ride-stats";
+	stats.append(distance, speed);
+
+	button.append(duration, stats);
+	button.addEventListener("click", () => openPostSession(session.id, null, "push"));
+	return button;
+}
+
+function buildSessionRow(session, date) {
+	const li = document.createElement("li");
+	const button = document.createElement("button");
+	button.className = "btn session-row";
+	button.type = "button";
+
+	const activityIcon = ACTIVITIES[session.activityType || "bike"]?.icon || "🚴";
+	const dayPart = sessionDayPart(session, date);
+
+	const when = document.createElement("span");
+	when.className = "session-when";
+	when.textContent = `${activityIcon} ${formatSessionDay(date)}${dayPart ? ` · ${dayPart}` : ""}`;
+
+	const stats = document.createElement("span");
+	stats.className = "session-stats";
+	stats.textContent = [
+		`${formatDistance(session.totalDistance || 0, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)}`,
+		formatDurationMinutes(session.movingTime || 0),
+		`${formatSpeed(session.avgSpeed || 0, state.prefs.unit)} ${speedUnitLabel(state.prefs.unit)}`,
+	].join(" • ");
+
+	button.append(when, stats);
+	button.addEventListener("click", () => openPostSession(session.id, null, "push"));
+	li.appendChild(button);
+	return li;
+}
+
+function formatSessionDay(date) {
+	if (Number.isNaN(date.getTime())) return "Unknown date";
+	return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Half of the day the ride sat in, or "All day" when it ran across noon or past
+// midnight. The clock time itself is on the summary screen if it is wanted.
+function sessionDayPart(session, date) {
+	if (Number.isNaN(date.getTime())) return "";
+
+	const end = sessionEndDate(session, date);
+	const crossedDay = end.toDateString() !== date.toDateString();
+	const crossedNoon = date.getHours() < 12 && end.getHours() >= 12;
+	if (crossedDay || crossedNoon) return "All day";
+
+	if (date.getHours() < 12) return "Morning";
+	if (date.getHours() < 17) return "Afternoon";
+	return "Evening";
+}
+
+function sessionEndDate(session, startDate) {
+	// The last fix is the real end. movingTime excludes stops, so it only stands in
+	// when a ride recorded no points at all.
+	const points = session.points;
+	const lastTimestamp = Array.isArray(points) && points.length ? points[points.length - 1].timestamp : null;
+	if (Number.isFinite(lastTimestamp)) return new Date(lastTimestamp);
+	return new Date(startDate.getTime() + (session.movingTime || 0));
 }
 
 async function startCountdownFlow() {
@@ -469,27 +776,32 @@ function cancelActivityAndReturnHome() {
 	navigateToScreen("home");
 }
 
-async function startActivityCountdown() {
+async function startActivityCountdown({ retry = false } = {}) {
 	if (state.selectedActivityType === "bike") requestOrientationPermission();
 
 	const runToken = Date.now();
 	state.countdownRunToken = runToken;
-	navigateToScreen("countdown");
+	// A retry is already sitting on the countdown entry, so replace it rather than
+	// stacking another one behind the back button.
+	navigateToScreen("countdown", retry ? "replace" : "push");
 	el.retryCountdownBtn.classList.add("hidden");
 	el.countdownStatus.textContent = "Getting GPS lock...";
 
-	let countdown = 5;
+	let countdown = COUNTDOWN_SECONDS;
 	el.countdownNumber.textContent = String(countdown);
 
-	let lockPosition = null;
-	try {
-		lockPosition = await Promise.race([
-			getCurrentPosition(4500),
-			new Promise((resolve) => setTimeout(() => resolve(null), 4500)),
-		]);
-	} catch {
-		lockPosition = null;
-	}
+	// Acquire the fix while the countdown runs, not before it. Awaiting the fix
+	// first froze the display on the starting number for the whole timeout and
+	// only then began counting, so the rider waited twice over.
+	const lockRequest = Promise.race([
+		getCurrentPosition(COUNTDOWN_SECONDS * 1000),
+		new Promise((resolve) => setTimeout(() => resolve(null), COUNTDOWN_SECONDS * 1000)),
+	]).catch(() => null);
+
+	lockRequest.then((position) => {
+		if (state.countdownRunToken !== runToken || !position) return;
+		el.countdownStatus.textContent = "GPS lock acquired.";
+	});
 
 	const intervalId = setInterval(async () => {
 		if (state.countdownRunToken !== runToken) {
@@ -503,6 +815,10 @@ async function startActivityCountdown() {
 		if (countdown > 0) return;
 
 		clearInterval(intervalId);
+
+		const lockPosition = await lockRequest;
+		// The rider can cancel while that last await settles.
+		if (state.countdownRunToken !== runToken) return;
 
 		if (!lockPosition) {
 			el.countdownStatus.textContent = "GPS lock failed. Move to open sky and try again.";
@@ -536,6 +852,10 @@ async function startSession(initialPosition) {
 		segments: [],
 		segmentMarkers: [],
 		paused: false,
+		// Point timestamps run on the wall clock, so the stretches the ride spent
+		// stopped have to be recorded to be subtracted back out afterwards.
+		pauses: [],
+		pauseStartedAt: null,
 		watchId: null,
 		lastPoint: null,
 		elapsedIntervalId: null,
@@ -891,22 +1211,24 @@ function updateLiveMap(point, heading, speedMps) {
 		if (state.guideLine) state.guideLine.setLatLngs(line);
 	}
 
+	const session = state.currentSession;
 	const threshold = state.prefs.unit === "imperial" ? 3 / MPS_TO_MPH : 5 / MPS_TO_KPH;
-	let nextHeading = 0;
+
+	// Below the threshold the last known heading is held. Resetting to north
+	// whipped the map round at every traffic light and back again on moving off.
+	let nextHeading = session?.currentHeading ?? 0;
 
 	if (speedMps >= threshold) {
 		if (Number.isFinite(heading)) {
 			nextHeading = heading;
-		} else {
-			const session = state.currentSession;
-			if (session && session.points.length >= 2) {
-				const a = session.points[session.points.length - 2];
-				const b = session.points[session.points.length - 1];
-				nextHeading = bearingDegrees(a.lat, a.lng, b.lat, b.lng);
-			}
+		} else if (session && session.points.length >= 2) {
+			const a = session.points[session.points.length - 2];
+			const b = session.points[session.points.length - 1];
+			nextHeading = bearingDegrees(a.lat, a.lng, b.lat, b.lng);
 		}
 	}
 
+	if (session) session.currentHeading = nextHeading;
 	rotateLiveMap(nextHeading);
 
 	if (state.currentSession?.shouldRecenter) {
@@ -972,6 +1294,7 @@ async function togglePauseSession() {
 	if (!session.paused) {
 		session.movingTime = getElapsedMs();
 		session.paused = true;
+		session.pauseStartedAt = Date.now();
 		stopWatch();
 		el.pauseBtn.textContent = "Resume";
 		await releaseWakeLock();
@@ -981,11 +1304,23 @@ async function togglePauseSession() {
 	}
 
 	session.paused = false;
+	closeOpenPause(session);
 	session.resumeTimestamp = Date.now();
 	startWatch();
 	initMotionSensors();
 	el.pauseBtn.textContent = "Pause";
 	await requestWakeLock();
+}
+
+// Seals the pause that is currently open, if there is one. Called on resume and
+// again at finalize, so a ride ended while paused still stores a closed interval.
+function closeOpenPause(session, endedAt = Date.now()) {
+	if (!session || session.pauseStartedAt == null) return;
+	if (!Array.isArray(session.pauses)) session.pauses = [];
+	if (endedAt > session.pauseStartedAt) {
+		session.pauses.push({ start: session.pauseStartedAt, end: endedAt });
+	}
+	session.pauseStartedAt = null;
 }
 
 async function endSessionWithConfirm() {
@@ -1010,6 +1345,7 @@ async function finalizeSession() {
 
 	session.movingTime = getElapsedMs();
 	session.paused = true;
+	closeOpenPause(session);
 
 	stopWatch();
 	clearInterval(session.elapsedIntervalId);
@@ -1029,6 +1365,7 @@ async function finalizeSession() {
 		elevationDrop: session.elevationDrop,
 		segments: session.segments,
 		segmentMarkers: session.segmentMarkers,
+		pauses: Array.isArray(session.pauses) ? session.pauses : [],
 	};
 
 	const id = await addSession(saved);
@@ -1058,6 +1395,8 @@ async function saveActiveSessionCheckpoint() {
 			elevationDrop: session.elevationDrop,
 			segments: session.segments,
 			segmentMarkers: session.segmentMarkers,
+			pauses: Array.isArray(session.pauses) ? session.pauses : [],
+			pauseStartedAt: session.pauseStartedAt ?? null,
 			altitudeSamples: session.altitudeSamples,
 			smoothAltitudePrev: session.smoothAltitudePrev,
 			nextSegmentDistance: session.nextSegmentDistance,
@@ -1079,6 +1418,16 @@ async function clearActiveSessionCheckpoint() {
 
 function restoreSessionFromCheckpoint(checkpoint) {
 	const points = Array.isArray(checkpoint.points) ? checkpoint.points : [];
+	const pauses = Array.isArray(checkpoint.pauses) ? checkpoint.pauses.slice() : [];
+
+	// resumeTimestamp below restarts the clock, so the interrupted stretch is
+	// already excluded from moving time. Record it as a pause as well, or the
+	// segment table would charge the whole interruption to one segment. A ride
+	// interrupted while paused counts from the pause, not from the last fix.
+	const gapStart = checkpoint.pauseStartedAt ?? (points.length ? points[points.length - 1].timestamp : null);
+	if (Number.isFinite(gapStart) && Date.now() > gapStart) {
+		pauses.push({ start: gapStart, end: Date.now() });
+	}
 
 	return {
 		date: checkpoint.date,
@@ -1095,6 +1444,8 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		segments: checkpoint.segments || [],
 		segmentMarkers: checkpoint.segmentMarkers || [],
 		paused: false,
+		pauses,
+		pauseStartedAt: null,
 		watchId: null,
 		lastPoint: points.length ? points[points.length - 1] : null,
 		elapsedIntervalId: null,
@@ -1125,7 +1476,7 @@ async function maybeRecoverSession() {
 	}
 
 	const restored = restoreSessionFromCheckpoint(checkpoint);
-	const unitLabel = state.prefs.unit === "imperial" ? "mi" : "km";
+	const unitLabel = distanceUnitLabel(state.prefs.unit);
 	const distanceText = `${formatDistance(restored.totalDistance, state.prefs.unit)} ${unitLabel}`;
 	const resume = await confirmWithModal({
 		title: "Unfinished Ride Found",
@@ -1141,7 +1492,7 @@ async function maybeRecoverSession() {
 
 	state.currentSession = restored;
 	const saved = await finalizeSession();
-	await renderSessionsList();
+	await renderPastRides();
 	if (saved) await openPostSession(saved.id, saved, "replace");
 }
 
@@ -1395,12 +1746,26 @@ function recalculateSegmentMarkers(session) {
 	return segmentMarkers;
 }
 
+// Wall-clock span between two point timestamps with any paused portion removed.
+// getElapsedMs() already defines the headline moving time this way, so segment
+// durations have to be measured the same way or the table will not sum to it.
+function movingMsBetween(startMs, endMs, pauses) {
+	let pausedMs = 0;
+	for (const pause of pauses) {
+		const overlapStart = Math.max(startMs, pause.start);
+		const overlapEnd = Math.min(endMs, pause.end ?? endMs);
+		if (overlapEnd > overlapStart) pausedMs += overlapEnd - overlapStart;
+	}
+	return Math.max(0, endMs - startMs - pausedMs);
+}
+
 function recalculateSegments(session) {
 	if (!session.points || !session.points.length) return [];
 
 	const segments = [];
 	const stepDistance = getSegmentLengthMeters(state.prefs.unit);
-	
+	const pauses = Array.isArray(session.pauses) ? session.pauses : [];
+
 	// Calculate cumulative distance and time for each point
 	let cumulativeDistance = 0;
 	let cumulativeTime = 0;
@@ -1408,7 +1773,7 @@ function recalculateSegments(session) {
 		if (index > 0) {
 			const prev = session.points[index - 1];
 			cumulativeDistance += haversineMeters(prev.lat, prev.lng, point.lat, point.lng);
-			cumulativeTime += (point.timestamp - prev.timestamp);
+			cumulativeTime += movingMsBetween(prev.timestamp, point.timestamp, pauses);
 		}
 		return {
 			distance: cumulativeDistance,
@@ -1439,6 +1804,21 @@ function recalculateSegments(session) {
 			segmentStartTime = data.time;
 			nextSegmentDistance += stepDistance;
 		}
+	}
+
+	// A ride almost never ends on a boundary. Without this row the table silently
+	// drops the last stretch and never adds up to the headline moving time.
+	const last = pointData[pointData.length - 1];
+	const partialDistance = last.distance - (nextSegmentDistance - stepDistance);
+	if (partialDistance > 1) {
+		const segmentTime = last.time - segmentStartTime;
+		segments.push({
+			segmentNumber,
+			duration: segmentTime,
+			avgSpeed: segmentTime > 0 ? partialDistance / (segmentTime / 1000) : 0,
+			partial: true,
+			distance: partialDistance,
+		});
 	}
 
 	return segments;
@@ -1540,10 +1920,14 @@ function renderPostSummary(session) {
 	el.segmentsBody.innerHTML = "";
 	// Recalculate segments based on current unit settings
 	const segments = recalculateSegments(session);
+	const unitLabel = distanceUnitLabel(state.prefs.unit);
 	for (const seg of segments) {
 		const tr = document.createElement("tr");
+		const label = seg.partial
+			? `Final ${formatDistance(seg.distance, state.prefs.unit)} ${unitLabel}`
+			: segmentLabel(seg.segmentNumber, state.prefs.unit);
 		tr.innerHTML = `
-			<td>${segmentLabel(seg.segmentNumber, state.prefs.unit)}</td>
+			<td>${label}</td>
 			<td>${formatDuration(seg.duration)}</td>
 			<td>${formatSpeed(seg.avgSpeed, state.prefs.unit)}</td>
 		`;
@@ -1906,7 +2290,7 @@ async function deleteCurrentRide() {
 	await deleteSessionById(state.currentPostSession.id);
 	state.currentPostSession = null;
 	navigateToScreen("home", "replace");
-	await renderSessionsList();
+	await renderPastRides();
 }
 
 function showMessage(title, message) {
@@ -2175,6 +2559,14 @@ function getSegmentLengthMeters(unit) {
 	return unit === "imperial" ? METERS_PER_MILE : METERS_PER_KM;
 }
 
+function distanceUnitLabel(unit) {
+	return unit === "imperial" ? "mi" : "km";
+}
+
+function speedUnitLabel(unit) {
+	return unit === "imperial" ? "mph" : "km/h";
+}
+
 function segmentLabel(number, unit) {
 	return unit === "imperial" ? `Mile ${number}` : `Km ${number}`;
 }
@@ -2367,6 +2759,18 @@ function formatElevation(meters, unit) {
 	return `${meters.toFixed(0)} m`;
 }
 
+// Ride length rounded to the nearest minute, for the at-a-glance list. The
+// summary screen and the segment table still carry seconds, where they matter.
+function formatDurationMinutes(ms) {
+	const totalMinutes = Math.round((ms || 0) / 60000);
+	if (totalMinutes < 1) return "<1m";
+
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	if (!hours) return `${minutes}m`;
+	return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
 function formatDuration(ms) {
 	const totalSeconds = Math.floor(ms / 1000);
 	const h = Math.floor(totalSeconds / 3600);
@@ -2479,7 +2883,7 @@ async function importAllData(event) {
 		}
 
 		await loadPrefs();
-		await renderSessionsList();
+		await renderPastRides();
 		await showMessage("Import Success", "Your data has been imported successfully.");
 	} catch (error) {
 		el.importFileInput.value = "";
@@ -2557,6 +2961,7 @@ async function loadPrefs() {
 	state.prefs.stadiaKey = await getPref("stadiaKey", "");
 	state.prefs.guideContrast = await getPref("guideContrast", "high");
 	state.prefs.markerSize = await getPref("markerSize", "medium");
+	state.prefs.ridesView = await getPref("ridesView", "list");
 	state.prefs.installDismissed = await getPref("installDismissed", false);
 }
 

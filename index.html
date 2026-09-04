@@ -35,8 +35,27 @@
       </div>
 
       <section class="sessions-card">
-        <h2>Past Rides</h2>
+        <header class="sessions-header">
+          <h2>Past Rides</h2>
+          <div class="toggle-pill" id="ridesViewToggle" role="group" aria-label="Past rides view">
+            <button data-rides-view="list" class="toggle-option">List</button>
+            <button data-rides-view="calendar" class="toggle-option">Calendar</button>
+          </div>
+        </header>
         <ul id="sessionsList" class="sessions-list"></ul>
+        <div id="ridesCalendar" class="rides-calendar hidden">
+          <div class="calendar-nav">
+            <button id="calPrevBtn" class="icon-btn" aria-label="Previous month">‹</button>
+            <h3 id="calMonthLabel" aria-live="polite">-</h3>
+            <button id="calNextBtn" class="icon-btn" aria-label="Next month">›</button>
+          </div>
+          <table class="calendar-table">
+            <thead>
+              <tr id="calWeekdayRow"></tr>
+            </thead>
+            <tbody id="calBody"></tbody>
+          </table>
+        </div>
         <p id="sessionsEmpty" class="empty">No rides yet. Start your first ride above.</p>
       </section>
     </section>
