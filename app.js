@@ -585,20 +585,20 @@ function renderRidesCalendar(sessions) {
 
 	renderCalendarWeekdays();
 
+	// Not filtered to the displayed month: the grid spills into the neighbouring
+	// months, and those days show their rides too.
 	const byDay = new Map();
 	for (const session of sessions) {
 		const date = new Date(session.date);
 		if (Number.isNaN(date.getTime())) continue;
-		if (date.getFullYear() !== year || date.getMonth() !== monthIndex) continue;
 		const key = dayKey(date);
 		if (!byDay.has(key)) byDay.set(key, []);
 		byDay.get(key).push(session);
 	}
 
-	// Blanks before the 1st, then the month, padded out to whole weeks.
-	const leadingBlanks = (new Date(year, monthIndex, 1).getDay() - WEEK_START_DAY + 7) % 7;
+	const leadingDays = (new Date(year, monthIndex, 1).getDay() - WEEK_START_DAY + 7) % 7;
 	const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-	const weeks = Math.ceil((leadingBlanks + daysInMonth) / 7);
+	const weeks = Math.ceil((leadingDays + daysInMonth) / 7);
 	const todayKey = dayKey(new Date());
 
 	el.calBody.innerHTML = "";
@@ -607,26 +607,21 @@ function renderRidesCalendar(sessions) {
 		const tr = document.createElement("tr");
 
 		for (let column = 0; column < 7; column += 1) {
-			const dayNumber = week * 7 + column - leadingBlanks + 1;
-			const td = document.createElement("td");
-
-			if (dayNumber < 1 || dayNumber > daysInMonth) {
-				td.className = "calendar-empty";
-				tr.appendChild(td);
-				continue;
-			}
-
-			const cellDate = new Date(year, monthIndex, dayNumber);
+			// Day-of-month arithmetic rolls into the adjacent months on its own, so a
+			// day number outside 1..daysInMonth resolves to the right neighbouring date.
+			const cellDate = new Date(year, monthIndex, week * 7 + column - leadingDays + 1);
 			const key = dayKey(cellDate);
 			const rides = byDay.get(key) || [];
 
+			const td = document.createElement("td");
 			td.className = "calendar-day";
+			if (cellDate.getMonth() !== monthIndex) td.classList.add("is-outside");
 			if (rides.length) td.classList.add("has-ride");
 			if (key === todayKey) td.classList.add("is-today");
 
 			const number = document.createElement("span");
 			number.className = "calendar-day-number";
-			number.textContent = String(dayNumber);
+			number.textContent = String(cellDate.getDate());
 			td.appendChild(number);
 
 			// Oldest first within a day, so the entries read in the order they happened.

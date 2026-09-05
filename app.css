@@ -359,14 +359,26 @@ select {
   overflow: hidden;
 }
 
-.calendar-table td.calendar-empty {
-  border-color: transparent;
-  background: transparent;
-}
-
 .calendar-table td.has-ride {
   background: color-mix(in srgb, var(--primary) 10%, var(--surface));
   border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+/* Days carried in from the previous or next month, so the grid runs whole weeks.
+   Dimmed to keep the month being viewed the thing that reads first. */
+.calendar-table td.is-outside {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.calendar-table td.is-outside.has-ride {
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
+}
+
+.calendar-table td.is-outside .calendar-day-number,
+.calendar-table td.is-outside .calendar-ride {
+  opacity: 0.5;
 }
 
 .calendar-day-number {
