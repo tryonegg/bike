@@ -1,10 +1,18 @@
-const CACHE_VERSION = "v1.2.2";
+const CACHE_VERSION = "v1.3.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
-const TILE_CACHE = "bike-tracker-tiles-v1";
-const TILE_CACHE_MAX = 500;
 const STADIA_CACHE = "bike-tracker-stadia-v1";
+const STADIA_CACHE_MAX = 500;
+// OpenFreeMap vector tiles plus the elevation tiles behind topo mode. Vector
+// tiles are small and each covers every zoom from 14 in, so this spans a lot
+// of riding.
+const MAP_DATA_CACHE = "bike-tracker-mapdata-v1";
+const MAP_DATA_CACHE_MAX = 1500;
+// Styles, fonts and sprites are few but the map is blank or unlabelled without
+// them, so they live apart from the tiles where eviction cannot reach them.
+const MAP_STYLE_CACHE = "bike-tracker-mapstyle-v1";
+const MAP_DATA_HOSTS = ["tiles.openfreemap.org", "elevation-tiles-prod.s3.amazonaws.com"];
 
 const ASSETS = [
   "./",
@@ -13,14 +21,9 @@ const ASSETS = [
   "./app.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
-  "./vendor/leaflet/leaflet.css",
-  "./vendor/leaflet/leaflet.js",
-  "./vendor/leaflet/marker-icon.png",
-  "./vendor/leaflet/marker-icon-2x.png",
-  "./vendor/leaflet/marker-shadow.png",
   "./vendor/maplibre/maplibre-gl.css",
   "./vendor/maplibre/maplibre-gl.js",
-  "./vendor/maplibre/leaflet-maplibre-gl.js",
+  "./vendor/maplibre-contour/maplibre-contour.min.js",
 ];
 
 const SHELL_ASSET_SUFFIXES = [
@@ -29,14 +32,9 @@ const SHELL_ASSET_SUFFIXES = [
   "/app.js",
   "/manifest.webmanifest",
   "/icons/icon.svg",
-  "/vendor/leaflet/leaflet.css",
-  "/vendor/leaflet/leaflet.js",
-  "/vendor/leaflet/marker-icon.png",
-  "/vendor/leaflet/marker-icon-2x.png",
-  "/vendor/leaflet/marker-shadow.png",
   "/vendor/maplibre/maplibre-gl.css",
   "/vendor/maplibre/maplibre-gl.js",
-  "/vendor/maplibre/leaflet-maplibre-gl.js",
+  "/vendor/maplibre-contour/maplibre-contour.min.js",
 ];
 
 const UPDATE_WATCH_SUFFIXES = [
@@ -44,10 +42,8 @@ const UPDATE_WATCH_SUFFIXES = [
   "/app.css",
   "/app.js",
   "/manifest.webmanifest",
-  "/vendor/leaflet/leaflet.css",
-  "/vendor/leaflet/leaflet.js",
   "/vendor/maplibre/maplibre-gl.js",
-  "/vendor/maplibre/leaflet-maplibre-gl.js",
+  "/vendor/maplibre-contour/maplibre-contour.min.js",
 ];
 
 let updateNotified = false;
@@ -63,8 +59,11 @@ self.addEventListener("activate", (event) => {
         keys
           .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
           .concat(keys.filter((key) => key.startsWith("bike-tracker-runtime-") && key !== RUNTIME_CACHE))
-          .concat(keys.filter((key) => key.startsWith("bike-tracker-tiles-") && key !== TILE_CACHE))
+          // The OpenStreetMap raster cache from the Leaflet maps, which nothing uses now.
+          .concat(keys.filter((key) => key.startsWith("bike-tracker-tiles-")))
           .concat(keys.filter((key) => key.startsWith("bike-tracker-stadia-") && key !== STADIA_CACHE))
+          .concat(keys.filter((key) => key.startsWith("bike-tracker-mapdata-") && key !== MAP_DATA_CACHE))
+          .concat(keys.filter((key) => key.startsWith("bike-tracker-mapstyle-") && key !== MAP_STYLE_CACHE))
           .map((key) => caches.delete(key)),
       ),
     ),
@@ -85,12 +84,22 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (url.origin !== self.location.origin) {
-    if (request.url.includes("tile.openstreetmap.org") || request.url.includes("tiles.stadiamaps.com")) {
-      if (request.url.includes("tiles.stadiamaps.com")) {
-        event.respondWith(stadiaFirst(request));
+    if (MAP_DATA_HOSTS.includes(url.hostname)) {
+      // Style JSON and the TileJSON change when OpenFreeMap publishes new data, so
+      // they are refreshed when online. Fonts, sprites and tiles live under
+      // versioned paths and never change, so those are served from cache first.
+      const { pathname } = url;
+      if (pathname.startsWith("/styles/") || pathname === "/planet") {
+        event.respondWith(networkFirst(request, MAP_STYLE_CACHE));
+      } else if (pathname.startsWith("/fonts/") || pathname.startsWith("/sprites/")) {
+        event.respondWith(cacheFirst(request, MAP_STYLE_CACHE));
       } else {
-        event.respondWith(tileFirst(request));
+        event.respondWith(tileFirst(request, MAP_DATA_CACHE, MAP_DATA_CACHE_MAX));
       }
+      return;
+    }
+    if (request.url.includes("tiles.stadiamaps.com")) {
+      event.respondWith(stadiaFirst(request));
     }
     return;
   }
@@ -145,7 +154,7 @@ async function stadiaFirst(request) {
   try {
     const response = await fetch(request);
     if (response && response.ok) {
-      await limitTileCache(cache);
+      await limitTileCache(cache, STADIA_CACHE_MAX);
       cache.put(request, response.clone());
     }
     return response;
@@ -155,15 +164,15 @@ async function stadiaFirst(request) {
   }
 }
 
-async function tileFirst(request) {
-  const cache = await caches.open(TILE_CACHE);
+async function tileFirst(request, cacheName, maxEntries) {
+  const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) return cached;
 
   try {
     const response = await fetch(request);
     if (response && response.ok) {
-      await limitTileCache(cache);
+      await limitTileCache(cache, maxEntries);
       cache.put(request, response.clone());
     }
     return response;
@@ -172,10 +181,10 @@ async function tileFirst(request) {
   }
 }
 
-async function limitTileCache(cache) {
+async function limitTileCache(cache, maxEntries) {
   const keys = await cache.keys();
-  if (keys.length < TILE_CACHE_MAX) return;
-  const overflow = keys.length - TILE_CACHE_MAX + 1;
+  if (keys.length < maxEntries) return;
+  const overflow = keys.length - maxEntries + 1;
   for (let i = 0; i < overflow; i += 1) {
     await cache.delete(keys[i]);
   }

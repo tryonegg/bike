@@ -7,7 +7,6 @@
   <meta name="description" content="Offline bike ride tracker PWA">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
   <link rel="stylesheet" href="app.css">
   <title>Bike Tracker</title>
@@ -189,11 +188,21 @@
             <button data-theme="dark" class="toggle-option">Dark</button>
           </div>
         </div>
+
+        <div class="toggle-card" role="group" aria-label="Map style">
+          <span>Map Style</span>
+          <div class="toggle-pill" id="mapTypeToggle">
+            <button data-map-type="road" class="toggle-option">Road</button>
+            <button data-map-type="topo" class="toggle-option">Topo</button>
+          </div>
+        </div>
+        <p class="muted">Topo adds hill shading and contour lines to the ride and summary maps.</p>
+
         <div class="row">
           <label for="stadiaKeyInput">Stadia Maps API Key (optional)</label>
           <input id="stadiaKeyInput" type="text" placeholder="Paste API key">
         </div>
-          <p class="muted">With a key, map tiles switch to Alidade Smooth in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API Key here.</a></p>
+          <p class="muted">Without a key, maps use free OpenFreeMap tiles. With a key, it uses Stadia's Alidade Smooth (Outdoors for Topo) in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API Key here.</a></p>
 
         <div class="row">
           <label for="guideContrastSelect">Guide Line Contrast</label>
@@ -237,9 +246,8 @@
     </div>
   </div>
 
-  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="vendor/maplibre/maplibre-gl.js"></script>
-  <script src="vendor/maplibre/leaflet-maplibre-gl.js"></script>
+  <script src="vendor/maplibre-contour/maplibre-contour.min.js"></script>
   <script src="app.js" type="module"></script>
 </body>
 </html>

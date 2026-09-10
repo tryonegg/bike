@@ -29,6 +29,33 @@ const SPEED_BANDS = 16;
 // The pre-ride countdown, which also bounds how long the initial GPS fix gets.
 const COUNTDOWN_SECONDS = 5;
 
+// Live map camera. Fixes land about once a second, so each follow move is eased
+// over a little less than that to glide between fixes rather than jump. The
+// zoom is only the starting default; the rider's own pick is saved as a pref.
+const LIVE_MAP_ZOOM = 16;
+const LIVE_CAMERA_EASE_MS = 900;
+// A three-quarter view that tilts the road ahead into sight. It stays fixed for
+// the ride: the tilt gestures are off and the follow camera never changes it.
+const LIVE_MAP_PITCH = 55;
+const LIVE_ROUTE_SOURCE = "live-route";
+const LIVE_GUIDE_SOURCE = "live-guide";
+// The distance-to-start chip sits this far from the rider along the guide line,
+// measured as if the map were flat; tilt shortens it on screen toward the
+// horizon. It hides when the whole line is shorter than the minimum.
+const GUIDE_LABEL_OFFSET_PX = 90;
+const GUIDE_LABEL_MIN_LINE_PX = 70;
+// Width of the whole world in pixels at zoom 0, which MapLibre doubles per zoom.
+const WORLD_SIZE_AT_ZOOM_0 = 512;
+
+// Topo relief and contours are drawn from AWS's open terrain tiles. Zoom 13 is
+// fine enough for riding-scale contours and keeps the download per view small.
+const DEM_TILE_URL = "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png";
+const DEM_MAX_ZOOM = 13;
+const DEM_ATTRIBUTION = '<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Terrain Tiles</a>';
+const FEET_PER_METER = 3.28084;
+const TOPO_LAYER_IDS = ["topo-hillshade", "topo-contour-lines", "topo-contour-labels"];
+const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
+
 const ACTIVITIES = {
 	bike: { label: "Bike", icon: "🚴" },
 	walk: { label: "Walk", icon: "🚶" },
@@ -41,6 +68,8 @@ const state = {
 		unit: "imperial",
 		theme: "light",
 		stadiaKey: "",
+		mapType: "road",
+		liveMapZoom: LIVE_MAP_ZOOM,
 		guideContrast: "high",
 		markerSize: "medium",
 		ridesView: "list",
@@ -50,15 +79,19 @@ const state = {
 	// Null until the first calendar render picks a starting month from the rides.
 	calendarMonth: null,
 	deferredInstallPrompt: null,
+	// Both maps are MapLibre. The live map's sources are rebuilt from these
+	// whenever the style is swapped, so they are the record of what it shows.
 	liveMap: null,
-	liveTileLayer: null,
-	routeLine: null,
-	guideLineHalo: null,
-	guideLine: null,
+	liveRouteCoords: [],
+	liveGuideCoords: [],
 	markerLayer: null,
+	guideLabelMarker: null,
 	postMap: null,
-	postTileLayer: null,
 	postMarkerLayer: null,
+	// Per map: whether it is on Stadia and whether its current style has loaded.
+	mapStatus: new WeakMap(),
+	// Created once; it registers MapLibre protocols that every topo style reuses.
+	demSource: null,
 	elevationChart: null,
 	currentSession: null,
 	currentPostSession: null,
@@ -106,6 +139,7 @@ const el = {
 	},
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
+	mapTypeToggle: document.getElementById("mapTypeToggle"),
 	sessionsList: document.getElementById("sessionsList"),
 	sessionsEmpty: document.getElementById("sessionsEmpty"),
 	ridesViewToggle: document.getElementById("ridesViewToggle"),
@@ -185,6 +219,7 @@ function wireEvents() {
 		await renderPastRides();
 		updateLiveStats();
 		applyMapVisualPrefs();
+		refreshTopoLayers();
 		if (state.currentPostSession) {
 			renderPostSummary(state.currentPostSession);
 			renderElevationChart(state.currentPostSession);
@@ -198,7 +233,16 @@ function wireEvents() {
 		await setPref("theme", state.prefs.theme);
 		applyTheme();
 		syncToggles();
-		rebuildMapTiles();
+		rebuildMapStyles();
+	});
+
+	el.mapTypeToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-map-type]");
+		if (!btn) return;
+		state.prefs.mapType = btn.dataset.mapType;
+		await setPref("mapType", state.prefs.mapType);
+		syncToggles();
+		rebuildMapStyles();
 	});
 
 	el.ridesViewToggle.addEventListener("click", async (event) => {
@@ -265,7 +309,7 @@ function wireEvents() {
 		await setPref("guideContrast", state.prefs.guideContrast);
 		await setPref("markerSize", state.prefs.markerSize);
 		navigateToScreen("home");
-		rebuildMapTiles();
+		rebuildMapStyles();
 		applyMapVisualPrefs();
 	});
 
@@ -312,12 +356,8 @@ function wireEvents() {
 		el.installBanner.classList.add("hidden");
 	});
 
+	// Both maps watch their own containers; only the chart needs redrawing.
 	window.addEventListener("resize", () => {
-		if (state.liveMap) {
-			sizeLiveMapForRotation();
-			state.liveMap.invalidateSize();
-		}
-		if (state.postMap) state.postMap.invalidateSize();
 		if (state.currentPostSession) renderElevationChart(state.currentPostSession);
 	});
 
@@ -377,6 +417,9 @@ function syncToggles() {
 
 	const themeButtons = el.themeToggle.querySelectorAll("button");
 	themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
+
+	const mapTypeButtons = el.mapTypeToggle.querySelectorAll("button");
+	mapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
 
 	const viewButtons = el.ridesViewToggle.querySelectorAll("button");
 	viewButtons.forEach((btn) => {
@@ -1193,18 +1236,17 @@ function updateSegments(point) {
 function updateLiveMap(point, heading, speedMps) {
 	if (!state.liveMap) return;
 
-	if (state.routeLine) {
-		state.routeLine.addLatLng([point.lat, point.lng]);
-	}
+	state.liveRouteCoords.push([point.lng, point.lat]);
+	setLiveLineData(LIVE_ROUTE_SOURCE, state.liveRouteCoords);
 
-	if ((state.guideLine || state.guideLineHalo) && state.currentSession?.points?.length) {
+	if (state.currentSession?.points?.length) {
 		const startPoint = state.currentSession.points[0];
-		const line = [
-			[startPoint.lat, startPoint.lng],
-			[point.lat, point.lng],
+		state.liveGuideCoords = [
+			[startPoint.lng, startPoint.lat],
+			[point.lng, point.lat],
 		];
-		if (state.guideLineHalo) state.guideLineHalo.setLatLngs(line);
-		if (state.guideLine) state.guideLine.setLatLngs(line);
+		setLiveLineData(LIVE_GUIDE_SOURCE, state.liveGuideCoords);
+		updateGuideLabel();
 	}
 
 	const session = state.currentSession;
@@ -1225,38 +1267,35 @@ function updateLiveMap(point, heading, speedMps) {
 	}
 
 	if (session) session.currentHeading = nextHeading;
-	rotateLiveMap(nextHeading);
-
-	if (state.currentSession?.shouldRecenter) {
-		state.liveMap.setView([point.lat, point.lng]);
-	}
+	followLiveMap(point, nextHeading);
 }
 
-function rotateLiveMap(heading) {
-	const mapElement = document.getElementById("liveMap");
-	if (!mapElement) return;
-	mapElement.style.transformOrigin = "50% 50%";
-	mapElement.style.transform = `rotate(${-heading}deg)`;
+// Heading-up follow camera. MapLibre rotates the map itself, so road names are
+// re-laid out upright at every bearing instead of turning with the tiles.
+function followLiveMap(point, heading) {
+	const map = state.liveMap;
 
-	// The control container shares the map's centre, so an equal counter-rotation
-	// leaves the zoom buttons and attribution upright and in place.
-	const controls = mapElement.querySelector(".leaflet-control-container");
-	if (controls) {
-		controls.style.transform = `rotate(${heading}deg)`;
-	}
+	// Easing the camera cancels any gesture in progress, so a fix that lands
+	// mid-pan or mid-zoom is skipped rather than yanking the map from the finger.
+	if (map.isZooming() || map.dragPan.isActive() || map.touchZoomRotate.isActive()) return;
 
-	// Counter-rotate all segment markers to keep text upright
-	const markers = document.querySelectorAll(".segment-flag-marker");
-	markers.forEach((marker) => {
-		marker.style.transform = `rotate(${heading}deg)`;
-	});
+	const camera = { bearing: heading, duration: LIVE_CAMERA_EASE_MS, easing: (t) => t };
+	if (state.currentSession?.shouldRecenter) camera.center = [point.lng, point.lat];
+	map.easeTo(camera);
 }
 
 function recenterLiveMap() {
 	const session = state.currentSession;
 	if (!session || !session.lastPoint || !state.liveMap) return;
 	session.shouldRecenter = true;
-	state.liveMap.setView([session.lastPoint.lat, session.lastPoint.lng], 16);
+	setLiveZoomAnchor(state.liveMap, true);
+	// Back to the rider's picked riding zoom as well as the rider, dropping any
+	// zoom from looking around.
+	state.liveMap.easeTo({
+		center: [session.lastPoint.lng, session.lastPoint.lat],
+		zoom: state.prefs.liveMapZoom,
+		bearing: session.currentHeading ?? 0,
+	});
 }
 
 function updateLiveStats() {
@@ -1505,9 +1544,8 @@ async function resumeCheckpointedSession(restored) {
 	navigateToScreen("active", "replace");
 	initLiveMap(restored.lastPoint.lat, restored.lastPoint.lng);
 
-	if (state.routeLine) {
-		state.routeLine.setLatLngs(restored.points.map((point) => [point.lat, point.lng]));
-	}
+	state.liveRouteCoords = restored.points.map((point) => [point.lng, point.lat]);
+	setLiveLineData(LIVE_ROUTE_SOURCE, state.liveRouteCoords);
 	if (state.markerLayer) {
 		renderSegmentMarkers(state.markerLayer, restored.segmentMarkers || []);
 	}
@@ -1525,90 +1563,436 @@ function initLiveMap(lat, lng) {
 		state.liveMap = null;
 	}
 
-	state.liveMap = L.map("liveMap", { zoomControl: true }).setView([lat, lng], 16);
-	state.liveTileLayer = createTileLayer((fallbackLayer) => {
-		if (!state.liveMap || state.liveTileLayer !== fallbackLayer.from) return;
-		state.liveMap.removeLayer(fallbackLayer.from);
-		state.liveTileLayer = fallbackLayer.to;
-		state.liveTileLayer.addTo(state.liveMap);
+	state.liveRouteCoords = [];
+	state.liveGuideCoords = [];
+
+	const map = createVectorMap(
+		{
+			container: "liveMap",
+			center: [lng, lat],
+			zoom: state.prefs.liveMapZoom,
+			bearing: state.currentSession?.currentHeading ?? 0,
+			pitch: LIVE_MAP_PITCH,
+		},
+		addLiveOverlayLayers,
+	);
+	state.liveMap = map;
+	state.markerLayer = createMarkerLayer(map);
+	state.guideLabelMarker = createGuideLabelMarker(map);
+	// Its offset is in pixels, so its ground position depends on the zoom.
+	map.on("zoom", updateGuideLabel);
+
+	// The rider sits two-thirds of the way down, leaving the larger share of the
+	// tilted map for the road ahead. Padding moves the camera's centre, so the
+	// follow camera, rotation, Re-center and rider-anchored zooms all aim there.
+	const placeRider = () => map.setPadding({ top: map.getContainer().clientHeight / 3, bottom: 0, left: 0, right: 0 });
+	placeRider();
+	map.on("resize", placeRider);
+	setLiveZoomAnchor(map, true);
+
+	// A one-finger or mouse drag means the rider wants to look around, so the
+	// camera stops following. Zooming, a two-finger pinch included, keeps it
+	// following at the new zoom. Only gestures carry an originalEvent; the follow
+	// camera's own moves do not.
+	map.on("dragstart", (event) => {
+		const gesture = event.originalEvent;
+		if (!gesture || !state.currentSession) return;
+		if (gesture.touches && gesture.touches.length > 1) return;
+		state.currentSession.shouldRecenter = false;
+		setLiveZoomAnchor(map, false);
 	});
-	state.liveTileLayer.addTo(state.liveMap);
 
-	state.routeLine = L.polyline([], {
-		color: "#0b5d3b",
-		weight: 5,
-	}).addTo(state.liveMap);
-
-	const guideStyle = getGuideLineStyle(state.prefs.guideContrast);
-
-	state.guideLineHalo = L.polyline([], {
-		color: guideStyle.haloColor,
-		weight: guideStyle.haloWeight,
-		opacity: guideStyle.haloOpacity,
-		dashArray: guideStyle.dashArray,
-		lineCap: "round",
-	}).addTo(state.liveMap);
-
-	state.guideLine = L.polyline([], {
-		color: guideStyle.lineColor,
-		weight: guideStyle.lineWeight,
-		opacity: guideStyle.lineOpacity,
-		dashArray: guideStyle.dashArray,
-		lineCap: "round",
-	}).addTo(state.liveMap);
-
-	state.markerLayer = L.layerGroup().addTo(state.liveMap);
-
-	state.liveMap.on("dragstart zoomstart", () => {
-		if (state.currentSession) state.currentSession.shouldRecenter = false;
+	// A zoom made while following is the rider picking their riding zoom, so it
+	// is kept for this and future rides. A zoom after panning away is just a look
+	// around, and Re-center undoes it.
+	let pickingZoom = false;
+	map.on("zoomstart", (event) => {
+		pickingZoom = Boolean(event.originalEvent && state.currentSession?.shouldRecenter);
 	});
-
-	sizeLiveMapForRotation();
-	setTimeout(() => {
-		sizeLiveMapForRotation();
-		state.liveMap?.invalidateSize();
-	}, 150);
+	map.on("zoomend", () => {
+		if (!pickingZoom) return;
+		pickingZoom = false;
+		saveLiveMapZoom(map.getZoom());
+	});
 }
 
-// The live map rotates to match heading. Leaflet only renders tiles for the
-// element's own box, so rotating an element the size of its panel sweeps empty
-// corners into view. Sizing it to a square whose side is the panel's diagonal
-// guarantees coverage at every angle, because that square contains the panel's
-// circumscribed circle.
-function sizeLiveMapForRotation() {
-	const mapElement = document.getElementById("liveMap");
-	const panel = mapElement?.parentElement;
-	if (!mapElement || !panel) return;
+async function saveLiveMapZoom(zoom) {
+	state.prefs.liveMapZoom = zoom;
+	await setPref("liveMapZoom", zoom);
+}
 
-	const width = panel.clientWidth;
-	const height = panel.clientHeight;
-	if (!width || !height) return;
+// While following, zooms pivot on the rider so they stay put under the camera.
+// Once the map has been panned away, zooms pivot on the finger or cursor.
+function setLiveZoomAnchor(map, aroundRider) {
+	const options = aroundRider ? { around: "center" } : undefined;
+	map.touchZoomRotate.enable(options);
+	// The scroll handler ignores enable() while it is already enabled.
+	map.scrollZoom.disable();
+	map.scrollZoom.enable(options);
+}
 
-	// Plus a couple of pixels so sub-pixel rounding can never expose a hairline
-	// gap at the 45-degree worst case.
-	const side = Math.ceil(Math.hypot(width, height)) + 2;
-	const offsetX = Math.round((width - side) / 2);
-	const offsetY = Math.round((height - side) / 2);
+// Shared by the live and post-ride maps: provider and theme choice, the topo
+// layers, the Stadia fallback, and re-adding the map's own overlays whenever
+// its style is swapped.
+function createVectorMap(options, addOverlays) {
+	const usesStadia = Boolean(state.prefs.stadiaKey);
+	const map = new maplibregl.Map({
+		...options,
+		style: mapStyleUrl(usesStadia),
+		// Heading owns the live map's bearing and the ride summary stays north-up,
+		// so rotate and tilt gestures have no job on either map.
+		dragRotate: false,
+		pitchWithRotate: false,
+		touchPitch: false,
+		attributionControl: { compact: true },
+	});
+	map.touchZoomRotate.disableRotation();
+	map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+	state.mapStatus.set(map, { usesStadia, styleReady: false });
 
-	mapElement.style.position = "absolute";
-	mapElement.style.minHeight = "0";
-	mapElement.style.width = `${side}px`;
-	mapElement.style.height = `${side}px`;
-	mapElement.style.left = `${offsetX}px`;
-	mapElement.style.top = `${offsetY}px`;
+	// Fires for the first style and again after every setStyle, which discards
+	// the overlays along with the old style.
+	map.on("style.load", () => {
+		state.mapStatus.get(map).styleReady = true;
+		addTopoLayers(map);
+		addOverlays(map);
+	});
+	map.on("error", (event) => handleMapError(map, event));
+	return map;
+}
 
-	// Leaflet's controls live inside the map element, so the oversize would push
-	// the zoom buttons and the required OSM attribution outside the visible area.
-	// Pin their container back over the visible rect; rotateLiveMap keeps it upright.
-	const controls = mapElement.querySelector(".leaflet-control-container");
-	if (controls) {
-		controls.style.position = "absolute";
-		controls.style.left = `${-offsetX}px`;
-		controls.style.top = `${-offsetY}px`;
-		controls.style.width = `${width}px`;
-		controls.style.height = `${height}px`;
-		controls.style.transformOrigin = "50% 50%";
+function isMapStyleReady(map) {
+	return Boolean(map && state.mapStatus.get(map)?.styleReady);
+}
+
+// Vector styles only: raster tiles bake their labels in, and those would turn
+// upside down as the live map rotates. Both providers use the OpenMapTiles
+// schema, so the topo layers below slot into either.
+function mapStyleUrl(useStadia) {
+	const dark = state.prefs.theme === "dark";
+	const topo = state.prefs.mapType === "topo";
+
+	if (useStadia) {
+		const styleName = dark ? "alidade_smooth_dark" : topo ? "outdoors" : "alidade_smooth";
+		return `https://tiles.stadiamaps.com/styles/${styleName}.json?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`;
 	}
+
+	const styleName = dark ? "dark" : topo ? "liberty" : "positron";
+	return `https://tiles.openfreemap.org/styles/${styleName}`;
+}
+
+function setMapStyle(map, useStadia) {
+	const status = state.mapStatus.get(map);
+	status.usesStadia = useStadia;
+	status.styleReady = false;
+	// A diffed swap keeps the old style object and never fires style.load, which
+	// would silently drop the overlays and topo layers.
+	map.setStyle(mapStyleUrl(useStadia), { diff: false });
+}
+
+function rebuildMapStyles() {
+	for (const map of [state.liveMap, state.postMap]) {
+		if (map) setMapStyle(map, Boolean(state.prefs.stadiaKey));
+	}
+}
+
+function handleMapError(map, event) {
+	console.warn("Map error", event.error || event);
+	const status = state.mapStatus.get(map);
+	if (!status.usesStadia) return;
+
+	// A rejected or mistyped Stadia key would otherwise leave the map blank for
+	// the whole ride. Offline tile misses are not a key problem, so they stay put.
+	const httpStatus = event.error?.status;
+	if (!status.styleReady || httpStatus === 401 || httpStatus === 403) {
+		setMapStyle(map, false);
+	}
+}
+
+function lineData(coords) {
+	if (coords.length < 2) return { type: "FeatureCollection", features: [] };
+	return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } };
+}
+
+// A no-op until the style is ready; style.load then builds the source from the
+// same coordinates.
+function setLiveLineData(sourceId, coords) {
+	state.liveMap?.getSource(sourceId)?.setData(lineData(coords));
+}
+
+function addLiveOverlayLayers(map) {
+	const guideStyle = getGuideLineStyle(state.prefs.guideContrast);
+	const round = { "line-cap": "round", "line-join": "round" };
+
+	map.addSource(LIVE_ROUTE_SOURCE, { type: "geojson", data: lineData(state.liveRouteCoords) });
+	map.addSource(LIVE_GUIDE_SOURCE, { type: "geojson", data: lineData(state.liveGuideCoords) });
+
+	map.addLayer({
+		id: "live-route",
+		type: "line",
+		source: LIVE_ROUTE_SOURCE,
+		layout: round,
+		paint: { "line-color": "#0b5d3b", "line-width": 5 },
+	});
+	map.addLayer({
+		id: "live-guide-halo",
+		type: "line",
+		source: LIVE_GUIDE_SOURCE,
+		layout: round,
+		paint: guideHaloPaint(guideStyle),
+	});
+	map.addLayer({
+		id: "live-guide",
+		type: "line",
+		source: LIVE_GUIDE_SOURCE,
+		layout: round,
+		paint: guideLinePaint(guideStyle),
+	});
+}
+
+function guideHaloPaint(guideStyle) {
+	return linePaint(guideStyle.haloColor, guideStyle.haloWeight, guideStyle.haloOpacity, guideStyle.dashArray);
+}
+
+function guideLinePaint(guideStyle) {
+	return linePaint(guideStyle.lineColor, guideStyle.lineWeight, guideStyle.lineOpacity, guideStyle.dashArray);
+}
+
+function linePaint(color, width, opacity, dashArray) {
+	return {
+		"line-color": color,
+		"line-width": width,
+		"line-opacity": opacity,
+		// The guide styles give dashes in pixels; MapLibre measures them in line widths.
+		"line-dasharray": dashArray.split(" ").map((px) => Number(px) / width),
+	};
+}
+
+function applyLiveGuideStyle(guideStyle) {
+	const map = state.liveMap;
+	if (!isMapStyleReady(map)) return;
+	for (const [layerId, paint] of [
+		["live-guide-halo", guideHaloPaint(guideStyle)],
+		["live-guide", guideLinePaint(guideStyle)],
+	]) {
+		if (!map.getLayer(layerId)) continue;
+		for (const [property, value] of Object.entries(paint)) map.setPaintProperty(layerId, property, value);
+	}
+}
+
+// Contours are computed in a worker from the elevation tiles, so topo needs no
+// tile server of its own. The same cached tiles also feed the hillshade.
+function getDemSource() {
+	if (!state.demSource && typeof mlcontour !== "undefined") {
+		state.demSource = new mlcontour.DemSource({
+			url: DEM_TILE_URL,
+			encoding: "terrarium",
+			maxzoom: DEM_MAX_ZOOM,
+			worker: true,
+		});
+		state.demSource.setupMaplibre(maplibregl);
+	}
+	return state.demSource;
+}
+
+function addTopoLayers(map) {
+	if (state.prefs.mapType !== "topo") return;
+	const demSource = getDemSource();
+	if (!demSource) return;
+
+	const dark = state.prefs.theme === "dark";
+	const imperial = state.prefs.unit === "imperial";
+	const layers = map.getStyle().layers;
+
+	// Relief sits under roads and buildings so it shades the land without dimming
+	// them. Contour labels sit under the road names and place labels, so where
+	// they collide those win. Some styles put water names first, which is why the
+	// first symbol layer alone is not a safe anchor.
+	const firstSymbolId = layers.find((layer) => layer.type === "symbol")?.id;
+	const reliefBeforeId =
+		layers.find((layer) => ["transportation", "building", "aeroway"].includes(layer["source-layer"]))?.id ??
+		firstSymbolId;
+	const labelBeforeId =
+		layers.find((layer) => ["transportation_name", "place"].includes(layer["source-layer"]))?.id ?? firstSymbolId;
+
+	// Contour labels have to use a font the style's glyph server actually has.
+	// Styles often lead with an italic for water names, so a regular face wins.
+	const styleFonts = layers
+		.map((layer) => layer.layout?.["text-font"])
+		.filter((font) => Array.isArray(font) && font.every((name) => typeof name === "string"));
+	const textFont = styleFonts.find((font) => /regular/i.test(font[0])) ?? styleFonts[0] ?? ["Noto Sans Regular"];
+
+	const contourColor = dark ? "rgba(214, 196, 160, 0.4)" : "rgba(128, 88, 40, 0.5)";
+	const contourTextColor = dark ? "#d6c4a0" : "#6b4a22";
+
+	map.addSource("topo-dem", {
+		type: "raster-dem",
+		encoding: "terrarium",
+		tiles: [demSource.sharedDemProtocolUrl],
+		tileSize: 256,
+		maxzoom: DEM_MAX_ZOOM,
+		attribution: DEM_ATTRIBUTION,
+	});
+	map.addLayer(
+		{
+			id: "topo-hillshade",
+			type: "hillshade",
+			source: "topo-dem",
+			paint: dark
+				? {
+					"hillshade-exaggeration": 0.35,
+					"hillshade-shadow-color": "rgba(0, 0, 0, 0.6)",
+					"hillshade-highlight-color": "rgba(255, 255, 255, 0.2)",
+					"hillshade-accent-color": "rgba(0, 0, 0, 0.3)",
+				}
+				: {
+					"hillshade-exaggeration": 0.4,
+					"hillshade-shadow-color": "rgba(71, 59, 36, 0.55)",
+					"hillshade-highlight-color": "rgba(255, 255, 255, 0.35)",
+					"hillshade-accent-color": "rgba(71, 59, 36, 0.25)",
+				},
+		},
+		reliefBeforeId,
+	);
+
+	map.addSource("topo-contours", {
+		type: "vector",
+		tiles: [
+			demSource.contourProtocolUrl({
+				multiplier: imperial ? FEET_PER_METER : 1,
+				// zoom: [minor, major] interval, in the display unit.
+				thresholds: imperial
+					? { 11: [200, 1000], 12: [100, 500], 14: [50, 200], 15: [20, 100] }
+					: { 11: [50, 250], 12: [25, 100], 14: [10, 50], 15: [5, 25] },
+				contourLayer: "contours",
+				elevationKey: "ele",
+				levelKey: "level",
+			}),
+		],
+		maxzoom: 15,
+	});
+	map.addLayer(
+		{
+			id: "topo-contour-lines",
+			type: "line",
+			source: "topo-contours",
+			"source-layer": "contours",
+			paint: {
+				"line-color": contourColor,
+				// level is 1 for major lines and 0 for minor ones.
+				"line-width": ["match", ["get", "level"], 1, 1.1, 0.5],
+			},
+		},
+		reliefBeforeId,
+	);
+	map.addLayer(
+		{
+			id: "topo-contour-labels",
+			type: "symbol",
+			source: "topo-contours",
+			"source-layer": "contours",
+			filter: [">", ["get", "level"], 0],
+			layout: {
+				"symbol-placement": "line",
+				"text-size": 10,
+				"text-field": ["concat", ["number-format", ["get", "ele"], {}], imperial ? " ft" : " m"],
+				"text-font": textFont,
+			},
+			paint: {
+				"text-color": contourTextColor,
+				"text-halo-color": dark ? "rgba(0, 0, 0, 0.75)" : "rgba(255, 255, 255, 0.85)",
+				"text-halo-width": 1,
+			},
+		},
+		labelBeforeId,
+	);
+}
+
+// Contour intervals and labels are in the display unit, so a unit change
+// rebuilds them in place rather than reloading the whole style.
+function refreshTopoLayers() {
+	for (const map of [state.liveMap, state.postMap]) {
+		if (!isMapStyleReady(map)) continue;
+		for (const layerId of TOPO_LAYER_IDS) {
+			if (map.getLayer(layerId)) map.removeLayer(layerId);
+		}
+		for (const sourceId of TOPO_SOURCE_IDS) {
+			if (map.getSource(sourceId)) map.removeSource(sourceId);
+		}
+		// Topo layers go under everything else, so re-adding them after the
+		// overlays still leaves the route on top.
+		addTopoLayers(map);
+	}
+}
+
+// Distance flags. MapLibre markers sit in screen space, so they stay upright as
+// the live map rotates underneath them.
+function createMarkerLayer(map) {
+	let markers = [];
+	return {
+		add(lat, lng, element) {
+			markers.push(new maplibregl.Marker({ element }).setLngLat([lng, lat]).addTo(map));
+		},
+		clearLayers() {
+			for (const marker of markers) marker.remove();
+			markers = [];
+		},
+	};
+}
+
+// The distance back to the start, as a chip on the guide line. It takes the
+// guide line's colours so the two read as one, and the distance markers' size.
+function createGuideLabelMarker(map) {
+	const element = document.createElement("div");
+	element.className = "guide-distance-label";
+	element.append(document.createElement("span"));
+	element.style.visibility = "hidden";
+	styleGuideLabel(element, state.prefs.guideContrast, state.prefs.markerSize);
+	return new maplibregl.Marker({ element }).setLngLat([0, 0]).addTo(map);
+}
+
+function styleGuideLabel(element, guideContrast, markerSize) {
+	const guideStyle = getGuideLineStyle(guideContrast);
+	element.style.setProperty("--guide-label-bg", guideStyle.haloColor);
+	element.style.setProperty("--guide-label-fg", guideStyle.lineColor);
+	// classList, not className: MapLibre keeps its own marker classes on it.
+	element.classList.remove("small", "medium", "large");
+	element.classList.add(getMarkerSizeConfig(markerSize).className);
+}
+
+// Placed a fixed distance from the rider rather than at the line's midpoint,
+// which is off the map on a long ride. It is worked out along the line in
+// Mercator space, where the guide line is drawn straight, because a start far
+// behind the tilted camera cannot be projected to the screen reliably.
+function updateGuideLabel() {
+	const map = state.liveMap;
+	const marker = state.guideLabelMarker;
+	if (!map || !marker) return;
+	const element = marker.getElement();
+
+	if (state.liveGuideCoords.length < 2) {
+		element.style.visibility = "hidden";
+		return;
+	}
+
+	const [origin, rider] = state.liveGuideCoords;
+	const from = maplibregl.MercatorCoordinate.fromLngLat(rider);
+	const to = maplibregl.MercatorCoordinate.fromLngLat(origin);
+	const linePixels = Math.hypot(to.x - from.x, to.y - from.y) * WORLD_SIZE_AT_ZOOM_0 * 2 ** map.getZoom();
+
+	// Too short to hold the chip without covering the rider and the start.
+	if (linePixels < GUIDE_LABEL_MIN_LINE_PX) {
+		element.style.visibility = "hidden";
+		return;
+	}
+
+	const fraction = Math.min(GUIDE_LABEL_OFFSET_PX / linePixels, 0.5);
+	const at = new maplibregl.MercatorCoordinate(from.x + (to.x - from.x) * fraction, from.y + (to.y - from.y) * fraction);
+	marker.setLngLat(at.toLngLat());
+
+	const meters = haversineMeters(rider[1], rider[0], origin[1], origin[0]);
+	element.firstChild.textContent = `${formatDistance(meters, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)} to start`;
+	element.style.visibility = "visible";
 }
 
 function initPostMap(session) {
@@ -1617,78 +2001,108 @@ function initPostMap(session) {
 		state.postMap = null;
 	}
 
-	state.postMap = L.map("postMap", { zoomControl: true });
-	state.postTileLayer = createTileLayer((fallbackLayer) => {
-		if (!state.postMap || state.postTileLayer !== fallbackLayer.from) return;
-		state.postMap.removeLayer(fallbackLayer.from);
-		state.postTileLayer = fallbackLayer.to;
-		state.postTileLayer.addTo(state.postMap);
-	});
-	state.postTileLayer.addTo(state.postMap);
+	// The highlight marker went with the map it was on.
+	state.chartHighlightMarker = null;
+	state.highlightedPointIndex = -1;
 
-	const coords = session.points.map((p) => [p.lat, p.lng]);
-	if (coords.length) {
-		const polyGroup = L.layerGroup().addTo(state.postMap);
-		const maxSpeed = Math.max(maxOf(session.points, (p) => p.speed || 0), 0.0001);
+	const routeData = buildSpeedBandRoute(session.points);
+	const bounds = routeBounds(session.points);
+	const view = bounds
+		? { bounds, fitBoundsOptions: { maxZoom: 17 } }
+		: { center: [0, 0], zoom: 2 };
 
-		// One layer per speed band, not one per point pair. A two-hour ride is
-		// thousands of pairs, and a Leaflet layer for each locks up this screen.
-		// Each band renders as a single multi-polyline, so no detail is lost.
-		const bands = new Map();
-		for (let i = 1; i < session.points.length; i++) {
-			const prev = session.points[i - 1];
-			const curr = session.points[i];
-			const midSpeed = ((prev.speed || 0) + (curr.speed || 0)) / 2;
-			const band = speedBand(midSpeed, maxSpeed);
+	state.postMap = createVectorMap({ container: "postMap", ...view }, (map) => addPostRouteLayer(map, routeData));
+	state.postMarkerLayer = createMarkerLayer(state.postMap);
 
-			let runs = bands.get(band);
-			if (!runs) {
-				runs = [];
-				bands.set(band, runs);
-			}
-
-			// Extend the previous run when this pair continues it, so a steady
-			// stretch becomes one subpath rather than many.
-			const lastRun = runs.length ? runs[runs.length - 1] : null;
-			if (lastRun && lastRun.endIndex === i - 1) {
-				lastRun.latlngs.push([curr.lat, curr.lng]);
-				lastRun.endIndex = i;
-			} else {
-				runs.push({
-					latlngs: [
-						[prev.lat, prev.lng],
-						[curr.lat, curr.lng],
-					],
-					endIndex: i,
-				});
-			}
-		}
-
-		// Draw slower bands first so the faster stretches stay visible where a route
-		// crosses itself.
-		for (const [band, runs] of [...bands].sort((a, b) => a[0] - b[0])) {
-			L.polyline(runs.map((run) => run.latlngs), {
-				color: speedBandColor(band),
-				weight: 5,
-			}).addTo(polyGroup);
-		}
-
-		const bounds = L.latLngBounds(coords);
-		state.postMap.fitBounds(bounds.pad(0.12));
-	} else {
-		state.postMap.setView([0, 0], 2);
-	}
-
-	if (state.postMarkerLayer) {
-		state.postMap.removeLayer(state.postMarkerLayer);
-	}
-	state.postMarkerLayer = L.layerGroup().addTo(state.postMap);
-	
 	// Recalculate segment markers based on current unit settings
 	const segmentMarkers = recalculateSegmentMarkers(session);
 	renderSegmentMarkers(state.postMarkerLayer, segmentMarkers);
+}
 
-	setTimeout(() => state.postMap?.invalidateSize(), 150);
+// One feature per speed band, not one per point pair. A two-hour ride is
+// thousands of pairs; each band renders as a single multi-line, so no detail is
+// lost.
+function buildSpeedBandRoute(points) {
+	const features = [];
+	if (points.length < 2) return { type: "FeatureCollection", features };
+
+	const maxSpeed = Math.max(maxOf(points, (p) => p.speed || 0), 0.0001);
+	const bands = new Map();
+	for (let i = 1; i < points.length; i++) {
+		const prev = points[i - 1];
+		const curr = points[i];
+		const midSpeed = ((prev.speed || 0) + (curr.speed || 0)) / 2;
+		const band = speedBand(midSpeed, maxSpeed);
+
+		let runs = bands.get(band);
+		if (!runs) {
+			runs = [];
+			bands.set(band, runs);
+		}
+
+		// Extend the previous run when this pair continues it, so a steady
+		// stretch becomes one subpath rather than many.
+		const lastRun = runs.length ? runs[runs.length - 1] : null;
+		if (lastRun && lastRun.endIndex === i - 1) {
+			lastRun.coords.push([curr.lng, curr.lat]);
+			lastRun.endIndex = i;
+		} else {
+			runs.push({
+				coords: [
+					[prev.lng, prev.lat],
+					[curr.lng, curr.lat],
+				],
+				endIndex: i,
+			});
+		}
+	}
+
+	for (const [band, runs] of bands) {
+		features.push({
+			type: "Feature",
+			properties: { band, color: speedBandColor(band) },
+			geometry: { type: "MultiLineString", coordinates: runs.map((run) => run.coords) },
+		});
+	}
+	return { type: "FeatureCollection", features };
+}
+
+function addPostRouteLayer(map, routeData) {
+	map.addSource("post-route", { type: "geojson", data: routeData });
+	map.addLayer({
+		id: "post-route",
+		type: "line",
+		source: "post-route",
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+			// Slower bands draw first so the faster stretches stay visible where a
+			// route crosses itself.
+			"line-sort-key": ["get", "band"],
+		},
+		paint: { "line-color": ["get", "color"], "line-width": 5 },
+	});
+}
+
+// The route's extent plus 12% on every side, so it never touches the map edge.
+function routeBounds(points) {
+	if (!points.length) return null;
+	let west = Infinity;
+	let south = Infinity;
+	let east = -Infinity;
+	let north = -Infinity;
+	for (const point of points) {
+		west = Math.min(west, point.lng);
+		east = Math.max(east, point.lng);
+		south = Math.min(south, point.lat);
+		north = Math.max(north, point.lat);
+	}
+	const padLng = (east - west) * 0.12;
+	const padLat = (north - south) * 0.12;
+	return [
+		[west - padLng, south - padLat],
+		[east + padLng, north + padLat],
+	];
 }
 
 function recalculateSegmentMarkers(session) {
@@ -1818,72 +2232,6 @@ function recalculateSegments(session) {
 	}
 
 	return segments;
-}
-
-function createTileLayer(onFallback) {
-	const hasStadia = Boolean(state.prefs.stadiaKey);
-
-	if (hasStadia) {
-		const dark = state.prefs.theme === "dark";
-		const styleName = dark ? "alidade_smooth_dark" : "alidade_smooth";
-		const styleUrl = `https://tiles.stadiamaps.com/styles/${styleName}.json?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`;
-		const useVector = typeof L.maplibreGL === "function";
-		const layer = useVector
-			? L.maplibreGL({
-				style: styleUrl,
-				attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
-			})
-			: L.tileLayer(
-				`https://tiles.stadiamaps.com/tiles/${styleName}/{z}/{x}/{y}{r}.png?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`,
-				{
-					maxZoom: 20,
-					attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
-				},
-			);
-
-		let failedOver = false;
-		const errorEvent = useVector ? "error" : "tileerror";
-		layer.on(errorEvent, () => {
-			if (failedOver) return;
-			failedOver = true;
-			const fallback = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-				maxZoom: 19,
-				attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-			});
-			if (onFallback) onFallback({ from: layer, to: fallback });
-		});
-
-		return layer;
-	}
-
-	return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-		maxZoom: 19,
-		attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-	});
-}
-
-function rebuildMapTiles() {
-	if (state.liveMap) {
-		if (state.liveTileLayer) state.liveMap.removeLayer(state.liveTileLayer);
-		state.liveTileLayer = createTileLayer((fallbackLayer) => {
-			if (!state.liveMap || state.liveTileLayer !== fallbackLayer.from) return;
-			state.liveMap.removeLayer(fallbackLayer.from);
-			state.liveTileLayer = fallbackLayer.to;
-			state.liveTileLayer.addTo(state.liveMap);
-		});
-		state.liveTileLayer.addTo(state.liveMap);
-	}
-
-	if (state.postMap) {
-		if (state.postTileLayer) state.postMap.removeLayer(state.postTileLayer);
-		state.postTileLayer = createTileLayer((fallbackLayer) => {
-			if (!state.postMap || state.postTileLayer !== fallbackLayer.from) return;
-			state.postMap.removeLayer(fallbackLayer.from);
-			state.postTileLayer = fallbackLayer.to;
-			state.postTileLayer.addTo(state.postMap);
-		});
-		state.postTileLayer.addTo(state.postMap);
-	}
 }
 
 async function openPostSession(sessionId, sessionData = null, mode = "push") {
@@ -2122,25 +2470,19 @@ function highlightPointOnMap(session, pointIndex) {
 
 	const point = session.points[pointIndex];
 
-	// Remove old marker if exists
-	if (state.chartHighlightMarker) {
-		state.postMap.removeLayer(state.chartHighlightMarker);
+	// One marker, moved as the finger slides along the chart.
+	if (!state.chartHighlightMarker) {
+		const element = document.createElement("div");
+		element.className = "chart-highlight-marker";
+		state.chartHighlightMarker = new maplibregl.Marker({ element }).setLngLat([point.lng, point.lat]).addTo(state.postMap);
+	} else {
+		state.chartHighlightMarker.setLngLat([point.lng, point.lat]);
 	}
-
-	// Create highlight marker
-	state.chartHighlightMarker = L.circleMarker([point.lat, point.lng], {
-		radius: 8,
-		fillColor: "#ff6b35",
-		color: "#fff",
-		weight: 3,
-		opacity: 1,
-		fillOpacity: 0.8,
-	}).addTo(state.postMap);
 }
 
 function clearChartHighlight() {
 	if (state.chartHighlightMarker) {
-		state.postMap?.removeLayer(state.chartHighlightMarker);
+		state.chartHighlightMarker.remove();
 		state.chartHighlightMarker = null;
 	}
 	state.highlightedPointIndex = -1;
@@ -2241,7 +2583,8 @@ function drawChartAxes(ctx, width, height, padding, minElevation, maxElevation, 
 function speedToColor(speed, maxSpeed) {
 	const clamped = Math.max(0, Math.min(1, speed / maxSpeed));
 	const hue = 0 + clamped * 120;
-	return `hsl(${hue} 75% 48%)`;
+	// Comma syntax: MapLibre's colour parser does not take the space-separated form.
+	return `hsl(${hue}, 75%, 48%)`;
 }
 
 function speedBand(speed, maxSpeed) {
@@ -2571,16 +2914,16 @@ function segmentDistanceLabel(number, unit) {
 	return unit === "imperial" ? `${number} mi` : `${number} km`;
 }
 
-function createSegmentMarkerIcon(label, markerSizeValue = state.prefs.markerSize) {
-	const safeLabel = escapeHtml(label);
+// MapLibre markers anchor on their element's centre, so the flag sits centred
+// on the point where the segment ended.
+function createSegmentMarkerElement(label, markerSizeValue = state.prefs.markerSize) {
 	const markerSize = getMarkerSizeConfig(markerSizeValue);
-	return L.divIcon({
-		className: "segment-flag-wrapper",
-		html: `<div class="segment-flag-marker ${markerSize.className}"><span>${safeLabel}</span></div>`,
-		iconSize: markerSize.iconSize,
-		iconAnchor: markerSize.iconAnchor,
-		rotationAngle: 0,
-	});
+	const wrapper = document.createElement("div");
+	wrapper.className = "segment-flag-wrapper";
+	wrapper.style.width = `${markerSize.iconSize[0]}px`;
+	wrapper.style.height = `${markerSize.iconSize[1]}px`;
+	wrapper.innerHTML = `<div class="segment-flag-marker ${markerSize.className}"><span>${escapeHtml(label)}</span></div>`;
+	return wrapper;
 }
 
 function getMarkerSizeConfig(size) {
@@ -2588,7 +2931,6 @@ function getMarkerSizeConfig(size) {
 		return {
 			className: "small",
 			iconSize: [56, 28],
-			iconAnchor: [28, 14],
 		};
 	}
 
@@ -2596,14 +2938,12 @@ function getMarkerSizeConfig(size) {
 		return {
 			className: "large",
 			iconSize: [88, 40],
-			iconAnchor: [44, 20],
 		};
 	}
 
 	return {
 		className: "medium",
 		iconSize: [72, 34],
-		iconAnchor: [36, 17],
 	};
 }
 
@@ -2644,9 +2984,7 @@ function getGuideLineStyle(contrast) {
 }
 
 function addSegmentMarkerToLayer(layer, lat, lng, label, markerSizeValue = state.prefs.markerSize) {
-	L.marker([lat, lng], {
-		icon: createSegmentMarkerIcon(label, markerSizeValue),
-	}).addTo(layer);
+	layer.add(lat, lng, createSegmentMarkerElement(label, markerSizeValue));
 }
 
 function renderSegmentMarkers(layer, markers, markerSizeValue = state.prefs.markerSize) {
@@ -2671,24 +3009,12 @@ function renderSegmentMarkers(layer, markers, markerSizeValue = state.prefs.mark
 function applyMapVisualPrefs(preview = null) {
 	const guideContrast = preview?.guideContrast ?? state.prefs.guideContrast;
 	const markerSize = preview?.markerSize ?? state.prefs.markerSize;
-	const guideStyle = getGuideLineStyle(guideContrast);
+	applyLiveGuideStyle(getGuideLineStyle(guideContrast));
 
-	if (state.guideLineHalo) {
-		state.guideLineHalo.setStyle({
-			color: guideStyle.haloColor,
-			weight: guideStyle.haloWeight,
-			opacity: guideStyle.haloOpacity,
-			dashArray: guideStyle.dashArray,
-		});
-	}
-
-	if (state.guideLine) {
-		state.guideLine.setStyle({
-			color: guideStyle.lineColor,
-			weight: guideStyle.lineWeight,
-			opacity: guideStyle.lineOpacity,
-			dashArray: guideStyle.dashArray,
-		});
+	if (state.guideLabelMarker) {
+		styleGuideLabel(state.guideLabelMarker.getElement(), guideContrast, markerSize);
+		// Re-rendered for the text too, which follows the units.
+		updateGuideLabel();
 	}
 
 	if (state.markerLayer) {
@@ -2955,6 +3281,11 @@ async function loadPrefs() {
 	state.prefs.unit = await getPref("unit", "imperial");
 	state.prefs.theme = await getPref("theme", "light");
 	state.prefs.stadiaKey = await getPref("stadiaKey", "");
+	state.prefs.mapType = await getPref("mapType", "road");
+	// Checked because an imported backup could carry anything, and a bad zoom
+	// would leave the live map unable to draw.
+	const liveMapZoom = await getPref("liveMapZoom", LIVE_MAP_ZOOM);
+	state.prefs.liveMapZoom = Number.isFinite(liveMapZoom) ? liveMapZoom : LIVE_MAP_ZOOM;
 	state.prefs.guideContrast = await getPref("guideContrast", "high");
 	state.prefs.markerSize = await getPref("markerSize", "medium");
 	state.prefs.ridesView = await getPref("ridesView", "list");

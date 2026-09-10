@@ -603,18 +603,11 @@ select {
   background: var(--surface);
 }
 
-.segment-flag-wrapper {
-  background: transparent;
-  border: 0;
-}
-
 .segment-flag-marker {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
-  transform-origin: 50% 50%;
-  transition: transform 0.05s linear;
 }
 
 .segment-flag-marker span {
@@ -638,6 +631,48 @@ select {
 .segment-flag-marker.large span {
   font-size: 1rem;
   padding: 4px 10px;
+}
+
+/* Distance back to the start, on the live map's guide line. The colours come
+   from the guide line contrast setting, set inline as custom properties. */
+.guide-distance-label {
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+}
+
+.guide-distance-label span {
+  display: block;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: var(--guide-label-bg);
+  border: 1px solid color-mix(in srgb, var(--guide-label-fg) 45%, transparent);
+  color: var(--guide-label-fg);
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.guide-distance-label.small span {
+  font-size: 0.78rem;
+  padding: 2px 6px;
+}
+
+.guide-distance-label.large span {
+  font-size: 1rem;
+  padding: 4px 10px;
+}
+
+/* The point on the post-ride map under the finger on the elevation chart. */
+.chart-highlight-marker {
+  box-sizing: border-box;
+  width: 19px;
+  height: 19px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: rgba(255, 107, 53, 0.8);
+  pointer-events: none;
 }
 
 .post-header,
