@@ -1647,7 +1647,7 @@ function determinePointRejection(point) {
 	if (haversineMeters(centerLat, centerLng, point.lat, point.lng)<=POINT_REJECTION_THRESHOLD &&
 		haversineMeters(centerLat, centerLng, state.currentSession.points[l-1].lat, state.currentSession.points[l-2]) <= POINT_REJECTION_THRESHOLD &&
 		haversineMeters(centerLat, centerLng, state.currentSession.points[l-2].lat, state.currentSession.points[l-2].lng) <= POINT_REJECTION_THRESHOLD) {
-		console.log("rejecting point: within rejection radius");
+		// console.log("rejecting point: within rejection radius");
 		return true;
 	}
 
@@ -1672,7 +1672,7 @@ function determinePointRejection(point) {
 	// the threshold, then we will reject the point
 	var distanceToLine = haversineMeters(b.lat, b.lng, nearestPoint.lat, nearestPoint.lng);
 	if (distanceToLine < POINT_REJECTION_THRESHOLD) {
-		console.log("rejecting point: along the interpolated line");
+		// console.log("rejecting point: along the interpolated line");
 		return true;
 	}
 
