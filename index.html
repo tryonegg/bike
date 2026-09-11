@@ -7,6 +7,7 @@
   <meta name="description" content="Offline bike ride tracker PWA">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="preload" href="vendor/archivo/archivo-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
   <link rel="stylesheet" href="app.css">
   <title>Bike Tracker</title>
@@ -15,38 +16,54 @@
   <div id="installBanner" class="install-banner hidden" role="dialog" aria-live="polite">
     <p id="installMessage">Add Bike Tracker to your home screen for quick, full-screen access.</p>
     <div class="row">
+      <button id="dismissInstallBtn" class="btn">Not Now</button>
       <button id="installBtn" class="btn primary">Add to Home Screen</button>
-      <button id="dismissInstallBtn" class="btn ghost">Not Now</button>
     </div>
   </div>
 
   <main id="appRoot">
-    <section id="homeScreen" class="screen active">
-      <header class="home-header">
-        <div>
-          <h1>Bike Tracker</h1>
-        </div>
-        <button id="openSettingsBtn" class="icon-btn" aria-label="Open settings">⚙</button>
-      </header>
-
-      <div class="top-controls">
-        <button id="startRideBtn" class="btn primary large">Start New Ride</button>
-      </div>
-
-      <section class="sessions-card">
-        <header class="sessions-header">
-          <h2>Past Rides</h2>
+    <section id="homeScreen" class="screen has-bottom-bar active">
+      <header class="app-header">
+        <h1 class="visually-hidden">Bike Tracker</h1>
+        <div class="app-header-row">
+          <h2 id="pastRidesLabel" class="label">Past rides</h2>
           <div class="toggle-pill" id="ridesViewToggle" role="group" aria-label="Past rides view">
             <button data-rides-view="list" class="toggle-option">List</button>
             <button data-rides-view="calendar" class="toggle-option">Calendar</button>
           </div>
-        </header>
+        </div>
+        <dl class="header-stats" aria-label="This month">
+          <div>
+            <dt>This month</dt>
+            <dd><span id="monthDistance">0.0</span> <span class="unit" id="monthDistanceUnit">mi</span></dd>
+          </div>
+          <div>
+            <dt id="monthCountLabel">Rides</dt>
+            <dd id="monthCount">0</dd>
+          </div>
+          <div>
+            <dt>Avg</dt>
+            <dd class="accent"><span id="monthAvgSpeed">0.0</span> <span class="unit" id="monthSpeedUnit">mph</span></dd>
+          </div>
+        </dl>
+      </header>
+
+      <div class="week-band">
+        <span class="label">Last 7 days</span>
+        <span class="week-band-values">
+          <span id="weekTime">0m</span>
+          <span class="week-band-divider" aria-hidden="true"></span>
+          <span><span id="weekDistance">0.00</span> <span class="unit" id="weekDistanceUnit">mi</span></span>
+        </span>
+      </div>
+
+      <section class="past-rides">
         <ul id="sessionsList" class="sessions-list"></ul>
         <div id="ridesCalendar" class="rides-calendar hidden">
           <div class="calendar-nav">
-            <button id="calPrevBtn" class="icon-btn" aria-label="Previous month">‹</button>
+            <button id="calPrevBtn" class="calendar-step" aria-label="Previous month">‹</button>
             <h3 id="calMonthLabel" aria-live="polite">-</h3>
-            <button id="calNextBtn" class="icon-btn" aria-label="Next month">›</button>
+            <button id="calNextBtn" class="calendar-step" aria-label="Next month">›</button>
           </div>
           <table class="calendar-table">
             <thead>
@@ -55,16 +72,21 @@
             <tbody id="calBody"></tbody>
           </table>
         </div>
-        <p id="sessionsEmpty" class="empty">No rides yet. Start your first ride above.</p>
+        <p id="sessionsEmpty" class="empty">No rides yet. Start your first ride below.</p>
       </section>
+
+      <div class="bottom-bar">
+        <button id="openSettingsBtn" class="round-btn bar-round-btn" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
+        <button id="startRideBtn" class="btn primary pill grow cta">Start New Ride</button>
+      </div>
     </section>
 
     <section id="countdownScreen" class="screen center hidden">
       <div class="countdown-wrap">
         <div id="countdownNumber" class="countdown-number">5</div>
         <p id="countdownStatus" class="sub">Getting GPS lock...</p>
-        <button id="retryCountdownBtn" class="btn primary hidden">Try Again</button>
-        <button id="cancelCountdownBtn" class="btn ghost">Cancel</button>
+        <button id="retryCountdownBtn" class="btn primary pill hidden">Try Again</button>
+        <button id="cancelCountdownBtn" class="btn pill">Cancel</button>
       </div>
     </section>
 
@@ -77,159 +99,241 @@
           <button class="activity-btn" data-activity="hike">🥾 Hike</button>
           <button class="activity-btn" data-activity="kayak">🛶 Kayak</button>
         </div>
-        <div class="toggle-card" role="group" aria-label="Screen preference">
+        <div class="setting-row" role="group" aria-label="Screen preference">
           <label for="keepScreenOnToggle">Keep Screen On</label>
           <input id="keepScreenOnToggle" type="checkbox">
         </div>
         <div class="row">
-          <button id="startActivityBtn" class="btn primary">Start Activity</button>
-          <button id="cancelActivityBtn" class="btn ghost">Cancel</button>
+          <button id="cancelActivityBtn" class="btn pill">Cancel</button>
+          <button id="startActivityBtn" class="btn primary pill">Start Activity</button>
         </div>
       </div>
     </section>
 
-    <section id="activeScreen" class="activescreen screen hidden">
-      <div class="active-layout">
-        <div class="stats-panel">
-          <div class="stat primary">
-            <span>Current Speed</span>
-            <strong id="currentSpeed">0.0</strong>
-          </div>
-          <div class="stat secondary">
-            <span>Distance</span>
-            <strong id="distanceValue">0.00</strong>
-          </div>
-          <div class="stat">
-            <span>Avg Speed</span>
-            <strong id="avgSpeed">0.0</strong>
-          </div>
-          <div class="stat">
-            <span>Elapsed</span>
-            <strong id="elapsedTime">00:00</strong>
-          </div>
-          <div class="control-bar">
-            <button id="pauseBtn" class="btn warn">Pause</button>
-            <button id="stopBtn" class="btn danger">Stop</button>
+    <section id="activeScreen" class="screen active-screen hidden">
+      <div id="liveMap" class="map live-map"></div>
+
+      <header id="rideStrip" class="ride-strip">
+        <div class="label" id="speedLabel">Speed</div>
+        <div class="hero">
+          <strong id="currentSpeed" class="hero-value">0.0</strong>
+          <div class="hero-side">
+            <span id="currentSpeedUnit" class="hero-unit">mph</span>
+            <span class="hero-avg">avg <span id="avgSpeed">0.0</span></span>
           </div>
         </div>
-
-        <div class="map-panel">
-          <div id="liveMap" class="map"></div>
-          <button id="recenterBtn" class="btn recenter">Re-center</button>
+        <div class="stat-pair">
+          <div>
+            <div class="label">Distance</div>
+            <div class="pair-value"><span id="distanceValue">0.00</span> <span class="unit" id="distanceUnit">mi</span></div>
+          </div>
+          <div class="stat-pair-divider" aria-hidden="true"></div>
+          <div>
+            <div class="label">Elapsed</div>
+            <div class="pair-value" id="elapsedTime">00:00</div>
+          </div>
         </div>
-      </div>
-    </section>
-
-    <section id="postScreen" class="screen hidden">
-      <header class="post-header">
-        <h2 id="postTitle">Ride Summary</h2>
       </header>
 
-      <div class="summary-grid">
-        <div><span>Distance</span><strong id="postDistance">-</strong></div>
-        <div><span>Moving Time</span><strong id="postTime">-</strong></div>
-        <div><span>Max Speed</span><strong id="postMaxSpeed">-</strong></div>
-        <div><span>Avg Speed</span><strong id="postAvgSpeed">-</strong></div>
-        <div class="full"><span>Elevation</span><strong id="postElevation">-</strong></div>
+      <button id="recenterBtn" class="map-chip recenter">Re-center</button>
+
+      <div class="ride-controls">
+        <button id="pauseBtn" class="pause-btn" aria-label="Pause"><span class="pause-icon" aria-hidden="true"></span></button>
+        <button id="stopBtn" class="btn primary pill">Finish ride</button>
       </div>
+    </section>
 
-      <div id="postMap" class="map post-map"></div>
+    <section id="postScreen" class="screen has-bottom-bar hidden">
+      <header class="app-bar">
+        <button id="postBackBtn" class="round-btn" aria-label="Back to home">←</button>
+        <div class="app-bar-titles">
+          <div class="label" id="postDate">-</div>
+          <h2 id="postTitle">Ride Summary</h2>
+        </div>
+      </header>
 
-      <section class="chart-card">
-        <div class="chart-header">
-          <h3>Elevation Over Ride</h3>
-          <p class="muted">Line color reflects speed at that point, from red to green.</p>
+      <section class="detail-hero">
+        <div class="label">Distance</div>
+        <div class="hero">
+          <strong id="postDistance" class="hero-value">-</strong>
+          <div class="hero-side">
+            <span id="postDistanceUnit" class="hero-unit">mi</span>
+            <span class="hero-avg">avg <span id="postAvgSpeed">-</span></span>
+          </div>
         </div>
-        <div class="chart-wrap">
-          <canvas id="elevationChart" aria-label="Elevation over ride chart" role="img"></canvas>
+        <div class="stat-pair">
+          <div>
+            <div class="label">Moving time</div>
+            <div class="pair-value" id="postTime">-</div>
+          </div>
+          <div class="stat-pair-divider" aria-hidden="true"></div>
+          <div>
+            <div class="label">Max speed</div>
+            <div class="pair-value"><span id="postMaxSpeed">-</span> <span class="unit" id="postSpeedUnit">mph</span></div>
+          </div>
         </div>
-        <div class="chart-legend">
-          <span><i class="swatch slow"></i> Slower</span>
-          <span><i class="swatch fast"></i> Faster</span>
+        <div class="elevation-row">
+          <span class="label">Elevation</span>
+          <span class="elevation-values">
+            <span>↑ <span id="postGain">-</span> <span class="unit" id="postGainUnit">ft</span></span>
+            <span>↓ <span id="postDrop">-</span> <span class="unit" id="postDropUnit">ft</span></span>
+          </span>
         </div>
       </section>
 
-      <section class="segments">
-        <h3>Segment Breakdown</h3>
-        <table>
+      <div id="postMap" class="map post-map"></div>
+
+      <section class="detail-section chart-section">
+        <div class="section-head">
+          <h3 class="label">Elevation</h3>
+          <div class="chart-legend">
+            <span><i class="swatch slow"></i>Slower</span>
+            <span><i class="swatch fast"></i>Faster</span>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="elevationChart" aria-label="Elevation over ride, colored by speed" role="img"></canvas>
+        </div>
+        <div class="chart-x-labels">
+          <span id="chartStartLabel">0 mi</span>
+          <span id="chartEndLabel">-</span>
+        </div>
+      </section>
+
+      <section class="detail-section segments-section">
+        <h3 class="label ruled">Segments</h3>
+        <table class="segments-table">
           <thead>
             <tr>
-              <th>Segment</th>
-              <th>Time</th>
-              <th>Avg Speed</th>
+              <th scope="col">Segment</th>
+              <th scope="col">Pace</th>
+              <th scope="col" class="num">Time</th>
+              <th scope="col" class="num" id="segmentsSpeedHeader">mph</th>
             </tr>
           </thead>
           <tbody id="segmentsBody"></tbody>
         </table>
+        <div class="delete-wrap">
+          <button id="deleteRideBtn" class="text-danger">Delete ride</button>
+        </div>
       </section>
 
-      <div class="row actions">
-        <button id="exportGpxBtn" class="btn">Export GPX</button>
-        <button id="deleteRideBtn" class="btn danger">Delete Ride</button>
-        <button id="backHomeBtn" class="btn primary">Back to Home</button>
+      <div class="bottom-bar">
+        <button id="exportGpxBtn" class="btn pill">Export GPX</button>
+        <button id="backHomeBtn" class="btn primary pill grow">Back to home</button>
       </div>
     </section>
 
-    <section id="settingsScreen" class="screen hidden center">
-      <div class="settings-card">
+    <section id="settingsScreen" class="screen has-bottom-bar hidden">
+      <header class="app-bar">
+        <button id="settingsBackBtn" class="round-btn" aria-label="Back without saving">←</button>
         <h2>Settings</h2>
-        <div class="toggle-card" role="group" aria-label="Units">
+      </header>
+
+      <h3 class="label settings-section-label">Display</h3>
+      <div class="settings-group">
+        <div class="setting-row" role="group" aria-label="Units">
           <span>Units</span>
           <div class="toggle-pill" id="unitToggle">
             <button data-unit="imperial" class="toggle-option">Imperial</button>
             <button data-unit="metric" class="toggle-option">Metric</button>
           </div>
         </div>
-
-        <div class="toggle-card" role="group" aria-label="Theme">
+        <div class="setting-row" role="group" aria-label="Theme">
           <span>Theme</span>
           <div class="toggle-pill" id="themeToggle">
             <button data-theme="light" class="toggle-option">Light</button>
             <button data-theme="dark" class="toggle-option">Dark</button>
           </div>
         </div>
-
-        <div class="toggle-card" role="group" aria-label="Map style">
-          <span>Map Style</span>
-          <div class="toggle-pill" id="mapTypeToggle">
-            <button data-map-type="road" class="toggle-option">Road</button>
-            <button data-map-type="topo" class="toggle-option">Topo</button>
+        <div class="setting-row stacked" role="group" aria-label="Map style">
+          <div class="setting-row-main">
+            <span>Map Style</span>
+            <div class="toggle-pill" id="mapTypeToggle">
+              <button data-map-type="road" class="toggle-option">Road</button>
+              <button data-map-type="topo" class="toggle-option">Topo</button>
+            </div>
           </div>
+          <p class="setting-note">Topo adds hill shading and contour lines to the ride and summary maps.</p>
         </div>
-        <p class="muted">Topo adds hill shading and contour lines to the ride and summary maps.</p>
-
-        <div class="row">
-          <label for="stadiaKeyInput">Stadia Maps API Key (optional)</label>
-          <input id="stadiaKeyInput" type="text" placeholder="Paste API key">
-        </div>
-          <p class="muted">Without a key, maps use free OpenFreeMap tiles. With a key, it uses Stadia's Alidade Smooth (Outdoors for Topo) in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API Key here.</a></p>
-
-        <div class="row">
+        <div class="setting-row">
           <label for="guideContrastSelect">Guide Line Contrast</label>
-          <select id="guideContrastSelect">
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
+          <span class="select-wrap">
+            <select id="guideContrastSelect">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </span>
         </div>
-        <div class="row">
+        <div class="setting-row">
           <label for="markerSizeSelect">Distance Marker Size</label>
-          <select id="markerSizeSelect">
-            <option value="small">Small</option>
-            <option value="medium">Medium</option>
-            <option value="large">Large</option>
-          </select>
+          <span class="select-wrap">
+            <select id="markerSizeSelect">
+              <option value="small">Small</option>
+              <option value="medium">Medium</option>
+              <option value="large">Large</option>
+            </select>
+          </span>
         </div>
+      </div>
 
-        <div class="row">
-          <button id="exportDataBtn" class="btn">Export Data</button>
-          <button id="importDataBtn" class="btn">Import Data</button>
-          <input id="importFileInput" type="file" accept=".json" style="display: none;">
+      <h3 class="label settings-section-label">Home totals</h3>
+      <div class="settings-group">
+        <div class="setting-row stacked">
+          <div class="setting-row-main">
+            <label for="statsActivitySelect">Activity</label>
+            <span class="select-wrap">
+              <select id="statsActivitySelect">
+                <option value="all">All activities</option>
+                <option value="bike">Bike</option>
+                <option value="walk">Walk</option>
+                <option value="hike">Hike</option>
+                <option value="kayak">Kayak</option>
+              </select>
+            </span>
+          </div>
+          <p class="setting-note">Which activities the This month and Last 7 days totals on the home screen count.</p>
         </div>
-        
-        <div class="row">
-          <button id="saveSettingsBtn" class="btn primary">Save</button>
+      </div>
+
+      <h3 class="label settings-section-label">Calendar</h3>
+      <div class="settings-group">
+        <div class="setting-row stacked" role="group" aria-label="Calendar bar color">
+          <div class="setting-row-main">
+            <span>Bar Color</span>
+            <div class="toggle-pill" id="calendarColorToggle">
+              <button data-calendar-color="distance" class="toggle-option">Distance</button>
+              <button data-calendar-color="time" class="toggle-option">Time</button>
+              <button data-calendar-color="pace" class="toggle-option">Pace</button>
+            </div>
+          </div>
+          <p class="setting-note" id="calendarColorNote">Green marks your longest days, red your shortest.</p>
         </div>
+      </div>
+
+      <h3 class="label settings-section-label">Map tiles</h3>
+      <div class="settings-group">
+        <div class="setting-row stacked">
+          <label for="stadiaKeyInput">Stadia Maps API Key <span class="muted">(optional)</span></label>
+          <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+          <p class="setting-note">Without a key, maps use free OpenFreeMap tiles. With a key, it uses Stadia's Alidade Smooth (Outdoors for Topo) in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
+        </div>
+      </div>
+
+      <h3 class="label settings-section-label">Data</h3>
+      <div class="data-buttons">
+        <button id="exportDataBtn" class="btn pill">Export Data</button>
+        <button id="importDataBtn" class="btn pill">Import Data</button>
+        <input id="importFileInput" type="file" accept=".json" hidden>
+      </div>
+      <div class="danger-zone">
+        <button id="deleteAllRidesBtn" class="btn pill danger-outline">Delete All Past Rides</button>
+        <p class="setting-note">Removes every saved ride from this device. Settings are kept. Export first if you might want them back.</p>
+      </div>
+
+      <div class="bottom-bar">
+        <button id="saveSettingsBtn" class="btn primary pill grow cta">Save</button>
       </div>
     </section>
   </main>
@@ -238,10 +342,11 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalMessage">
       <h3 id="modalTitle">Confirm</h3>
       <p id="modalMessage"></p>
+      <ul id="modalList" class="modal-list hidden"></ul>
       <p id="modalCountdown" class="muted hidden"></p>
       <div class="row">
-        <button id="modalCancelBtn" class="btn ghost">Cancel</button>
-        <button id="modalConfirmBtn" class="btn primary">OK</button>
+        <button id="modalCancelBtn" class="btn pill">Cancel</button>
+        <button id="modalConfirmBtn" class="btn primary pill">OK</button>
       </div>
     </div>
   </div>

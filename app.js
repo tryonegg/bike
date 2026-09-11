@@ -56,11 +56,23 @@ const FEET_PER_METER = 3.28084;
 const TOPO_LAYER_IDS = ["topo-hillshade", "topo-contour-lines", "topo-contour-labels"];
 const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
 
+// noun names one outing in a title ("Morning walk"); plural heads the home count.
 const ACTIVITIES = {
-	bike: { label: "Bike", icon: "🚴" },
-	walk: { label: "Walk", icon: "🚶" },
-	hike: { label: "Hike", icon: "🥾" },
-	kayak: { label: "Kayak", icon: "🛶" },
+	bike: { label: "Bike", icon: "🚴", noun: "ride", plural: "Rides" },
+	walk: { label: "Walk", icon: "🚶", noun: "walk", plural: "Walks" },
+	hike: { label: "Hike", icon: "🥾", noun: "hike", plural: "Hikes" },
+	kayak: { label: "Kayak", icon: "🛶", noun: "paddle", plural: "Paddles" },
+};
+
+// Slow to fast, evenly spaced. Shared by the route, the elevation line, the
+// segment bars and the calendar so one colour means one pace everywhere.
+const PACE_STOPS = ["#e05a3a", "#e07a3a", "#e0a63a", "#c9d63a", "#8fc93a", "#2f9c4f"];
+
+// The settings note under the calendar colour choice, one per option.
+const CALENDAR_COLOR_NOTES = {
+	distance: "Green marks your longest days, red your shortest.",
+	time: "Green marks the days with the most moving time, red the least.",
+	pace: "Green marks your fastest days for that activity, red your slowest.",
 };
 
 const state = {
@@ -73,6 +85,10 @@ const state = {
 		guideContrast: "high",
 		markerSize: "medium",
 		ridesView: "list",
+		// Which activity the home screen's month and week totals count, or "all".
+		statsActivity: "all",
+		// What the calendar's top rule colours by: "distance", "time" or "pace".
+		calendarColor: "distance",
 		installDismissed: false,
 	},
 	// Which month the calendar view is paged to, as the 1st at local midnight.
@@ -86,6 +102,7 @@ const state = {
 	liveGuideCoords: [],
 	markerLayer: null,
 	guideLabelMarker: null,
+	riderMarker: null,
 	postMap: null,
 	postMarkerLayer: null,
 	// Per map: whether it is on Stadia and whether its current style has loaded.
@@ -140,6 +157,18 @@ const el = {
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
 	mapTypeToggle: document.getElementById("mapTypeToggle"),
+	calendarColorToggle: document.getElementById("calendarColorToggle"),
+	calendarColorNote: document.getElementById("calendarColorNote"),
+	monthDistance: document.getElementById("monthDistance"),
+	monthDistanceUnit: document.getElementById("monthDistanceUnit"),
+	monthCount: document.getElementById("monthCount"),
+	monthCountLabel: document.getElementById("monthCountLabel"),
+	monthAvgSpeed: document.getElementById("monthAvgSpeed"),
+	monthSpeedUnit: document.getElementById("monthSpeedUnit"),
+	weekTime: document.getElementById("weekTime"),
+	weekDistance: document.getElementById("weekDistance"),
+	weekDistanceUnit: document.getElementById("weekDistanceUnit"),
+	pastRidesLabel: document.getElementById("pastRidesLabel"),
 	sessionsList: document.getElementById("sessionsList"),
 	sessionsEmpty: document.getElementById("sessionsEmpty"),
 	ridesViewToggle: document.getElementById("ridesViewToggle"),
@@ -151,14 +180,16 @@ const el = {
 	calBody: document.getElementById("calBody"),
 	startRideBtn: document.getElementById("startRideBtn"),
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
-	// closeSettingsBtn: document.getElementById("closeSettingsBtn"),
+	settingsBackBtn: document.getElementById("settingsBackBtn"),
 	saveSettingsBtn: document.getElementById("saveSettingsBtn"),
 	stadiaKeyInput: document.getElementById("stadiaKeyInput"),
 	guideContrastSelect: document.getElementById("guideContrastSelect"),
 	markerSizeSelect: document.getElementById("markerSizeSelect"),
+	statsActivitySelect: document.getElementById("statsActivitySelect"),
 	exportDataBtn: document.getElementById("exportDataBtn"),
 	importDataBtn: document.getElementById("importDataBtn"),
 	importFileInput: document.getElementById("importFileInput"),
+	deleteAllRidesBtn: document.getElementById("deleteAllRidesBtn"),
 	keepScreenOnToggle: document.getElementById("keepScreenOnToggle"),
 	cancelActivityBtn: document.getElementById("cancelActivityBtn"),
 	startActivityBtn: document.getElementById("startActivityBtn"),
@@ -166,27 +197,42 @@ const el = {
 	countdownStatus: document.getElementById("countdownStatus"),
 	retryCountdownBtn: document.getElementById("retryCountdownBtn"),
 	cancelCountdownBtn: document.getElementById("cancelCountdownBtn"),
+	rideStrip: document.getElementById("rideStrip"),
+	speedLabel: document.getElementById("speedLabel"),
 	currentSpeed: document.getElementById("currentSpeed"),
+	currentSpeedUnit: document.getElementById("currentSpeedUnit"),
 	distanceValue: document.getElementById("distanceValue"),
+	distanceUnit: document.getElementById("distanceUnit"),
 	avgSpeed: document.getElementById("avgSpeed"),
 	elapsedTime: document.getElementById("elapsedTime"),
 	pauseBtn: document.getElementById("pauseBtn"),
 	stopBtn: document.getElementById("stopBtn"),
 	recenterBtn: document.getElementById("recenterBtn"),
+	postBackBtn: document.getElementById("postBackBtn"),
+	postDate: document.getElementById("postDate"),
 	postTitle: document.getElementById("postTitle"),
 	postDistance: document.getElementById("postDistance"),
+	postDistanceUnit: document.getElementById("postDistanceUnit"),
 	postTime: document.getElementById("postTime"),
 	postMaxSpeed: document.getElementById("postMaxSpeed"),
+	postSpeedUnit: document.getElementById("postSpeedUnit"),
 	postAvgSpeed: document.getElementById("postAvgSpeed"),
-	postElevation: document.getElementById("postElevation"),
+	postGain: document.getElementById("postGain"),
+	postGainUnit: document.getElementById("postGainUnit"),
+	postDrop: document.getElementById("postDrop"),
+	postDropUnit: document.getElementById("postDropUnit"),
 	elevationChart: document.getElementById("elevationChart"),
+	chartStartLabel: document.getElementById("chartStartLabel"),
+	chartEndLabel: document.getElementById("chartEndLabel"),
 	segmentsBody: document.getElementById("segmentsBody"),
+	segmentsSpeedHeader: document.getElementById("segmentsSpeedHeader"),
 	exportGpxBtn: document.getElementById("exportGpxBtn"),
 	deleteRideBtn: document.getElementById("deleteRideBtn"),
 	backHomeBtn: document.getElementById("backHomeBtn"),
 	modalBackdrop: document.getElementById("modalBackdrop"),
 	modalTitle: document.getElementById("modalTitle"),
 	modalMessage: document.getElementById("modalMessage"),
+	modalList: document.getElementById("modalList"),
 	modalCountdown: document.getElementById("modalCountdown"),
 	modalCancelBtn: document.getElementById("modalCancelBtn"),
 	modalConfirmBtn: document.getElementById("modalConfirmBtn"),
@@ -234,6 +280,8 @@ function wireEvents() {
 		applyTheme();
 		syncToggles();
 		rebuildMapStyles();
+		// The chart reads its colours from the theme when it draws.
+		if (state.currentPostSession) renderElevationChart(state.currentPostSession);
 	});
 
 	el.mapTypeToggle.addEventListener("click", async (event) => {
@@ -243,6 +291,15 @@ function wireEvents() {
 		await setPref("mapType", state.prefs.mapType);
 		syncToggles();
 		rebuildMapStyles();
+	});
+
+	el.calendarColorToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-calendar-color]");
+		if (!btn) return;
+		state.prefs.calendarColor = btn.dataset.calendarColor;
+		await setPref("calendarColor", state.prefs.calendarColor);
+		syncToggles();
+		await renderPastRides();
 	});
 
 	el.ridesViewToggle.addEventListener("click", async (event) => {
@@ -290,27 +347,33 @@ function wireEvents() {
 	el.exportDataBtn.addEventListener("click", exportAllData);
 	el.importDataBtn.addEventListener("click", () => el.importFileInput.click());
 	el.importFileInput.addEventListener("change", importAllData);
+	el.deleteAllRidesBtn.addEventListener("click", deleteAllRides);
 
 	el.openSettingsBtn.addEventListener("click", () => {
-		el.stadiaKeyInput.value = state.prefs.stadiaKey;
-		el.guideContrastSelect.value = state.prefs.guideContrast;
-		el.markerSizeSelect.value = state.prefs.markerSize;
+		fillSettingsForm();
 		navigateToScreen("settings");
 	});
 
 	el.guideContrastSelect.addEventListener("change", previewSettingsMapVisuals);
 	el.markerSizeSelect.addEventListener("change", previewSettingsMapVisuals);
 
+	// Back leaves the unsaved fields behind. The history entry it returns to puts
+	// the map visuals back to the saved values, undoing any preview.
+	el.settingsBackBtn.addEventListener("click", () => history.back());
+
 	el.saveSettingsBtn.addEventListener("click", async () => {
 		state.prefs.stadiaKey = el.stadiaKeyInput.value.trim();
 		state.prefs.guideContrast = el.guideContrastSelect.value;
 		state.prefs.markerSize = el.markerSizeSelect.value;
+		state.prefs.statsActivity = el.statsActivitySelect.value;
 		await setPref("stadiaKey", state.prefs.stadiaKey);
 		await setPref("guideContrast", state.prefs.guideContrast);
 		await setPref("markerSize", state.prefs.markerSize);
+		await setPref("statsActivity", state.prefs.statsActivity);
 		navigateToScreen("home");
 		rebuildMapStyles();
 		applyMapVisualPrefs();
+		await renderPastRides();
 	});
 
 	el.pauseBtn.addEventListener("click", togglePauseSession);
@@ -319,12 +382,8 @@ function wireEvents() {
 
 	el.exportGpxBtn.addEventListener("click", exportCurrentGpx);
 	el.deleteRideBtn.addEventListener("click", deleteCurrentRide);
-	el.backHomeBtn.addEventListener("click", async () => {
-		clearChartHighlight();
-		state.currentPostSession = null;
-		navigateToScreen("home");
-		await renderPastRides();
-	});
+	el.backHomeBtn.addEventListener("click", leavePostSession);
+	el.postBackBtn.addEventListener("click", leavePostSession);
 
 	el.modalCancelBtn.addEventListener("click", () => closeModal("cancel"));
 	el.modalConfirmBtn.addEventListener("click", () => closeModal("confirm"));
@@ -421,6 +480,10 @@ function syncToggles() {
 	const mapTypeButtons = el.mapTypeToggle.querySelectorAll("button");
 	mapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
 
+	const colorButtons = el.calendarColorToggle.querySelectorAll("button");
+	colorButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.calendarColor === state.prefs.calendarColor));
+	el.calendarColorNote.textContent = CALENDAR_COLOR_NOTES[state.prefs.calendarColor];
+
 	const viewButtons = el.ridesViewToggle.querySelectorAll("button");
 	viewButtons.forEach((btn) => {
 		const on = btn.dataset.ridesView === state.prefs.ridesView;
@@ -430,7 +493,24 @@ function syncToggles() {
 }
 
 function applyTheme() {
-	document.documentElement.classList.toggle("dark", state.prefs.theme === "dark");
+	const dark = state.prefs.theme === "dark";
+	document.documentElement.classList.toggle("dark", dark);
+	// The browser chrome matches the screen background.
+	document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#111413" : "#fcfcfa");
+}
+
+function fillSettingsForm() {
+	el.stadiaKeyInput.value = state.prefs.stadiaKey;
+	el.guideContrastSelect.value = state.prefs.guideContrast;
+	el.markerSizeSelect.value = state.prefs.markerSize;
+	el.statsActivitySelect.value = state.prefs.statsActivity;
+}
+
+async function leavePostSession() {
+	clearChartHighlight();
+	state.currentPostSession = null;
+	navigateToScreen("home");
+	await renderPastRides();
 }
 
 function showScreen(name) {
@@ -466,9 +546,7 @@ async function applyHistoryState(targetState, mode = "none", savedSession = null
 		}
 
 		if (targetState.screen === "settings") {
-			el.stadiaKeyInput.value = state.prefs.stadiaKey;
-			el.guideContrastSelect.value = state.prefs.guideContrast;
-			el.markerSizeSelect.value = state.prefs.markerSize;
+			fillSettingsForm();
 			navigateToScreen("settings", mode);
 			return;
 		}
@@ -502,6 +580,9 @@ async function renderPastRides() {
 
 	const showCalendar = state.prefs.ridesView === "calendar";
 
+	renderHomeTotals(sessions);
+	el.pastRidesLabel.textContent = "Past rides";
+
 	if (!sessions.length) {
 		el.sessionsList.innerHTML = "";
 		el.sessionsList.classList.add("hidden");
@@ -522,32 +603,78 @@ async function renderPastRides() {
 	}
 }
 
+// Month-to-date and trailing-week figures for the header, over the activity
+// chosen in settings. Average speed is distance over moving time, the same
+// definition every other average in the app uses.
+function renderHomeTotals(sessions) {
+	const unit = state.prefs.unit;
+	const activity = state.prefs.statsActivity;
+	const counted =
+		activity === "all" ? sessions : sessions.filter((session) => (session.activityType || "bike") === activity);
+
+	const now = new Date();
+	const monthStart = startOfMonth(now).getTime();
+	// Today and the six days before it, from local midnight.
+	const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
+
+	const month = { distance: 0, time: 0, count: 0 };
+	const week = { distance: 0, time: 0 };
+
+	for (const session of counted) {
+		const time = new Date(session.date).getTime();
+		if (!Number.isFinite(time)) continue;
+		const distance = session.totalDistance || 0;
+		const moving = session.movingTime || 0;
+
+		if (time >= monthStart) {
+			month.distance += distance;
+			month.time += moving;
+			month.count += 1;
+		}
+		if (time >= weekStart) {
+			week.distance += distance;
+			week.time += moving;
+		}
+	}
+
+	const perUnit = getSegmentLengthMeters(unit);
+	el.monthDistance.textContent = (month.distance / perUnit).toFixed(1);
+	el.monthDistanceUnit.textContent = distanceUnitLabel(unit);
+	el.monthCount.textContent = String(month.count);
+	el.monthCountLabel.textContent = ACTIVITIES[activity]?.plural || "Rides";
+	el.monthAvgSpeed.textContent = formatSpeed(month.time > 0 ? month.distance / (month.time / 1000) : 0, unit);
+	el.monthSpeedUnit.textContent = speedUnitLabel(unit);
+
+	el.weekTime.textContent = week.time > 0 ? formatDurationMinutes(week.time) : "0m";
+	el.weekDistance.textContent = formatDistance(week.distance, unit);
+	el.weekDistanceUnit.textContent = distanceUnitLabel(unit);
+}
+
 function renderRidesList(sessions) {
 	el.sessionsList.innerHTML = "";
 
-	// Sorted newest first, so the year changes at most once per group and can be
-	// hoisted into a heading instead of being repeated on every row.
+	// Sorted newest first, so the year changes at most once per group. The first
+	// year rides in the section label; each older one gets a divider row.
 	let currentYear;
-	let yearList = null;
 
-	for (const session of sessions) {
+	for (const [index, session] of sessions.entries()) {
 		const date = new Date(session.date);
 		const year = Number.isNaN(date.getTime()) ? null : date.getFullYear();
+		const yearText = year == null ? "Undated" : String(year);
 
-		if (year !== currentYear) {
-			currentYear = year;
-			const group = document.createElement("li");
-			group.className = "sessions-year";
-
-			const heading = document.createElement("h3");
-			heading.textContent = year == null ? "Undated" : String(year);
-
-			yearList = document.createElement("ul");
-			group.append(heading, yearList);
-			el.sessionsList.appendChild(group);
+		if (index === 0) {
+			el.pastRidesLabel.textContent = `Past rides · ${yearText}`;
+		} else if (year !== currentYear) {
+			const divider = document.createElement("li");
+			divider.className = "sessions-year-label label";
+			divider.textContent = yearText;
+			el.sessionsList.appendChild(divider);
 		}
+		currentYear = year;
 
-		yearList.appendChild(buildSessionRow(session, date));
+		const li = document.createElement("li");
+		li.appendChild(buildSessionRow(session, date));
+		el.sessionsList.appendChild(li);
 	}
 }
 
@@ -639,6 +766,8 @@ function renderRidesCalendar(sessions) {
 		byDay.get(key).push(session);
 	}
 
+	const dayScale = calendarDayScale(byDay, sessions);
+
 	const leadingDays = (new Date(year, monthIndex, 1).getDay() - WEEK_START_DAY + 7) % 7;
 	const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
 	const weeks = Math.ceil((leadingDays + daysInMonth) / 7);
@@ -662,14 +791,14 @@ function renderRidesCalendar(sessions) {
 			if (rides.length) td.classList.add("has-ride");
 			if (key === todayKey) td.classList.add("is-today");
 
-			const number = document.createElement("span");
-			number.className = "calendar-day-number";
-			number.textContent = String(cellDate.getDate());
-			td.appendChild(number);
-
-			// Oldest first within a day, so the entries read in the order they happened.
-			for (const session of [...rides].reverse()) {
-				td.appendChild(buildCalendarRide(session, cellDate));
+			if (rides.length) {
+				// Oldest first within a day, so a picker lists them in the order they happened.
+				td.appendChild(buildCalendarCell([...rides].reverse(), cellDate, dayScale));
+			} else {
+				const number = document.createElement("span");
+				number.className = "calendar-day-number";
+				number.textContent = String(cellDate.getDate());
+				td.appendChild(number);
 			}
 
 			tr.appendChild(td);
@@ -693,79 +822,203 @@ function renderCalendarWeekdays() {
 	}
 }
 
-function buildCalendarRide(session, cellDate) {
+// One button per day however many rides it holds: the day's moving time and
+// distance added up, the top rule coloured by dayScale. A single ride opens
+// straight away; several open a picker.
+function buildCalendarCell(rides, cellDate, dayScale) {
 	const unit = state.prefs.unit;
-	const activityType = session.activityType || "bike";
-	const activityIcon = ACTIVITIES[activityType]?.icon || "🚴";
+	let time = 0;
+	let distance = 0;
 
-	const durationText = formatDurationMinutes(session.movingTime || 0);
-	const distanceText = `${formatDistance(session.totalDistance || 0, unit)} ${distanceUnitLabel(unit)}`;
-	const speedText = `${formatSpeed(session.avgSpeed || 0, unit)} ${speedUnitLabel(unit)}`;
+	for (const session of rides) {
+		time += session.movingTime || 0;
+		distance += session.totalDistance || 0;
+	}
+
+	const durationText = formatDurationMinutes(time);
+	const distanceText = formatDistance(distance, unit);
+	const dayText = cellDate.toLocaleDateString(undefined, { month: "long", day: "numeric" });
 
 	const button = document.createElement("button");
 	button.type = "button";
-	button.className = "calendar-ride";
-	// The cell shows abbreviations in a very small type size, so spell the whole
-	// entry out for anyone reading it aloud.
+	button.className = "calendar-cell";
+	button.style.setProperty("--day-color", paceColor(dayScale(rides)));
+	// The cell shows bare figures in a small type size, so spell it all out for
+	// anyone reading it aloud.
 	button.setAttribute(
 		"aria-label",
-		`${ACTIVITIES[activityType]?.label || "Ride"} on ${cellDate.toLocaleDateString(undefined, { month: "long", day: "numeric" })}, ${durationText}, ${distanceText}, ${speedText} average`,
+		rides.length === 1
+			? `${rideTitle(rides[0])} on ${dayText}, ${durationText}, ${distanceText} ${distanceUnitLabel(unit)}`
+			: `${rides.length} activities on ${dayText}, ${durationText}, ${distanceText} ${distanceUnitLabel(unit)} in total`,
 	);
 
-	// The icon and the two stats are separate elements so the stylesheet can drop
-	// the icon and stack the stats once a cell is too narrow to hold them inline.
-	const icon = document.createElement("span");
-	icon.className = "calendar-ride-icon";
-	icon.textContent = activityIcon;
-	icon.setAttribute("aria-hidden", "true");
+	const number = document.createElement("span");
+	number.className = "calendar-day-number";
+	number.textContent = String(cellDate.getDate());
 
 	const duration = document.createElement("span");
 	duration.className = "calendar-ride-time";
-	duration.append(icon, document.createTextNode(durationText));
+	duration.textContent = durationText;
+
+	const distanceEl = document.createElement("span");
+	distanceEl.className = "calendar-ride-distance";
+	distanceEl.textContent = distanceText;
+
+	button.append(number, duration, distanceEl);
+	button.addEventListener("click", () => {
+		if (rides.length === 1) {
+			openPostSession(rides[0].id, null, "push");
+		} else {
+			pickRideFromDay(rides, cellDate);
+		}
+	});
+	return button;
+}
+
+// Each row opens its ride itself, as it does in the list.
+function pickRideFromDay(rides, cellDate) {
+	showModal({
+		title: cellDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
+		message: "",
+		listItems: rides.map((session) => buildSessionRow(session, new Date(session.date), { withTime: true })),
+		hideConfirm: true,
+		cancelText: "Close",
+	});
+}
+
+// Returns a function placing a day's rides on the red (0) to green (1) scale,
+// by the measure chosen in settings. Every saved day is in the comparison, not
+// just the month on screen, so a day keeps its colour as the calendar is paged.
+// With nothing to compare against - one day, or every day alike - a day sits in
+// the middle.
+function calendarDayScale(byDay, sessions) {
+	if (state.prefs.calendarColor === "pace") {
+		const ranges = ridePaceRanges(sessions);
+		return (rides) => {
+			// Weighted by distance so a short spin does not recolour a long ride's day.
+			let weighted = 0;
+			let weight = 0;
+			for (const session of rides) {
+				const rideWeight = Math.max(session.totalDistance || 0, 1);
+				weighted += ridePaceFraction(session, ranges) * rideWeight;
+				weight += rideWeight;
+			}
+			return weighted / weight;
+		};
+	}
+
+	// Distance, or moving time: the day's total against the smallest and largest.
+	const measure =
+		state.prefs.calendarColor === "time" ? (session) => session.movingTime || 0 : (session) => session.totalDistance || 0;
+	const dayTotal = (rides) => rides.reduce((sum, session) => sum + measure(session), 0);
+
+	let min = Infinity;
+	let max = -Infinity;
+	for (const rides of byDay.values()) {
+		const total = dayTotal(rides);
+		min = Math.min(min, total);
+		max = Math.max(max, total);
+	}
+	return (rides) => (max > min ? (dayTotal(rides) - min) / (max - min) : 0.5);
+}
+
+// Each activity's slowest and fastest average speed across every saved ride, so
+// a ride's pace is judged against its own kind: a brisk walk is not red just
+// because bike rides are quicker.
+function ridePaceRanges(sessions) {
+	const ranges = new Map();
+	for (const session of sessions) {
+		const speed = rideAvgSpeed(session);
+		if (speed <= 0) continue;
+		const type = session.activityType || "bike";
+		const range = ranges.get(type);
+		if (!range) {
+			ranges.set(type, { min: speed, max: speed });
+		} else {
+			range.min = Math.min(range.min, speed);
+			range.max = Math.max(range.max, speed);
+		}
+	}
+	return ranges;
+}
+
+// 0 for the slowest ride of that activity, 1 for the fastest.
+function ridePaceFraction(session, ranges) {
+	const range = ranges.get(session.activityType || "bike");
+	const speed = rideAvgSpeed(session);
+	if (!range || speed <= 0) return 0.5;
+	if (range.max - range.min < 0.05) return 0.5;
+	return (speed - range.min) / (range.max - range.min);
+}
+
+// Distance over moving time. Stored on every saved ride, but worked out again
+// for any imported one that lacks it.
+function rideAvgSpeed(session) {
+	if (Number.isFinite(session.avgSpeed)) return session.avgSpeed;
+	const moving = session.movingTime || 0;
+	return moving > 0 ? (session.totalDistance || 0) / (moving / 1000) : 0;
+}
+
+// withTime puts the start time in place of the part of day, for the day picker
+// where every row shares the date.
+function buildSessionRow(session, date, { withTime = false } = {}) {
+	const unit = state.prefs.unit;
+	const button = document.createElement("button");
+	button.className = "session-row";
+	button.type = "button";
+
+	const main = document.createElement("span");
+	main.className = "session-main";
+
+	const when = document.createElement("span");
+	when.className = "session-when";
+	when.textContent = withTime ? sessionTimeTitle(session, date) : sessionRowTitle(session, date);
+
+	const sub = document.createElement("span");
+	sub.className = "session-sub";
+	sub.textContent = `${formatDurationMinutes(session.movingTime || 0)} · ${formatSpeed(session.avgSpeed || 0, unit)} ${speedUnitLabel(unit)}`;
+	main.append(when, sub);
 
 	const distance = document.createElement("span");
-	distance.className = "calendar-ride-distance";
-	distance.textContent = distanceText;
+	distance.className = "session-distance";
+	distance.innerHTML = `${formatDistance(session.totalDistance || 0, unit)} <span class="unit">${distanceUnitLabel(unit)}</span>`;
 
-	const speed = document.createElement("span");
-	speed.className = "calendar-ride-speed";
-	speed.textContent = speedText;
+	const chevron = document.createElement("span");
+	chevron.className = "chevron";
+	chevron.setAttribute("aria-hidden", "true");
+	chevron.textContent = "›";
 
-	const stats = document.createElement("span");
-	stats.className = "calendar-ride-stats";
-	stats.append(distance, speed);
-
-	button.append(duration, stats);
+	button.append(main, distance, chevron);
 	button.addEventListener("click", () => openPostSession(session.id, null, "push"));
 	return button;
 }
 
-function buildSessionRow(session, date) {
-	const li = document.createElement("li");
-	const button = document.createElement("button");
-	button.className = "btn session-row";
-	button.type = "button";
-
-	const activityIcon = ACTIVITIES[session.activityType || "bike"]?.icon || "🚴";
+// "Aug 26 · Morning" for a bike ride, the app's default; other activities name
+// themselves: "Aug 26 · Morning walk".
+function sessionRowTitle(session, date) {
 	const dayPart = sessionDayPart(session, date);
+	const type = session.activityType || "bike";
+	const part = type === "bike" ? dayPart : [dayPartWord(dayPart), ACTIVITIES[type]?.noun].filter(Boolean).join(" ");
+	return `${formatSessionDay(date)}${part ? ` · ${part}` : ""}`;
+}
 
-	const when = document.createElement("span");
-	when.className = "session-when";
-	// when.textContent = `${activityIcon} ${formatSessionDay(date)}${dayPart ? ` · ${dayPart}` : ""}`;
-	when.textContent = `${formatSessionDay(date)}${dayPart ? ` · ${dayPart}` : ""}`;
+// "Morning walk · 8:04 AM" - the ride summary's title.
+function sessionTimeTitle(session, date) {
+	if (Number.isNaN(date.getTime())) return rideTitle(session);
+	return `${rideTitle(session)} · ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
 
-	const stats = document.createElement("span");
-	stats.className = "session-stats";
-	stats.textContent = [
-		`${formatDistance(session.totalDistance || 0, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)}`,
-		formatDurationMinutes(session.movingTime || 0),
-		`${formatSpeed(session.avgSpeed || 0, state.prefs.unit)} ${speedUnitLabel(state.prefs.unit)}`,
-	].join(" • ");
+// "Morning ride", "All-day hike", or just "Ride" with no usable date.
+function rideTitle(session) {
+	const date = new Date(session.date);
+	const noun = ACTIVITIES[session.activityType || "bike"]?.noun || "ride";
+	const part = dayPartWord(sessionDayPart(session, date));
+	if (!part) return noun.charAt(0).toUpperCase() + noun.slice(1);
+	return `${part} ${noun}`;
+}
 
-	button.append(when, stats);
-	button.addEventListener("click", () => openPostSession(session.id, null, "push"));
-	li.appendChild(button);
-	return li;
+function dayPartWord(dayPart) {
+	return dayPart === "All day" ? "All-day" : dayPart;
 }
 
 function formatSessionDay(date) {
@@ -1238,6 +1491,7 @@ function updateLiveMap(point, heading, speedMps) {
 
 	state.liveRouteCoords.push([point.lng, point.lat]);
 	setLiveLineData(LIVE_ROUTE_SOURCE, state.liveRouteCoords);
+	state.riderMarker?.setLngLat([point.lng, point.lat]);
 
 	if (state.currentSession?.points?.length) {
 		const startPoint = state.currentSession.points[0];
@@ -1309,10 +1563,20 @@ function updateLiveStats() {
 	// An unweighted mean of instantaneous fixes disagreed with the post-ride figure.
 	session.avgSpeed = elapsed > 0 ? session.totalDistance / (elapsed / 1000) : 0;
 
-	el.currentSpeed.innerHTML = formatSpeedMarkup(currentSpeed, state.prefs.unit);
-	el.distanceValue.innerHTML = formatDistanceMarkup(session.totalDistance, state.prefs.unit);
-	el.avgSpeed.innerHTML = formatSpeedMarkup(session.avgSpeed, state.prefs.unit);
+	const unit = state.prefs.unit;
+	el.currentSpeed.textContent = formatSpeed(currentSpeed, unit);
+	el.currentSpeedUnit.textContent = speedUnitLabel(unit);
+	el.distanceValue.textContent = formatDistance(session.totalDistance, unit);
+	el.distanceUnit.textContent = distanceUnitLabel(unit);
+	el.avgSpeed.textContent = formatSpeed(session.avgSpeed, unit);
 	el.elapsedTime.textContent = formatDuration(elapsed);
+}
+
+function setPauseButton(paused) {
+	el.pauseBtn.classList.toggle("is-paused", paused);
+	el.pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
+	el.rideStrip.classList.toggle("is-paused", paused);
+	el.speedLabel.textContent = paused ? "Paused" : "Speed";
 }
 
 function getElapsedMs() {
@@ -1331,7 +1595,7 @@ async function togglePauseSession() {
 		session.paused = true;
 		session.pauseStartedAt = Date.now();
 		stopWatch();
-		el.pauseBtn.textContent = "Resume";
+		setPauseButton(true);
 		await releaseWakeLock();
 		await saveActiveSessionCheckpoint();
 		updateLiveStats();
@@ -1343,7 +1607,7 @@ async function togglePauseSession() {
 	session.resumeTimestamp = Date.now();
 	startWatch();
 	initMotionSensors();
-	el.pauseBtn.textContent = "Pause";
+	setPauseButton(false);
 	await requestWakeLock();
 }
 
@@ -1407,7 +1671,7 @@ async function finalizeSession() {
 	saved.id = id;
 	await clearActiveSessionCheckpoint();
 	state.currentSession = null;
-	el.pauseBtn.textContent = "Pause";
+	setPauseButton(false);
 	return saved;
 }
 
@@ -1579,6 +1843,7 @@ function initLiveMap(lat, lng) {
 	state.liveMap = map;
 	state.markerLayer = createMarkerLayer(map);
 	state.guideLabelMarker = createGuideLabelMarker(map);
+	state.riderMarker = createPointMarker(map, "rider-dot", [lng, lat]);
 	// Its offset is in pixels, so its ground position depends on the zoom.
 	map.on("zoom", updateGuideLabel);
 
@@ -1646,8 +1911,9 @@ function createVectorMap(options, addOverlays) {
 		touchPitch: false,
 		attributionControl: { compact: true },
 	});
+	// No zoom buttons: both maps are pinch-to-zoom, and the stats strip sits
+	// where the buttons would go.
 	map.touchZoomRotate.disableRotation();
-	map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
 	state.mapStatus.set(map, { usesStadia, styleReady: false });
 
 	// Fires for the first style and again after every setStyle, which discards
@@ -1940,6 +2206,13 @@ function createMarkerLayer(map) {
 	};
 }
 
+// A styled dot pinned to one spot: the rider, or a route's start and finish.
+function createPointMarker(map, className, lngLat) {
+	const element = document.createElement("div");
+	element.className = className;
+	return new maplibregl.Marker({ element }).setLngLat(lngLat).addTo(map);
+}
+
 // The distance back to the start, as a chip on the guide line. It takes the
 // guide line's colours so the two read as one, and the distance markers' size.
 function createGuideLabelMarker(map) {
@@ -2014,6 +2287,15 @@ function initPostMap(session) {
 	state.postMap = createVectorMap({ container: "postMap", ...view }, (map) => addPostRouteLayer(map, routeData));
 	state.postMarkerLayer = createMarkerLayer(state.postMap);
 
+	const points = session.points || [];
+	if (points.length) {
+		const first = points[0];
+		const last = points[points.length - 1];
+		// Finish first, so the start draws on top where a loop ends where it began.
+		createPointMarker(state.postMap, "route-finish", [last.lng, last.lat]);
+		createPointMarker(state.postMap, "route-start", [first.lng, first.lat]);
+	}
+
 	// Recalculate segment markers based on current unit settings
 	const segmentMarkers = recalculateSegmentMarkers(session);
 	renderSegmentMarkers(state.postMarkerLayer, segmentMarkers);
@@ -2069,6 +2351,19 @@ function buildSpeedBandRoute(points) {
 
 function addPostRouteLayer(map, routeData) {
 	map.addSource("post-route", { type: "geojson", data: routeData });
+	// A casing under the coloured line lifts it off busy tiles.
+	const dark = state.prefs.theme === "dark";
+	map.addLayer({
+		id: "post-route-casing",
+		type: "line",
+		source: "post-route",
+		layout: { "line-cap": "round", "line-join": "round" },
+		paint: {
+			"line-color": dark ? "#000000" : "#ffffff",
+			"line-opacity": dark ? 0.45 : 0.85,
+			"line-width": 10,
+		},
+	});
 	map.addLayer({
 		id: "post-route",
 		type: "line",
@@ -2251,30 +2546,72 @@ async function openPostSession(sessionId, sessionData = null, mode = "push") {
 }
 
 function renderPostSummary(session) {
-	el.postTitle.textContent = `Ride - ${new Date(session.date).toLocaleString()}`;
-	el.postDistance.innerHTML = formatDistanceMarkup(session.totalDistance || 0, state.prefs.unit);
+	const unit = state.prefs.unit;
+	const date = new Date(session.date);
+
+	el.postDate.textContent = Number.isNaN(date.getTime())
+		? "Unknown date"
+		: date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+	el.postTitle.textContent = sessionTimeTitle(session, date);
+
+	el.postDistance.textContent = formatDistance(session.totalDistance || 0, unit);
+	el.postDistanceUnit.textContent = distanceUnitLabel(unit);
+	el.postAvgSpeed.textContent = formatSpeed(rideAvgSpeed(session), unit);
 	el.postTime.textContent = formatDuration(session.movingTime || 0);
-	el.postMaxSpeed.innerHTML = formatSpeedMarkup(session.maxSpeed || 0, state.prefs.unit);
-	el.postAvgSpeed.innerHTML = formatSpeedMarkup(session.avgSpeed || 0, state.prefs.unit);
+	el.postMaxSpeed.textContent = formatSpeed(session.maxSpeed || 0, unit);
+	el.postSpeedUnit.textContent = speedUnitLabel(unit);
 
-	const gain = formatElevation(session.elevationGain || 0, state.prefs.unit);
-	const drop = formatElevation(session.elevationDrop || 0, state.prefs.unit);
-	el.postElevation.textContent = `↑ ${gain} gained / ↓ ${drop} dropped`;
+	const elevationUnit = unit === "imperial" ? "ft" : "m";
+	el.postGain.textContent = formatElevationValue(session.elevationGain || 0, unit);
+	el.postDrop.textContent = formatElevationValue(session.elevationDrop || 0, unit);
+	el.postGainUnit.textContent = elevationUnit;
+	el.postDropUnit.textContent = elevationUnit;
 
+	el.chartStartLabel.textContent = `0 ${distanceUnitLabel(unit)}`;
+	el.chartEndLabel.textContent = `${formatDistance(session.totalDistance || 0, unit)} ${distanceUnitLabel(unit)}`;
+
+	renderSegmentRows(recalculateSegments(session));
+}
+
+// Bar length is the segment's speed against the fastest one; its colour places
+// it between the ride's slowest and fastest segments.
+function renderSegmentRows(segments) {
+	const unit = state.prefs.unit;
+	el.segmentsSpeedHeader.textContent = speedUnitLabel(unit);
 	el.segmentsBody.innerHTML = "";
-	// Recalculate segments based on current unit settings
-	const segments = recalculateSegments(session);
-	const unitLabel = distanceUnitLabel(state.prefs.unit);
+
+	const speeds = segments.map((seg) => seg.avgSpeed);
+	const fastest = Math.max(...speeds, 0.0001);
+	const slowest = Math.min(...speeds);
+
 	for (const seg of segments) {
 		const tr = document.createElement("tr");
-		const label = seg.partial
-			? `Final ${formatDistance(seg.distance, state.prefs.unit)} ${unitLabel}`
-			: segmentLabel(seg.segmentNumber, state.prefs.unit);
-		tr.innerHTML = `
-			<td>${label}</td>
-			<td>${formatDuration(seg.duration)}</td>
-			<td>${formatSpeed(seg.avgSpeed, state.prefs.unit)}</td>
-		`;
+
+		const name = document.createElement("td");
+		name.className = seg.partial ? "seg-name partial" : "seg-name";
+		name.textContent = seg.partial
+			? `${formatDistance(seg.distance, unit)} ${distanceUnitLabel(unit)}`
+			: segmentLabel(seg.segmentNumber, unit);
+
+		const pace = document.createElement("td");
+		const track = document.createElement("div");
+		track.className = "pace-track";
+		const fill = document.createElement("div");
+		fill.className = "pace-fill";
+		fill.style.width = `${Math.max(2, (seg.avgSpeed / fastest) * 100).toFixed(1)}%`;
+		fill.style.background = paceColor(fastest - slowest > 0.01 ? (seg.avgSpeed - slowest) / (fastest - slowest) : 1);
+		track.appendChild(fill);
+		pace.appendChild(track);
+
+		const time = document.createElement("td");
+		time.className = "num seg-time";
+		time.textContent = formatDuration(seg.duration);
+
+		const speed = document.createElement("td");
+		speed.className = "num seg-speed";
+		speed.textContent = formatSpeed(seg.avgSpeed, unit);
+
+		tr.append(name, pace, time, speed);
 		el.segmentsBody.appendChild(tr);
 	}
 }
@@ -2315,7 +2652,9 @@ function renderElevationChart(session) {
 
 	const cssWidth = rect.width;
 	const cssHeight = rect.height;
-	const padding = { top: 16, right: 16, bottom: 26, left: 48 };
+	// Full bleed: the elevation labels sit on the grid lines and the distance
+	// labels are HTML under the canvas.
+	const padding = { top: 4, right: 0, bottom: 4, left: 0 };
 	const chartWidth = cssWidth - padding.left - padding.right;
 	const chartHeight = cssHeight - padding.top - padding.bottom;
 	const displayUnit = state.prefs.unit;
@@ -2331,9 +2670,22 @@ function renderElevationChart(session) {
 		return padding.top + chartHeight - ((elevation - minElevation) / (maxElevation - minElevation)) * chartHeight;
 	};
 
-	drawChartBackground(ctx, cssWidth, cssHeight, padding, minElevation, maxElevation, session, displayUnit, totalDistance);
+	drawChartBackground(ctx, cssWidth, cssHeight, padding);
 
-	ctx.lineWidth = 3;
+	// A soft fill under the line, fading to nothing at the floor.
+	const floor = cssHeight - padding.bottom;
+	const fill = ctx.createLinearGradient(0, padding.top, 0, floor);
+	fill.addColorStop(0, "rgba(143, 201, 58, 0.22)");
+	fill.addColorStop(1, "rgba(143, 201, 58, 0)");
+	ctx.beginPath();
+	ctx.moveTo(xFor(points[0].distance), floor);
+	for (const point of points) ctx.lineTo(xFor(point.distance), yFor(point.elevation));
+	ctx.lineTo(xFor(points[points.length - 1].distance), floor);
+	ctx.closePath();
+	ctx.fillStyle = fill;
+	ctx.fill();
+
+	ctx.lineWidth = 2.5;
 	ctx.lineCap = "round";
 	// Batched paths have joins where per-segment paths had none, and the canvas
 	// default of "miter" throws long spikes wherever noisy elevation data doubles
@@ -2361,7 +2713,7 @@ function renderElevationChart(session) {
 	}
 	if (currentBand !== -1) ctx.stroke();
 
-	drawChartAxes(ctx, cssWidth, cssHeight, padding, minElevation, maxElevation, session, displayUnit, totalDistance);
+	drawElevationLabels(ctx, cssHeight, padding, minElevation, maxElevation, displayUnit);
 
 	// Add event listeners for chart interaction
 	setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor);
@@ -2536,55 +2888,75 @@ function drawEmptyChart(canvas, message) {
 	ctx.fillText(message, rect.width / 2, rect.height / 2);
 }
 
-function drawChartBackground(ctx, width, height, padding, minElevation, maxElevation, session, unit, totalDistance) {
+function themeColor(name, fallback) {
+	return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+// Hairlines at the top and floor, fainter ones at the thirds.
+function drawChartBackground(ctx, width, height, padding) {
+	const rule = themeColor("--rule", "rgba(20, 24, 26, 0.1)");
+	const hairline = themeColor("--hairline", "rgba(20, 24, 26, 0.07)");
+	const top = padding.top;
+	const span = height - padding.top - padding.bottom;
+
 	ctx.save();
-	ctx.fillStyle = "transparent";
-	ctx.fillRect(0, 0, width, height);
-
-	ctx.strokeStyle = "rgba(127,127,127,0.18)";
 	ctx.lineWidth = 1;
-
-	const gridLines = 4;
-	for (let index = 0; index <= gridLines; index += 1) {
-		const y = padding.top + (index / gridLines) * (height - padding.top - padding.bottom);
+	for (const [fraction, color] of [
+		[0, rule],
+		[1 / 3, hairline],
+		[2 / 3, hairline],
+		[1, rule],
+	]) {
+		// Half-pixel offset keeps a 1px line crisp.
+		const y = Math.round(top + fraction * span) + 0.5;
+		ctx.strokeStyle = color;
 		ctx.beginPath();
-		ctx.moveTo(padding.left, y);
-		ctx.lineTo(width - padding.right, y);
+		ctx.moveTo(0, y);
+		ctx.lineTo(width, y);
 		ctx.stroke();
 	}
-
-	ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--muted") || "#666";
-	ctx.font = "12px sans-serif";
-	ctx.textAlign = "right";
-	ctx.textBaseline = "middle";
-	ctx.fillText(formatElevation(minElevation, unit), padding.left - 8, height - padding.bottom);
-	ctx.fillText(formatElevation(maxElevation, unit), padding.left - 8, padding.top);
-
-	ctx.textAlign = "center";
-	ctx.textBaseline = "top";
-	const totalDistanceLabel = formatDistance(session.totalDistance || 0, unit);
-	ctx.fillText(`0`, padding.left, height - padding.bottom + 6);
-	ctx.fillText(totalDistanceLabel, width - padding.right, height - padding.bottom + 6);
 	ctx.restore();
 }
 
-function drawChartAxes(ctx, width, height, padding, minElevation, maxElevation, session, unit, totalDistance) {
+// Highest and lowest elevation, sat on the top and floor lines over a patch of
+// page background so the route line does not run through them.
+function drawElevationLabels(ctx, height, padding, minElevation, maxElevation, unit) {
+	const background = themeColor("--bg", "#fcfcfa");
+	const muted = themeColor("--muted", "#6b7472");
+
 	ctx.save();
-	ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--border") || "#ccc";
-	ctx.lineWidth = 1;
-	ctx.beginPath();
-	ctx.moveTo(padding.left, padding.top);
-	ctx.lineTo(padding.left, height - padding.bottom);
-	ctx.lineTo(width - padding.right, height - padding.bottom);
-	ctx.stroke();
+	ctx.font = `600 10px ${themeColor("--font", "sans-serif")}`;
+	ctx.textAlign = "left";
+	ctx.textBaseline = "middle";
+	for (const [text, y] of [
+		[formatElevation(maxElevation, unit), padding.top],
+		[formatElevation(minElevation, unit), height - padding.bottom],
+	]) {
+		const width = ctx.measureText(text).width + 6;
+		ctx.fillStyle = background;
+		ctx.fillRect(0, y - 7, width, 14);
+		ctx.fillStyle = muted;
+		ctx.fillText(text, 0, y);
+	}
 	ctx.restore();
 }
 
-function speedToColor(speed, maxSpeed) {
-	const clamped = Math.max(0, Math.min(1, speed / maxSpeed));
-	const hue = 0 + clamped * 120;
+// t runs 0 (slow) to 1 (fast) along PACE_STOPS, blended between neighbours.
+function paceColor(t) {
+	const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0.5));
+	const scaled = clamped * (PACE_STOPS.length - 1);
+	const index = Math.min(PACE_STOPS.length - 2, Math.floor(scaled));
+	const mix = scaled - index;
+	const from = hexToRgb(PACE_STOPS[index]);
+	const to = hexToRgb(PACE_STOPS[index + 1]);
+	const channel = (a, b) => Math.round(a + (b - a) * mix);
 	// Comma syntax: MapLibre's colour parser does not take the space-separated form.
-	return `hsl(${hue}, 75%, 48%)`;
+	return `rgb(${channel(from[0], to[0])}, ${channel(from[1], to[1])}, ${channel(from[2], to[2])})`;
+}
+
+function hexToRgb(hex) {
+	const value = parseInt(hex.slice(1), 16);
+	return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
 function speedBand(speed, maxSpeed) {
@@ -2594,7 +2966,7 @@ function speedBand(speed, maxSpeed) {
 
 function speedBandColor(band) {
 	// Sample the ramp mid-band so the bands stay evenly spaced across it.
-	return speedToColor((band + 0.5) / SPEED_BANDS, 1);
+	return paceColor((band + 0.5) / SPEED_BANDS);
 }
 
 function maxOf(items, pick) {
@@ -2632,6 +3004,41 @@ async function deleteCurrentRide() {
 	await renderPastRides();
 }
 
+// Asks twice: once to say what will go, then again as the point of no return.
+// An in-progress ride is not a saved ride, so its checkpoint is left alone.
+async function deleteAllRides() {
+	const count = (await getAllSessions()).length;
+	if (!count) {
+		await showMessage("No Rides to Delete", "There are no saved rides on this device.");
+		return;
+	}
+
+	const rides = count === 1 ? "1 saved ride" : `all ${count} saved rides`;
+	const first = await confirmWithModal({
+		title: "Delete All Past Rides?",
+		message: `This will remove ${rides} from this device. Your settings are kept.`,
+		confirmText: "Continue",
+		cancelText: "Cancel",
+	});
+	if (!first) return;
+
+	const second = await confirmWithModal({
+		title: "Are You Sure?",
+		message: `${count === 1 ? "This ride" : `All ${count} rides`} will be deleted permanently and cannot be recovered. Export your data first if you might want ${count === 1 ? "it" : "them"} back.`,
+		confirmText: count === 1 ? "Delete Ride" : `Delete ${count} Rides`,
+		cancelText: "Keep Rides",
+		danger: true,
+	});
+	if (!second) return;
+
+	await clearAllSessions();
+	state.currentPostSession = null;
+	// The calendar's range is worked out from the rides, so let it start over.
+	state.calendarMonth = null;
+	await renderPastRides();
+	await showMessage("Rides Deleted", "All past rides have been deleted.");
+}
+
 function showMessage(title, message) {
 	return showModal({
 		title,
@@ -2641,7 +3048,7 @@ function showMessage(title, message) {
 	}).then(() => undefined);
 }
 
-function confirmWithModal({ title, message, confirmText, cancelText, timeoutMs, timeoutLabel }) {
+function confirmWithModal({ title, message, confirmText, cancelText, timeoutMs, timeoutLabel, danger }) {
 	return showModal({
 		title,
 		message,
@@ -2649,6 +3056,7 @@ function confirmWithModal({ title, message, confirmText, cancelText, timeoutMs, 
 		cancelText,
 		timeoutMs,
 		timeoutLabel,
+		danger,
 	}).then((result) => result === "confirm");
 }
 
@@ -2658,6 +3066,12 @@ function showModal({
 	confirmText = "OK",
 	cancelText = "Cancel",
 	hideCancel = false,
+	hideConfirm = false,
+	// Colours the confirm button red, for actions that destroy data.
+	danger = false,
+	// Buttons to pick from. Choosing one closes the modal, settling it with the
+	// item's index as a string, and then runs the item's own click handler.
+	listItems = [],
 	timeoutMs,
 	timeoutLabel = "Auto cancel",
 }) {
@@ -2670,6 +3084,17 @@ function showModal({
 	el.modalConfirmBtn.textContent = confirmText;
 	el.modalCancelBtn.textContent = cancelText;
 	el.modalCancelBtn.classList.toggle("hidden", hideCancel);
+	el.modalConfirmBtn.classList.toggle("hidden", hideConfirm);
+	el.modalConfirmBtn.classList.toggle("danger", danger);
+
+	el.modalList.innerHTML = "";
+	el.modalList.classList.toggle("hidden", !listItems.length);
+	listItems.forEach((item, index) => {
+		item.addEventListener("click", () => closeModal(String(index)));
+		const li = document.createElement("li");
+		li.appendChild(item);
+		el.modalList.appendChild(li);
+	});
 	el.modalCountdown.classList.add("hidden");
 	el.modalBackdrop.classList.remove("hidden");
 	el.modalBackdrop.setAttribute("aria-hidden", "false");
@@ -3053,32 +3478,17 @@ function formatDistance(meters, unit) {
 	return `${(meters / METERS_PER_KM).toFixed(2)}`;
 }
 
-function formatDistanceMarkup(meters, unit) {
-	return wrapDecimalParts(formatDistance(meters, unit));
-}
-
 function formatSpeed(mps, unit) {
 	if (unit === "imperial") return `${(mps * MPS_TO_MPH).toFixed(1)}`;
 	return `${(mps * MPS_TO_KPH).toFixed(1)}`;
 }
 
-function formatSpeedMarkup(mps, unit) {
-	return wrapDecimalParts(formatSpeed(mps, unit));
-}
-
-function wrapDecimalParts(value) {
-	const text = String(value);
-	const match = text.match(/^(\d+)(\.(\d+))(.*)$/);
-	if (!match) return text;
-
-	const [, whole, dotAndFraction, fraction, suffix] = match;
-	const dot = dotAndFraction.slice(0, 1);
-	return `${whole}<span class="decimal-point">${dot}</span><span class="decimal-fraction">${fraction}</span>${suffix}`;
+function formatElevationValue(meters, unit) {
+	return (unit === "imperial" ? meters * FEET_PER_METER : meters).toFixed(0);
 }
 
 function formatElevation(meters, unit) {
-	if (unit === "imperial") return `${(meters * 3.28084).toFixed(0)} ft`;
-	return `${meters.toFixed(0)} m`;
+	return `${formatElevationValue(meters, unit)} ${unit === "imperial" ? "ft" : "m"}`;
 }
 
 // Ride length rounded to the nearest minute, for the at-a-glance list. The
@@ -3289,6 +3699,10 @@ async function loadPrefs() {
 	state.prefs.guideContrast = await getPref("guideContrast", "high");
 	state.prefs.markerSize = await getPref("markerSize", "medium");
 	state.prefs.ridesView = await getPref("ridesView", "list");
+	const statsActivity = await getPref("statsActivity", "all");
+	state.prefs.statsActivity = statsActivity === "all" || ACTIVITIES[statsActivity] ? statsActivity : "all";
+	const calendarColor = await getPref("calendarColor", "distance");
+	state.prefs.calendarColor = CALENDAR_COLOR_NOTES[calendarColor] ? calendarColor : "distance";
 	state.prefs.installDismissed = await getPref("installDismissed", false);
 }
 
@@ -3308,4 +3722,8 @@ async function getSessionById(id) {
 
 async function deleteSessionById(id) {
 	await withStore(SESSION_STORE, "readwrite", (store) => store.delete(id));
+}
+
+async function clearAllSessions() {
+	await withStore(SESSION_STORE, "readwrite", (store) => store.clear());
 }
