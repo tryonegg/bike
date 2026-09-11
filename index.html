@@ -232,7 +232,7 @@
       </div>
     </section>
 
-    <section id="settingsScreen" class="screen has-bottom-bar hidden">
+    <section id="settingsScreen" class="screen hidden">
       <header class="app-bar">
         <button id="settingsBackBtn" class="round-btn" aria-label="Back without saving">←</button>
         <h2>Settings</h2>
@@ -264,25 +264,19 @@
           </div>
           <p class="setting-note">Topo adds hill shading and contour lines to the ride and summary maps.</p>
         </div>
-        <div class="setting-row">
-          <label for="guideContrastSelect">Guide Line Contrast</label>
-          <span class="select-wrap">
-            <select id="guideContrastSelect">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </span>
+        <div class="setting-row" role="group" aria-label="Guide line contrast">
+          <span>Guide Line Contrast</span>
+          <div class="toggle-pill" id="guideContrastToggle">
+            <button data-guide-contrast="medium" class="toggle-option">Normal</button>
+            <button data-guide-contrast="high" class="toggle-option">High</button>
+          </div>
         </div>
-        <div class="setting-row">
-          <label for="markerSizeSelect">Distance Marker Size</label>
-          <span class="select-wrap">
-            <select id="markerSizeSelect">
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
-            </select>
-          </span>
+        <div class="setting-row" role="group" aria-label="Distance marker size">
+          <span>Distance Marker Size</span>
+          <div class="toggle-pill" id="markerSizeToggle">
+            <button data-marker-size="medium" class="toggle-option">Normal</button>
+            <button data-marker-size="large" class="toggle-option">Large</button>
+          </div>
         </div>
       </div>
 
@@ -348,8 +342,40 @@
       <div class="settings-group">
         <div class="setting-row stacked">
           <label for="stadiaKeyInput">Stadia Maps API Key <span class="muted">(optional)</span></label>
-          <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+          <div class="input-with-button">
+            <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+            <button id="saveStadiaKeyBtn" class="btn">Save</button>
+          </div>
           <p class="setting-note">Without a key, maps use free OpenFreeMap tiles. With a key, it uses Stadia's Alidade Smooth (Outdoors for Topo) in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
+        </div>
+      </div>
+
+      <h3 class="label settings-section-label">Debug</h3>
+      <div class="settings-group">
+        <div class="setting-row stacked" role="group" aria-label="GPS accuracy overlay">
+          <div class="setting-row-main">
+            <span>GPS Accuracy Overlay</span>
+            <div class="toggle-pill" id="debugAccuracyToggle">
+              <button data-debug-accuracy="off" class="toggle-option">Off</button>
+              <button data-debug-accuracy="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">On a ride's summary map, colors the route and dots each recorded point by GPS accuracy instead of speed — green is precise, red is imprecise — and flags the single best and worst points. Gaps between dots show where GPS dropped out.</p>
+          <div class="chart-legend accuracy-legend">
+            <span><i class="swatch fast"></i>Precise</span>
+            <span><i class="swatch slow"></i>Imprecise</span>
+            <span><i class="swatch unknown"></i>No accuracy data, or clipped warm-up</span>
+          </div>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="Clip GPS warm-up">
+          <div class="setting-row-main">
+            <span>Clip GPS Warm-up</span>
+            <div class="toggle-pill" id="debugClipWarmupToggle">
+              <button data-debug-clip-warmup="off" class="toggle-option">Off</button>
+              <button data-debug-clip-warmup="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">Grays out the start of the route until GPS accuracy settles down, so a shaky first fix doesn't skew the accuracy overlay's colors. Only affects the overlay above.</p>
         </div>
       </div>
 
@@ -369,10 +395,6 @@
       <div class="danger-zone">
         <button id="deleteAllRidesBtn" class="btn pill danger-outline">Delete All Past Rides</button>
         <p class="setting-note">Removes every saved ride from this device. Settings are kept. Export first if you might want them back.</p>
-      </div>
-
-      <div class="bottom-bar">
-        <button id="saveSettingsBtn" class="btn primary pill grow cta">Save</button>
       </div>
     </section>
   </main>

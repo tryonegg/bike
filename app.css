@@ -1395,6 +1395,32 @@ button {
   background: var(--finish);
 }
 
+/* Debug GPS accuracy overlay: flags on the route's single best and worst
+   fixes, coloured with the same red/green ends as the route line itself. */
+.accuracy-marker {
+  pointer-events: none;
+}
+
+.accuracy-marker span {
+  display: block;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(20, 24, 26, 0.3);
+}
+
+.accuracy-marker-best span {
+  background: var(--pace-fast);
+}
+
+.accuracy-marker-worst span {
+  background: var(--pace-slow);
+}
+
 /* Map credits: kept small, and flipped to dark with the theme so they do not
    sit on the map as a white slab. */
 .maplibregl-ctrl.maplibregl-ctrl-attrib {
@@ -1487,6 +1513,16 @@ button {
 
 .swatch.fast {
   background: var(--pace-fast);
+}
+
+.swatch.unknown {
+  background: #9aa39a;
+}
+
+.accuracy-legend {
+  margin-top: 10px;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .chart-wrap {
@@ -1655,6 +1691,24 @@ button {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+.input-with-button {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-button input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.input-with-button .btn {
+  flex: none;
+  align-self: stretch;
+  height: auto;
+  margin-top: 10px;
 }
 
 .select-wrap {

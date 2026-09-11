@@ -28,6 +28,21 @@ const CHECKPOINT_INTERVAL_MS = 10000;
 // Number of discrete colors in the speed ramp used by the route line and chart.
 const SPEED_BANDS = 16;
 
+// Debug GPS accuracy overlay: same idea as the speed ramp, but a point with no
+// accuracy reading (dead-reckoned during a GPS gap, or a GPX import) draws in
+// this neutral gray instead of guessing at a color.
+const ACCURACY_BANDS = 16;
+const ACCURACY_UNKNOWN_COLOR = "#9aa39a";
+
+// Debug "clip GPS warm-up": a receiver is usually noisiest on its first few
+// fixes and then locks on, but how long that takes varies ride to ride (open
+// sky vs. tree cover or downtown), so "settled" is judged against this ride's
+// own best fix rather than a fixed number. It's the first run of
+// WARMUP_CONFIRM_COUNT consecutive fixes all within WARMUP_STABLE_FACTOR of
+// that best accuracy; one lucky good fix alone doesn't count.
+const WARMUP_STABLE_FACTOR = 2;
+const WARMUP_CONFIRM_COUNT = 3;
+
 // The pre-ride countdown, which also bounds how long the initial GPS fix gets.
 const COUNTDOWN_SECONDS = 5;
 
@@ -115,6 +130,10 @@ const state = {
 		// What the calendar's top rule colours by: "distance", "time" or "pace".
 		calendarColor: "distance",
 		installDismissed: false,
+		// Debug: colours a ride's summary route by GPS accuracy instead of speed.
+		debugGpsAccuracy: false,
+		// Debug: also grays out the route's warm-up stretch, before GPS settles.
+		debugClipGpsWarmup: false,
 	},
 	// Which month the calendar view is paged to, as the 1st at local midnight.
 	// Null until the first calendar render picks a starting month from the rides.
@@ -196,6 +215,8 @@ const el = {
 	statsSideToggle: document.getElementById("statsSideToggle"),
 	calendarColorToggle: document.getElementById("calendarColorToggle"),
 	calendarColorNote: document.getElementById("calendarColorNote"),
+	debugAccuracyToggle: document.getElementById("debugAccuracyToggle"),
+	debugClipWarmupToggle: document.getElementById("debugClipWarmupToggle"),
 	monthDistance: document.getElementById("monthDistance"),
 	monthDistanceUnit: document.getElementById("monthDistanceUnit"),
 	monthCount: document.getElementById("monthCount"),
@@ -218,10 +239,10 @@ const el = {
 	startRideBtn: document.getElementById("startRideBtn"),
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
 	settingsBackBtn: document.getElementById("settingsBackBtn"),
-	saveSettingsBtn: document.getElementById("saveSettingsBtn"),
 	stadiaKeyInput: document.getElementById("stadiaKeyInput"),
-	guideContrastSelect: document.getElementById("guideContrastSelect"),
-	markerSizeSelect: document.getElementById("markerSizeSelect"),
+	saveStadiaKeyBtn: document.getElementById("saveStadiaKeyBtn"),
+	guideContrastToggle: document.getElementById("guideContrastToggle"),
+	markerSizeToggle: document.getElementById("markerSizeToggle"),
 	statsActivitySelect: document.getElementById("statsActivitySelect"),
 	exportDataBtn: document.getElementById("exportDataBtn"),
 	importDataBtn: document.getElementById("importDataBtn"),
@@ -364,6 +385,24 @@ function wireEvents() {
 		await renderPastRides();
 	});
 
+	// Takes effect next time a ride's summary map is opened, not on the map
+	// underneath settings, since there isn't one — settings only opens from home.
+	el.debugAccuracyToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-debug-accuracy]");
+		if (!btn) return;
+		state.prefs.debugGpsAccuracy = btn.dataset.debugAccuracy === "on";
+		await setPref("debugGpsAccuracy", state.prefs.debugGpsAccuracy);
+		syncToggles();
+	});
+
+	el.debugClipWarmupToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-debug-clip-warmup]");
+		if (!btn) return;
+		state.prefs.debugClipGpsWarmup = btn.dataset.debugClipWarmup === "on";
+		await setPref("debugClipGpsWarmup", state.prefs.debugClipGpsWarmup);
+		syncToggles();
+	});
+
 	el.ridesViewToggle.addEventListener("click", async (event) => {
 		const btn = event.target.closest("button[data-rides-view]");
 		if (!btn) return;
@@ -414,26 +453,40 @@ function wireEvents() {
 		navigateToScreen("settings");
 	});
 
-	el.guideContrastSelect.addEventListener("change", previewSettingsMapVisuals);
-	el.markerSizeSelect.addEventListener("change", previewSettingsMapVisuals);
+	el.guideContrastToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-guide-contrast]");
+		if (!btn) return;
+		state.prefs.guideContrast = btn.dataset.guideContrast;
+		await setPref("guideContrast", state.prefs.guideContrast);
+		syncToggles();
+		applyMapVisualPrefs();
+	});
 
-	// Back leaves the unsaved fields behind. The history entry it returns to puts
-	// the map visuals back to the saved values, undoing any preview.
+	el.markerSizeToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-marker-size]");
+		if (!btn) return;
+		state.prefs.markerSize = btn.dataset.markerSize;
+		await setPref("markerSize", state.prefs.markerSize);
+		syncToggles();
+		applyMapVisualPrefs();
+	});
+
+	el.statsActivitySelect.addEventListener("change", async () => {
+		state.prefs.statsActivity = el.statsActivitySelect.value;
+		await setPref("statsActivity", state.prefs.statsActivity);
+		await renderPastRides();
+	});
+
+	// Back leaves an unsaved, pasted API key behind. Everything else on this
+	// screen saves the moment it's changed.
 	el.settingsBackBtn.addEventListener("click", () => history.back());
 
-	el.saveSettingsBtn.addEventListener("click", async () => {
+	el.saveStadiaKeyBtn.addEventListener("click", async () => {
 		state.prefs.stadiaKey = el.stadiaKeyInput.value.trim();
-		state.prefs.guideContrast = el.guideContrastSelect.value;
-		state.prefs.markerSize = el.markerSizeSelect.value;
-		state.prefs.statsActivity = el.statsActivitySelect.value;
+		el.stadiaKeyInput.value = state.prefs.stadiaKey;
 		await setPref("stadiaKey", state.prefs.stadiaKey);
-		await setPref("guideContrast", state.prefs.guideContrast);
-		await setPref("markerSize", state.prefs.markerSize);
-		await setPref("statsActivity", state.prefs.statsActivity);
-		navigateToScreen("home");
 		rebuildMapStyles();
-		applyMapVisualPrefs();
-		await renderPastRides();
+		flashButtonLabel(el.saveStadiaKeyBtn, "Saved");
 	});
 
 	el.pauseBtn.addEventListener("click", togglePauseSession);
@@ -550,12 +603,42 @@ function syncToggles() {
 	colorButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.calendarColor === state.prefs.calendarColor));
 	el.calendarColorNote.textContent = CALENDAR_COLOR_NOTES[state.prefs.calendarColor];
 
+	const debugAccuracyButtons = el.debugAccuracyToggle.querySelectorAll("button");
+	debugAccuracyButtons.forEach((btn) =>
+		btn.classList.toggle("active", (btn.dataset.debugAccuracy === "on") === state.prefs.debugGpsAccuracy),
+	);
+
+	const debugClipWarmupButtons = el.debugClipWarmupToggle.querySelectorAll("button");
+	debugClipWarmupButtons.forEach((btn) =>
+		btn.classList.toggle("active", (btn.dataset.debugClipWarmup === "on") === state.prefs.debugClipGpsWarmup),
+	);
+
 	const viewButtons = el.ridesViewToggle.querySelectorAll("button");
 	viewButtons.forEach((btn) => {
 		const on = btn.dataset.ridesView === state.prefs.ridesView;
 		btn.classList.toggle("active", on);
 		btn.setAttribute("aria-pressed", String(on));
 	});
+
+	const guideContrastButtons = el.guideContrastToggle.querySelectorAll("button");
+	guideContrastButtons.forEach((btn) =>
+		btn.classList.toggle("active", btn.dataset.guideContrast === state.prefs.guideContrast),
+	);
+
+	const markerSizeButtons = el.markerSizeToggle.querySelectorAll("button");
+	markerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
+}
+
+// Briefly swaps a button's label to confirm an action, then restores it.
+function flashButtonLabel(btn, text, duration = 1200) {
+	if (btn.dataset.flashing) return;
+	const original = btn.textContent;
+	btn.dataset.flashing = "true";
+	btn.textContent = text;
+	setTimeout(() => {
+		btn.textContent = original;
+		delete btn.dataset.flashing;
+	}, duration);
 }
 
 // Only the landscape layout reads this; in portrait the stats sit above the map.
@@ -572,8 +655,6 @@ function applyTheme() {
 
 function fillSettingsForm() {
 	el.stadiaKeyInput.value = state.prefs.stadiaKey;
-	el.guideContrastSelect.value = state.prefs.guideContrast;
-	el.markerSizeSelect.value = state.prefs.markerSize;
 	el.statsActivitySelect.value = state.prefs.statsActivity;
 }
 
@@ -2522,6 +2603,36 @@ function createPointMarker(map, className, lngLat) {
 	return new maplibregl.Marker({ element }).setLngLat(lngLat).addTo(map);
 }
 
+// Debug GPS accuracy overlay: flags the single best (lowest-error) and worst
+// (highest-error) fixes on the route, so a kink in the line has an obvious
+// point to go inspect. Points before clipIndex (the warm-up, when that's
+// being clipped) are excluded so the opening fix doesn't just always win
+// "worst" for being first.
+function addAccuracyExtremeMarkers(map, points, clipIndex = 0) {
+	const known = points.filter((p, i) => i >= clipIndex && Number.isFinite(p.accuracy));
+	if (known.length < 2) return;
+
+	let best = known[0];
+	let worst = known[0];
+	for (const point of known) {
+		if (point.accuracy < best.accuracy) best = point;
+		if (point.accuracy > worst.accuracy) worst = point;
+	}
+	// Every fix carried the same accuracy: nothing to single out as best/worst.
+	if (best.accuracy === worst.accuracy) return;
+
+	createAccuracyMarker(map, "best", best);
+	createAccuracyMarker(map, "worst", worst);
+}
+
+function createAccuracyMarker(map, kind, point) {
+	const element = document.createElement("div");
+	element.className = `accuracy-marker accuracy-marker-${kind}`;
+	const label = kind === "best" ? "Best" : "Worst";
+	element.innerHTML = `<span>${label} ${escapeHtml(formatElevation(point.accuracy, state.prefs.unit))}</span>`;
+	return new maplibregl.Marker({ element }).setLngLat([point.lng, point.lat]).addTo(map);
+}
+
 // Glides a marker to its next GPS fix instead of snapping there, which read as
 // a jump every time a fix landed. Restarting from wherever the marker
 // currently sits (rather than its last target) keeps a run of fast-arriving
@@ -2767,13 +2878,19 @@ function initPostMap(session) {
 	state.chartHighlightMarker = null;
 	state.highlightedPointIndex = -1;
 
-	const routeData = buildSpeedBandRoute(session.points);
+	const showAccuracy = state.prefs.debugGpsAccuracy;
+	const clipIndex = showAccuracy && state.prefs.debugClipGpsWarmup ? findStableStartIndex(session.points) : 0;
+	const routeData = showAccuracy ? buildAccuracyBandRoute(session.points, clipIndex) : buildSpeedBandRoute(session.points);
+	const pointsData = showAccuracy ? buildAccuracyPointsData(session.points, clipIndex) : null;
 	const bounds = routeBounds(session.points);
 	const view = bounds
 		? { bounds, fitBoundsOptions: { maxZoom: 17 } }
 		: { center: [0, 0], zoom: 2 };
 
-	state.postMap = createVectorMap({ container: "postMap", ...view }, (map) => addPostRouteLayer(map, routeData));
+	state.postMap = createVectorMap({ container: "postMap", ...view }, (map) => {
+		addPostRouteLayer(map, routeData);
+		if (pointsData) addAccuracyPointsLayer(map, pointsData);
+	});
 	state.postMarkerLayer = createMarkerLayer(state.postMap);
 
 	const points = session.points || [];
@@ -2784,6 +2901,7 @@ function initPostMap(session) {
 		createPointMarker(state.postMap, "route-finish", [last.lng, last.lat]);
 		createPointMarker(state.postMap, "route-start", [first.lng, first.lat]);
 	}
+	if (showAccuracy) addAccuracyExtremeMarkers(state.postMap, points, clipIndex);
 
 	// Recalculate segment markers based on current unit settings
 	const segmentMarkers = recalculateSegmentMarkers(session);
@@ -2838,6 +2956,86 @@ function buildSpeedBandRoute(points) {
 	return { type: "FeatureCollection", features };
 }
 
+// Debug GPS accuracy overlay: same shape as buildSpeedBandRoute, but banded on
+// each point's accuracy reading (in meters) rather than its speed, and scaled
+// to this ride's own best and worst fixes rather than a fixed range. Points
+// before clipIndex (the warm-up, when that's being clipped) draw in the same
+// neutral gray as an unknown reading and are left out of the min/max range,
+// so a shaky opening doesn't compress the color scale for the rest of the ride.
+function buildAccuracyBandRoute(points, clipIndex = 0) {
+	const features = [];
+	if (points.length < 2) return { type: "FeatureCollection", features };
+
+	const known = points.filter((p, i) => i >= clipIndex && Number.isFinite(p.accuracy));
+	const minAccuracy = known.length ? minOf(known, (p) => p.accuracy) : 0;
+	const maxAccuracy = known.length ? maxOf(known, (p) => p.accuracy) : 0;
+
+	const bands = new Map();
+	for (let i = 1; i < points.length; i++) {
+		const prev = points[i - 1];
+		const curr = points[i];
+		const clipped = i - 1 < clipIndex;
+		const hasAccuracy = !clipped && Number.isFinite(prev.accuracy) && Number.isFinite(curr.accuracy);
+		const band = hasAccuracy ? accuracyBand((prev.accuracy + curr.accuracy) / 2, minAccuracy, maxAccuracy) : "unknown";
+
+		let runs = bands.get(band);
+		if (!runs) {
+			runs = [];
+			bands.set(band, runs);
+		}
+
+		const lastRun = runs.length ? runs[runs.length - 1] : null;
+		if (lastRun && lastRun.endIndex === i - 1) {
+			lastRun.coords.push([curr.lng, curr.lat]);
+			lastRun.endIndex = i;
+		} else {
+			runs.push({
+				coords: [
+					[prev.lng, prev.lat],
+					[curr.lng, curr.lat],
+				],
+				endIndex: i,
+			});
+		}
+	}
+
+	for (const [band, runs] of bands) {
+		const isUnknown = band === "unknown";
+		features.push({
+			type: "Feature",
+			// Unknown draws first (and thus underneath), same as the worst real band.
+			properties: { band: isUnknown ? -1 : band, color: isUnknown ? ACCURACY_UNKNOWN_COLOR : accuracyBandColor(band) },
+			geometry: { type: "MultiLineString", coordinates: runs.map((run) => run.coords) },
+		});
+	}
+	return { type: "FeatureCollection", features };
+}
+
+// Debug GPS accuracy overlay: one point per recorded fix, coloured the same
+// way as the route line. The line's bands smooth over individual readings, so
+// a gap between dots — not just a red stretch — is what shows a real dropout:
+// GPS stopped delivering fixes for a while and the points simply thin out.
+// One GL circle layer, not a marker per point: a long ride is thousands of
+// fixes, and thousands of DOM markers would stall the map.
+function buildAccuracyPointsData(points, clipIndex = 0) {
+	const known = points.filter((p, i) => i >= clipIndex && Number.isFinite(p.accuracy));
+	const minAccuracy = known.length ? minOf(known, (p) => p.accuracy) : 0;
+	const maxAccuracy = known.length ? maxOf(known, (p) => p.accuracy) : 0;
+
+	return {
+		type: "FeatureCollection",
+		features: points.map((point, i) => {
+			const hasAccuracy = i >= clipIndex && Number.isFinite(point.accuracy);
+			const color = hasAccuracy ? accuracyBandColor(accuracyBand(point.accuracy, minAccuracy, maxAccuracy)) : ACCURACY_UNKNOWN_COLOR;
+			return {
+				type: "Feature",
+				properties: { color },
+				geometry: { type: "Point", coordinates: [point.lng, point.lat] },
+			};
+		}),
+	};
+}
+
 function addPostRouteLayer(map, routeData) {
 	map.addSource("post-route", { type: "geojson", data: routeData });
 	// A casing under the coloured line lifts it off busy tiles.
@@ -2865,6 +3063,25 @@ function addPostRouteLayer(map, routeData) {
 			"line-sort-key": ["get", "band"],
 		},
 		paint: { "line-color": ["get", "color"], "line-width": 5 },
+	});
+}
+
+// Debug GPS accuracy overlay: the per-point dots, drawn over the route line
+// so they read as individual fixes rather than blending back into the band
+// they sit on.
+function addAccuracyPointsLayer(map, pointsData) {
+	const dark = state.prefs.theme === "dark";
+	map.addSource("post-accuracy-points", { type: "geojson", data: pointsData });
+	map.addLayer({
+		id: "post-accuracy-points",
+		type: "circle",
+		source: "post-accuracy-points",
+		paint: {
+			"circle-radius": 3,
+			"circle-color": ["get", "color"],
+			"circle-stroke-width": 1,
+			"circle-stroke-color": dark ? "#000000" : "#ffffff",
+		},
 	});
 }
 
@@ -3459,6 +3676,44 @@ function speedBandColor(band) {
 	return paceColor((band + 0.5) / SPEED_BANDS);
 }
 
+// accuracy is the fix's radius of uncertainty in meters, so smaller is
+// better; invert against this ride's own range so band 0 is its worst fix
+// (red) and the top band its best (green), same direction as speedBand.
+function accuracyBand(accuracy, minAccuracy, maxAccuracy) {
+	const range = maxAccuracy - minAccuracy;
+	const t = range > 0 ? 1 - (accuracy - minAccuracy) / range : 1;
+	return Math.min(ACCURACY_BANDS - 1, Math.floor(Math.max(0, Math.min(1, t)) * ACCURACY_BANDS));
+}
+
+function accuracyBandColor(band) {
+	return paceColor((band + 0.5) / ACCURACY_BANDS);
+}
+
+// Debug "clip GPS warm-up": the index of the first fix in a settled run (see
+// the WARMUP_* constants), or 0 if the ride never settles by that definition
+// — better to clip nothing than to grey out an entire ride that just never
+// got great reception.
+function findStableStartIndex(points) {
+	const known = points.filter((p) => Number.isFinite(p.accuracy));
+	if (known.length < WARMUP_CONFIRM_COUNT) return 0;
+
+	const bestAccuracy = minOf(known, (p) => p.accuracy);
+	const settledThreshold = bestAccuracy * WARMUP_STABLE_FACTOR;
+
+	for (let i = 0; i <= points.length - WARMUP_CONFIRM_COUNT; i++) {
+		let settled = true;
+		for (let k = i; k < i + WARMUP_CONFIRM_COUNT; k++) {
+			const accuracy = points[k].accuracy;
+			if (!Number.isFinite(accuracy) || accuracy > settledThreshold) {
+				settled = false;
+				break;
+			}
+		}
+		if (settled) return i;
+	}
+	return 0;
+}
+
 function maxOf(items, pick) {
 	// Spreading a long ride's points into Math.max risks a call-stack overflow.
 	let max = -Infinity;
@@ -3911,9 +4166,9 @@ function renderSegmentMarkers(layer, markers, markerSizeValue = state.prefs.mark
 	}
 }
 
-function applyMapVisualPrefs(preview = null) {
-	const guideContrast = preview?.guideContrast ?? state.prefs.guideContrast;
-	const markerSize = preview?.markerSize ?? state.prefs.markerSize;
+function applyMapVisualPrefs() {
+	const guideContrast = state.prefs.guideContrast;
+	const markerSize = state.prefs.markerSize;
 	applyLiveGuideStyle(getGuideLineStyle(guideContrast));
 
 	if (state.guideLabelMarker) {
@@ -3934,14 +4189,6 @@ function applyMapVisualPrefs(preview = null) {
 			renderSegmentMarkers(state.postMarkerLayer, segmentMarkers, markerSize);
 		}
 	}
-}
-
-function previewSettingsMapVisuals() {
-	if (state.currentScreen !== "settings") return;
-	applyMapVisualPrefs({
-		guideContrast: el.guideContrastSelect.value,
-		markerSize: el.markerSizeSelect.value,
-	});
 }
 
 function escapeHtml(value) {
@@ -4365,6 +4612,8 @@ async function loadPrefs() {
 	const calendarColor = await getPref("calendarColor", "distance");
 	state.prefs.calendarColor = CALENDAR_COLOR_NOTES[calendarColor] ? calendarColor : "distance";
 	state.prefs.installDismissed = await getPref("installDismissed", false);
+	state.prefs.debugGpsAccuracy = (await getPref("debugGpsAccuracy", false)) === true;
+	state.prefs.debugClipGpsWarmup = (await getPref("debugClipGpsWarmup", false)) === true;
 }
 
 async function addSession(session) {
