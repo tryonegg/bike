@@ -83,9 +83,9 @@ const PACE_STOPS = ["#e05a3a", "#e07a3a", "#e0a63a", "#c9d63a", "#8fc93a", "#2f9
 
 // The settings note under the calendar colour choice, one per option.
 const CALENDAR_COLOR_NOTES = {
-	distance: "Green marks your longest days, red your shortest.",
-	time: "Green marks the days with the most moving time, red the least.",
-	pace: "Green marks your fastest days for that activity, red your slowest.",
+	distance: "Longer bars and green mark your longest rides and days, red your shortest.",
+	time: "Longer bars and green mark the rides and days with the most moving time, red the least.",
+	pace: "Longer bars and green mark your fastest rides and days for that activity, red your slowest.",
 };
 
 const state = {
@@ -240,6 +240,7 @@ const el = {
 	postMaxSpeed: document.getElementById("postMaxSpeed"),
 	postSpeedUnit: document.getElementById("postSpeedUnit"),
 	postAvgSpeed: document.getElementById("postAvgSpeed"),
+	postAvgSpeedUnit: document.getElementById("postAvgSpeedUnit"),
 	postGain: document.getElementById("postGain"),
 	postGainUnit: document.getElementById("postGainUnit"),
 	postDrop: document.getElementById("postDrop"),
@@ -709,6 +710,7 @@ function renderRidesList(sessions) {
 	// Sorted newest first, so the year changes at most once per group. The first
 	// year rides in the section label; each older one gets a divider row.
 	let currentYear;
+	const barScale = rideBarScale(sessions);
 
 	for (const [index, session] of sessions.entries()) {
 		const date = new Date(session.date);
@@ -726,7 +728,7 @@ function renderRidesList(sessions) {
 		currentYear = year;
 
 		const li = document.createElement("li");
-		li.appendChild(buildSessionRow(session, date));
+		li.appendChild(buildSessionRow(session, date, { bar: barScale(session) }));
 		el.sessionsList.appendChild(li);
 	}
 }
@@ -975,6 +977,40 @@ function calendarDayScale(byDay, sessions) {
 	return (rides) => (max > min ? (dayTotal(rides) - min) / (max - min) : 0.5);
 }
 
+// The list's per-ride bars, by the same measure as the calendar colours. Length
+// is the ride against the biggest one, as the segment bars are against the
+// fastest segment; colour places it between the smallest and biggest. Rides are
+// compared one by one here, where the calendar compares whole days.
+function rideBarScale(sessions) {
+	if (state.prefs.calendarColor === "pace") {
+		const ranges = ridePaceRanges(sessions);
+		return (session) => {
+			const range = ranges.get(session.activityType || "bike");
+			return {
+				length: range ? rideAvgSpeed(session) / range.max : 0,
+				color: ridePaceFraction(session, ranges),
+			};
+		};
+	}
+
+	const measure =
+		state.prefs.calendarColor === "time" ? (session) => session.movingTime || 0 : (session) => session.totalDistance || 0;
+	let min = Infinity;
+	let max = -Infinity;
+	for (const session of sessions) {
+		const value = measure(session);
+		min = Math.min(min, value);
+		max = Math.max(max, value);
+	}
+	return (session) => {
+		const value = measure(session);
+		return {
+			length: max > 0 ? value / max : 0,
+			color: max > min ? (value - min) / (max - min) : 0.5,
+		};
+	};
+}
+
 // Each activity's slowest and fastest average speed across every saved ride, so
 // a ride's pace is judged against its own kind: a brisk walk is not red just
 // because bike rides are quicker.
@@ -1013,8 +1049,9 @@ function rideAvgSpeed(session) {
 }
 
 // withTime puts the start time in place of the part of day, for the day picker
-// where every row shares the date.
-function buildSessionRow(session, date, { withTime = false } = {}) {
+// where every row shares the date. bar, from rideBarScale, adds the comparison
+// bar the home list shows.
+function buildSessionRow(session, date, { withTime = false, bar = null } = {}) {
 	const unit = state.prefs.unit;
 	const button = document.createElement("button");
 	button.className = "session-row";
@@ -1041,7 +1078,20 @@ function buildSessionRow(session, date, { withTime = false } = {}) {
 	chevron.setAttribute("aria-hidden", "true");
 	chevron.textContent = "›";
 
-	button.append(main, distance, chevron);
+	button.append(main);
+	if (bar) {
+		button.classList.add("with-bar");
+		const track = document.createElement("span");
+		track.className = "pace-track session-bar";
+		track.setAttribute("aria-hidden", "true");
+		const fill = document.createElement("span");
+		fill.className = "pace-fill";
+		fill.style.width = `${Math.max(2, Math.min(1, bar.length) * 100).toFixed(1)}%`;
+		fill.style.background = paceColor(bar.color);
+		track.appendChild(fill);
+		button.appendChild(track);
+	}
+	button.append(distance, chevron);
 	button.addEventListener("click", () => openPostSession(session.id, null, "push"));
 	return button;
 }
@@ -2808,6 +2858,7 @@ function renderPostSummary(session) {
 	el.postTime.textContent = formatDuration(session.movingTime || 0);
 	el.postMaxSpeed.textContent = formatSpeed(session.maxSpeed || 0, unit);
 	el.postSpeedUnit.textContent = speedUnitLabel(unit);
+	el.postAvgSpeedUnit.textContent = speedUnitLabel(unit);
 
 	const elevationUnit = unit === "imperial" ? "ft" : "m";
 	el.postGain.textContent = formatElevationValue(session.elevationGain || 0, unit);

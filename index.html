@@ -158,13 +158,17 @@
           <strong id="postDistance" class="hero-value">-</strong>
           <div class="hero-side">
             <span id="postDistanceUnit" class="hero-unit">mi</span>
-            <span class="hero-avg">avg <span id="postAvgSpeed">-</span></span>
           </div>
         </div>
-        <div class="stat-pair">
+        <div class="stat-pair stat-trio">
           <div>
             <div class="label">Moving time</div>
             <div class="pair-value" id="postTime">-</div>
+          </div>
+          <div class="stat-pair-divider" aria-hidden="true"></div>
+          <div>
+            <div class="label">Avg speed</div>
+            <div class="pair-value"><span id="postAvgSpeed">-</span> <span class="unit" id="postAvgSpeedUnit">mph</span></div>
           </div>
           <div class="stat-pair-divider" aria-hidden="true"></div>
           <div>
@@ -321,18 +325,18 @@
         </div>
       </div>
 
-      <h3 class="label settings-section-label">Calendar</h3>
+      <h3 class="label settings-section-label">Past rides</h3>
       <div class="settings-group">
-        <div class="setting-row stacked" role="group" aria-label="Calendar bar color">
+        <div class="setting-row stacked" role="group" aria-label="What the past ride bars show">
           <div class="setting-row-main">
-            <span>Bar Color</span>
+            <span>Bars Show</span>
             <div class="toggle-pill" id="calendarColorToggle">
               <button data-calendar-color="distance" class="toggle-option">Distance</button>
               <button data-calendar-color="time" class="toggle-option">Time</button>
               <button data-calendar-color="pace" class="toggle-option">Pace</button>
             </div>
           </div>
-          <p class="setting-note" id="calendarColorNote">Green marks your longest days, red your shortest.</p>
+          <p class="setting-note" id="calendarColorNote">Longer bars and green mark your longest rides and days, red your shortest.</p>
         </div>
       </div>
 
