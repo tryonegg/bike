@@ -1,3 +1,5 @@
+import { bestPaceAt, buildPaceIndex, pathsAhead, trailingPace } from "./pace-index.js";
+
 const DB_NAME = "bike-tracker-db";
 const DB_VERSION = 1;
 const SESSION_STORE = "sessions";
@@ -56,6 +58,17 @@ const FEET_PER_METER = 3.28084;
 const TOPO_LAYER_IDS = ["topo-hillshade", "topo-contour-lines", "topo-contour-labels"];
 const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
 
+// Best past pace: the band colours the known paths within this distance ahead,
+// fading out, and a stretch at least this steep gets a climb tag in the readout.
+// Each path is a line layer of its own, since a line gradient is set per layer;
+// the longest paths get the slots.
+const BEST_PACE_LAYER = "live-best-pace";
+const BEST_PACE_SLOTS = 12;
+const BEST_PACE_BAND_M = 500;
+const BEST_PACE_BAND_OPACITY = 0.6;
+const BEST_PACE_CLIMB_GRADE = 0.03;
+const CLEAR_LINE_GRADIENT = ["interpolate", ["linear"], ["line-progress"], 0, "rgba(0, 0, 0, 0)", 1, "rgba(0, 0, 0, 0)"];
+
 // noun names one outing in a title ("Morning walk"); plural heads the home count.
 const ACTIVITIES = {
 	bike: { label: "Bike", icon: "🚴", noun: "ride", plural: "Rides" },
@@ -82,6 +95,9 @@ const state = {
 		stadiaKey: "",
 		mapType: "road",
 		liveMapZoom: LIVE_MAP_ZOOM,
+		comparePastRides: true,
+		// Which side of the map the ride stats sit on in landscape: "left" or "right".
+		rideStatsSide: "left",
 		guideContrast: "high",
 		markerSize: "medium",
 		ridesView: "list",
@@ -103,6 +119,11 @@ const state = {
 	markerLayer: null,
 	guideLabelMarker: null,
 	riderMarker: null,
+	// Built from the saved rides when a ride starts; null until it is ready.
+	paceIndex: null,
+	bestPaceChip: null,
+	// What the band shows, kept so a style swap can redraw it.
+	bestPaceBand: null,
 	postMap: null,
 	postMarkerLayer: null,
 	// Per map: whether it is on Stadia and whether its current style has loaded.
@@ -157,6 +178,8 @@ const el = {
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
 	mapTypeToggle: document.getElementById("mapTypeToggle"),
+	compareToggle: document.getElementById("compareToggle"),
+	statsSideToggle: document.getElementById("statsSideToggle"),
 	calendarColorToggle: document.getElementById("calendarColorToggle"),
 	calendarColorNote: document.getElementById("calendarColorNote"),
 	monthDistance: document.getElementById("monthDistance"),
@@ -246,6 +269,7 @@ init().catch((error) => {
 async function init() {
 	await loadPrefs();
 	applyTheme();
+	applyRideLayout();
 	syncToggles();
 	wireEvents();
 	history.replaceState({ screen: "home" }, "");
@@ -291,6 +315,24 @@ function wireEvents() {
 		await setPref("mapType", state.prefs.mapType);
 		syncToggles();
 		rebuildMapStyles();
+	});
+
+	// Takes effect from the next ride, which is when the past rides are indexed.
+	el.compareToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-compare]");
+		if (!btn) return;
+		state.prefs.comparePastRides = btn.dataset.compare === "on";
+		await setPref("comparePastRides", state.prefs.comparePastRides);
+		syncToggles();
+	});
+
+	el.statsSideToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-stats-side]");
+		if (!btn) return;
+		state.prefs.rideStatsSide = btn.dataset.statsSide;
+		await setPref("rideStatsSide", state.prefs.rideStatsSide);
+		syncToggles();
+		applyRideLayout();
 	});
 
 	el.calendarColorToggle.addEventListener("click", async (event) => {
@@ -480,6 +522,12 @@ function syncToggles() {
 	const mapTypeButtons = el.mapTypeToggle.querySelectorAll("button");
 	mapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
 
+	const compareButtons = el.compareToggle.querySelectorAll("button");
+	compareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
+
+	const sideButtons = el.statsSideToggle.querySelectorAll("button");
+	sideButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.statsSide === state.prefs.rideStatsSide));
+
 	const colorButtons = el.calendarColorToggle.querySelectorAll("button");
 	colorButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.calendarColor === state.prefs.calendarColor));
 	el.calendarColorNote.textContent = CALENDAR_COLOR_NOTES[state.prefs.calendarColor];
@@ -490,6 +538,11 @@ function syncToggles() {
 		btn.classList.toggle("active", on);
 		btn.setAttribute("aria-pressed", String(on));
 	});
+}
+
+// Only the landscape layout reads this; in portrait the stats sit above the map.
+function applyRideLayout() {
+	el.screens.active.classList.toggle("stats-right", state.prefs.rideStatsSide === "right");
 }
 
 function applyTheme() {
@@ -1165,6 +1218,7 @@ async function startSession(initialPosition) {
 
 	navigateToScreen("active");
 	initLiveMap(initialPosition.coords.latitude, initialPosition.coords.longitude);
+	loadPaceIndex(state.currentSession);
 
 	// Initialize sensor fusion for GPS outage bridging
 	state.gpsOutageDetected = false;
@@ -1522,6 +1576,7 @@ function updateLiveMap(point, heading, speedMps) {
 
 	if (session) session.currentHeading = nextHeading;
 	followLiveMap(point, nextHeading);
+	updateBestPace(point, nextHeading);
 }
 
 // Heading-up follow camera. MapLibre rotates the map itself, so road names are
@@ -1596,6 +1651,7 @@ async function togglePauseSession() {
 		session.pauseStartedAt = Date.now();
 		stopWatch();
 		setPauseButton(true);
+		hideBestPace();
 		await releaseWakeLock();
 		await saveActiveSessionCheckpoint();
 		updateLiveStats();
@@ -1649,6 +1705,7 @@ async function finalizeSession() {
 	stopWatch();
 	clearInterval(session.elapsedIntervalId);
 	await releaseWakeLock();
+	state.paceIndex = null;
 
 	const saved = {
 		date: session.date,
@@ -1807,6 +1864,7 @@ async function resumeCheckpointedSession(restored) {
 
 	navigateToScreen("active", "replace");
 	initLiveMap(restored.lastPoint.lat, restored.lastPoint.lng);
+	loadPaceIndex(restored);
 
 	state.liveRouteCoords = restored.points.map((point) => [point.lng, point.lat]);
 	setLiveLineData(LIVE_ROUTE_SOURCE, state.liveRouteCoords);
@@ -1844,6 +1902,8 @@ function initLiveMap(lat, lng) {
 	state.markerLayer = createMarkerLayer(map);
 	state.guideLabelMarker = createGuideLabelMarker(map);
 	state.riderMarker = createPointMarker(map, "rider-dot", [lng, lat]);
+	state.bestPaceChip = createBestPaceChip(map, [lng, lat]);
+	state.bestPaceBand = null;
 	// Its offset is in pixels, so its ground position depends on the zoom.
 	map.on("zoom", updateGuideLabel);
 
@@ -1993,6 +2053,29 @@ function addLiveOverlayLayers(map) {
 	map.addSource(LIVE_ROUTE_SOURCE, { type: "geojson", data: lineData(state.liveRouteCoords) });
 	map.addSource(LIVE_GUIDE_SOURCE, { type: "geojson", data: lineData(state.liveGuideCoords) });
 
+	// The best-pace band sits under the road names, like a highlighter on the
+	// roads, while the route and guide line stay on top of everything.
+	const labelBeforeId = styleLayerAnchors(map).labelBeforeId;
+	for (let slot = 0; slot < BEST_PACE_SLOTS; slot++) {
+		const id = `${BEST_PACE_LAYER}-${slot}`;
+		const path = state.bestPaceBand?.[slot];
+		map.addSource(id, { type: "geojson", data: lineData(path?.coords ?? []), lineMetrics: true });
+		map.addLayer(
+			{
+				id,
+				type: "line",
+				source: id,
+				layout: round,
+				paint: {
+					"line-width": ["interpolate", ["linear"], ["zoom"], 13, 6, 16, 20, 19, 46],
+					"line-blur": 1,
+					"line-gradient": path?.gradient ?? CLEAR_LINE_GRADIENT,
+				},
+			},
+			labelBeforeId,
+		);
+	}
+
 	map.addLayer({
 		id: "live-route",
 		type: "line",
@@ -2061,6 +2144,23 @@ function getDemSource() {
 	return state.demSource;
 }
 
+// Where added layers slot into the base style. Relief goes under roads and
+// buildings so it shades the land without dimming them. Anything labelled or
+// highlighted goes under the road names and place labels, so those stay on top.
+// Some styles put water names first, which is why the first symbol layer alone
+// is not a safe anchor.
+function styleLayerAnchors(map) {
+	const layers = map.getStyle().layers;
+	const firstSymbolId = layers.find((layer) => layer.type === "symbol")?.id;
+	return {
+		reliefBeforeId:
+			layers.find((layer) => ["transportation", "building", "aeroway"].includes(layer["source-layer"]))?.id ??
+			firstSymbolId,
+		labelBeforeId:
+			layers.find((layer) => ["transportation_name", "place"].includes(layer["source-layer"]))?.id ?? firstSymbolId,
+	};
+}
+
 function addTopoLayers(map) {
 	if (state.prefs.mapType !== "topo") return;
 	const demSource = getDemSource();
@@ -2069,17 +2169,7 @@ function addTopoLayers(map) {
 	const dark = state.prefs.theme === "dark";
 	const imperial = state.prefs.unit === "imperial";
 	const layers = map.getStyle().layers;
-
-	// Relief sits under roads and buildings so it shades the land without dimming
-	// them. Contour labels sit under the road names and place labels, so where
-	// they collide those win. Some styles put water names first, which is why the
-	// first symbol layer alone is not a safe anchor.
-	const firstSymbolId = layers.find((layer) => layer.type === "symbol")?.id;
-	const reliefBeforeId =
-		layers.find((layer) => ["transportation", "building", "aeroway"].includes(layer["source-layer"]))?.id ??
-		firstSymbolId;
-	const labelBeforeId =
-		layers.find((layer) => ["transportation_name", "place"].includes(layer["source-layer"]))?.id ?? firstSymbolId;
+	const { reliefBeforeId, labelBeforeId } = styleLayerAnchors(map);
 
 	// Contour labels have to use a font the style's glyph server actually has.
 	// Styles often lead with an italic for water names, so a regular face wins.
@@ -2266,6 +2356,164 @@ function updateGuideLabel() {
 	const meters = haversineMeters(rider[1], rider[0], origin[1], origin[0]);
 	element.firstChild.textContent = `${formatDistance(meters, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)} to start`;
 	element.style.visibility = "visible";
+}
+
+// ---- Best past pace ----
+
+// Indexes the saved rides of the same activity when a ride starts. It is ready
+// a moment later; until then the readout and band stay hidden.
+async function loadPaceIndex(session) {
+	state.paceIndex = null;
+	if (!state.prefs.comparePastRides) return;
+	const activity = session.activityType || "bike";
+	try {
+		const sessions = (await getAllSessions()).filter((saved) => (saved.activityType || "bike") === activity);
+		const index = await buildPaceIndex(sessions);
+		// The ride may have ended, or another begun, while the index was building.
+		if (state.currentSession === session) state.paceIndex = index;
+	} catch (error) {
+		console.warn("Indexing past rides failed", error);
+	}
+}
+
+function updateBestPace(point, heading) {
+	const session = state.currentSession;
+	const index = state.paceIndex;
+	state.bestPaceChip?.setLngLat([point.lng, point.lat]);
+
+	if (!state.prefs.comparePastRides || !index || !session || session.paused) {
+		hideBestPace();
+		return;
+	}
+
+	// The band shows every known path ahead even where this spot has no history,
+	// such as a new street leading onto roads ridden before.
+	setBestPaceBand(pathsAhead(index, point, heading, BEST_PACE_BAND_M));
+
+	const here = bestPaceAt(index, point.lat, point.lng, heading);
+	if (!Number.isFinite(here.best)) {
+		renderBestPaceChip({ empty: true });
+		return;
+	}
+	renderBestPaceChip({ best: here.best, current: trailingPace(session.points), grade: here.grade });
+}
+
+function hideBestPace() {
+	renderBestPaceChip(null);
+	setBestPaceBand(null);
+}
+
+const GRADE_ICON =
+	'<svg width="10" height="11" viewBox="0 0 10 11" aria-hidden="true"><path d="M5 9.6V1.8M1.6 5.1 5 1.6l3.4 3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// The readout rides beside the rider dot, off the road ahead. It is a marker
+// anchored on its left edge, so it follows the rider in screen space.
+function createBestPaceChip(map, lngLat) {
+	const element = document.createElement("div");
+	element.className = "best-pace-chip";
+	element.hidden = true;
+	element.innerHTML = `
+		<div class="best-pace-top"><span class="label">Best here</span><span class="best-pace-value"></span></div>
+		<div class="best-pace-delta"><span class="best-pace-delta-value"></span><span class="best-pace-unit"></span></div>
+		<div class="best-pace-grade" hidden>${GRADE_ICON}<span></span></div>
+		<div class="best-pace-empty" hidden>No past rides this way</div>`;
+	return new maplibregl.Marker({ element, anchor: "left", offset: [22, 0] }).setLngLat(lngLat).addTo(map);
+}
+
+// view: null hides it; {empty: true} for no past rides this way; otherwise the
+// best past pace, the rider's own pace over the same stretch, and the grade.
+function renderBestPaceChip(view) {
+	const element = state.bestPaceChip?.getElement();
+	if (!element) return;
+	element.hidden = !view;
+	if (!view) return;
+
+	const part = (selector) => element.querySelector(selector);
+	element.classList.toggle("is-empty", Boolean(view.empty));
+	part(".best-pace-top").hidden = Boolean(view.empty);
+	part(".best-pace-delta").hidden = Boolean(view.empty);
+	part(".best-pace-empty").hidden = !view.empty;
+	if (view.empty) {
+		part(".best-pace-grade").hidden = true;
+		element.classList.remove("is-ahead", "is-pending");
+		return;
+	}
+
+	const unit = state.prefs.unit;
+	const best = formatSpeed(view.best, unit);
+	part(".best-pace-value").textContent = best;
+	part(".best-pace-unit").textContent = speedUnitLabel(unit);
+
+	// The delta is taken between the rounded figures so it always matches what
+	// the two numbers on screen say.
+	if (Number.isFinite(view.current)) {
+		const delta = Number(formatSpeed(view.current, unit)) - Number(best);
+		const ahead = delta >= 0;
+		part(".best-pace-delta-value").textContent = `${ahead ? "+" : "−"}${Math.abs(delta).toFixed(1)}`;
+		element.classList.toggle("is-ahead", ahead);
+		element.classList.remove("is-pending");
+	} else {
+		part(".best-pace-delta-value").textContent = "–";
+		element.classList.remove("is-ahead");
+		element.classList.add("is-pending");
+	}
+
+	const climbing = view.grade >= BEST_PACE_CLIMB_GRADE;
+	part(".best-pace-grade").hidden = !climbing;
+	if (climbing) part(".best-pace-grade span").textContent = `${Math.round(view.grade * 100)}% climb`;
+}
+
+// Colours the paths ahead by the best past pace along them, on the rider's own
+// slow-to-fast range, fading out with distance from the rider. Each path is one
+// line with a gradient along it, so colour and fade change smoothly and nothing
+// overlaps itself.
+function setBestPaceBand(lines) {
+	const index = state.paceIndex;
+	const paths = [];
+	if (lines && index) {
+		const range = index.fast - index.slow;
+		const measured = lines.map((line) => {
+			const along = [0];
+			for (let k = 1; k < line.coords.length; k++) {
+				const [lngA, latA] = line.coords[k - 1];
+				const [lngB, latB] = line.coords[k];
+				along.push(along[k - 1] + haversineMeters(latA, lngA, latB, lngB));
+			}
+			return { line, along };
+		});
+		measured.sort((a, b) => b.along[b.along.length - 1] - a.along[a.along.length - 1]);
+
+		for (const { line, along } of measured.slice(0, BEST_PACE_SLOTS)) {
+			const total = along[along.length - 1];
+			const stops = [];
+			let lastProgress = -1;
+			for (let k = 0; k < line.coords.length; k++) {
+				const progress = along[k] / total;
+				// line-gradient needs strictly rising stops.
+				if (!(progress > lastProgress)) continue;
+				lastProgress = progress;
+				const t = range > 0 && Number.isFinite(line.paces[k]) ? (line.paces[k] - index.slow) / range : 0.5;
+				const alpha = BEST_PACE_BAND_OPACITY * Math.max(0, 1 - (line.distances[k] / BEST_PACE_BAND_M) ** 1.4);
+				stops.push(progress, paceColor(t).replace("rgb(", "rgba(").replace(")", `, ${alpha.toFixed(3)})`));
+			}
+			if (stops.length >= 4) {
+				paths.push({ coords: line.coords, gradient: ["interpolate", ["linear"], ["line-progress"], ...stops] });
+			}
+		}
+	}
+
+	// Slots that were empty before and still are need no update.
+	const slotsInUse = Math.max(state.bestPaceBand?.length ?? 0, paths.length);
+	state.bestPaceBand = paths;
+
+	const map = state.liveMap;
+	if (!isMapStyleReady(map)) return;
+	for (let slot = 0; slot < slotsInUse; slot++) {
+		const id = `${BEST_PACE_LAYER}-${slot}`;
+		if (!map.getLayer(id)) continue;
+		map.getSource(id).setData(lineData(paths[slot]?.coords ?? []));
+		map.setPaintProperty(id, "line-gradient", paths[slot]?.gradient ?? CLEAR_LINE_GRADIENT);
+	}
 }
 
 function initPostMap(session) {
@@ -3615,6 +3863,7 @@ async function importAllData(event) {
 		}
 
 		await loadPrefs();
+		applyRideLayout();
 		await renderPastRides();
 		await showMessage("Import Success", "Your data has been imported successfully.");
 	} catch (error) {
@@ -3696,6 +3945,8 @@ async function loadPrefs() {
 	// would leave the live map unable to draw.
 	const liveMapZoom = await getPref("liveMapZoom", LIVE_MAP_ZOOM);
 	state.prefs.liveMapZoom = Number.isFinite(liveMapZoom) ? liveMapZoom : LIVE_MAP_ZOOM;
+	state.prefs.comparePastRides = (await getPref("comparePastRides", true)) !== false;
+	state.prefs.rideStatsSide = (await getPref("rideStatsSide", "left")) === "right" ? "right" : "left";
 	state.prefs.guideContrast = await getPref("guideContrast", "high");
 	state.prefs.markerSize = await getPref("markerSize", "medium");
 	state.prefs.ridesView = await getPref("ridesView", "list");

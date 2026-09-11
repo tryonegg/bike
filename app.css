@@ -10,10 +10,10 @@
 :root {
   color-scheme: light;
   --bg: #fcfcfa;
-  --bg-fade: rgba(252, 252, 250, 0.97);
+  --bg-fade: rgba(252, 252, 250, 0.5);
   --bg-clear: rgba(252, 252, 250, 0);
   --header-bg: rgba(252, 252, 250, 0.35);
-  --strip-bg: rgba(252, 252, 250, 0.95);
+  --strip-bg: rgba(252, 252, 250, 0.5);
   --raised: #ffffff;
   --sunk: #f4f5f1;
   --track: #eff0eb;
@@ -37,6 +37,9 @@
   --cta-shadow: 0 8px 24px rgba(20, 24, 26, 0.2);
   --pace-slow: #e05a3a;
   --pace-fast: #2f9c4f;
+  /* The best-pace readout when the rider is at or ahead of their best. */
+  --pace-ahead-tint: #f1f8f3;
+  --pace-ahead-edge: rgba(47, 156, 79, 0.45);
   --font: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -68,6 +71,8 @@
   --finish: #eef1ee;
   --chip-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
   --cta-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --pace-ahead-tint: #17271e;
+  --pace-ahead-edge: rgba(92, 199, 147, 0.5);
 }
 
 * {
@@ -326,8 +331,8 @@ button {
   top: 0;
   z-index: 5;
   background: var(--header-bg);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
   border-bottom: 1px solid var(--header-border);
 }
 
@@ -762,8 +767,8 @@ button {
   z-index: 2;
   padding: calc(20px + var(--safe-top)) 22px 18px;
   background: var(--strip-bg);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
   border-bottom: 1px solid var(--header-border);
 }
 
@@ -844,7 +849,7 @@ button {
 /* Clear of the map credits, which sit just above the ride controls. */
 .map-chip.recenter {
   left: 14px;
-  bottom: calc(132px + var(--safe-bottom));
+  bottom: calc(100px + var(--safe-bottom));
 }
 
 .ride-controls {
@@ -920,6 +925,7 @@ button {
 /* MapLibre's attribution would otherwise sit under the ride controls. */
 .live-map .maplibregl-ctrl-bottom-right,
 .live-map .maplibregl-ctrl-bottom-left {
+  display: none;
   bottom: calc(96px + var(--safe-bottom));
 }
 
@@ -933,30 +939,137 @@ button {
   pointer-events: none;
 }
 
-/* Sideways, the stats become a column beside the map. */
+/* Best past pace here vs. the rider's pace over the same stretch, beside the
+   rider dot. The delta is the figure to read at a glance, so it is the largest. */
+.best-pace-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px 11px;
+  border: 1.5px solid transparent;
+  border-radius: 18px;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--chip-shadow);
+  pointer-events: none;
+}
+
+.best-pace-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.best-pace-value {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.best-pace-delta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1;
+}
+
+.best-pace-delta-value {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--pace-slow);
+}
+
+.best-pace-unit {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.best-pace-chip.is-ahead {
+  border-color: var(--pace-ahead-edge);
+  background: var(--pace-ahead-tint);
+}
+
+.best-pace-chip.is-ahead .best-pace-delta-value {
+  color: var(--pace-fast);
+}
+
+/* The rider's own stretch is not long enough yet to compare. */
+.best-pace-chip.is-pending .best-pace-delta-value {
+  color: var(--faint);
+}
+
+.best-pace-grade {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--track);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.best-pace-chip.is-empty {
+  padding: 10px 16px;
+  border-radius: 999px;
+}
+
+.best-pace-empty {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Sideways, the stats become a column beside the map: a third of the screen
+   for the stats, two thirds for the map. */
 @media (orientation: landscape) and (max-height: 640px) {
+  .active-screen {
+    --ride-column: min(23%, 400px);
+  }
+
   .ride-strip {
     right: auto;
     bottom: 0;
-    width: min(44%, 400px);
+    width: var(--ride-column);
     padding-left: calc(22px + env(safe-area-inset-left, 0px));
     border-bottom: 0;
     border-right: 1px solid var(--header-border);
   }
 
+  /* The narrow column stacks distance over elapsed time, split by a rule. */
+  .ride-strip .stat-pair {
+    flex-direction: column;
+  }
+
+  .ride-strip .stat-pair-divider {
+    width: auto;
+    height: 1px;
+    margin: 14px 0;
+  }
+
+  /* The edges set the size here: .map's full width would push the map past the
+     right edge, taking the rider (placed at its centre) with it. */
   .live-map {
-    left: min(44%, 400px);
+    left: var(--ride-column);
+    width: auto;
   }
 
   .ride-controls {
     right: auto;
-    width: min(44%, 400px);
+    width: var(--ride-column);
     padding-left: calc(22px + env(safe-area-inset-left, 0px));
     background: none;
   }
 
   .map-chip.recenter {
-    left: calc(min(44%, 400px) + 14px);
+    left: calc(var(--ride-column) + 14px);
     bottom: calc(14px + var(--safe-bottom));
   }
 
@@ -967,6 +1080,53 @@ button {
 
   .hero-value {
     font-size: 72px;
+  }
+
+  /* The unit stays beside the speed and the average drops to its own line
+     under it. display: contents lets both join the hero row so the average
+     can wrap onto the next line. */
+  .ride-strip .hero {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .ride-strip .hero-side {
+    display: contents;
+  }
+
+  .ride-strip .hero-unit {
+    margin-bottom: 6px;
+  }
+
+  .ride-strip .hero-avg {
+    flex-basis: 100%;
+  }
+
+  /* The Stats Side setting: the same layout mirrored, with the stats on the
+     right. The notch inset moves to whichever edge the column is against. */
+  .active-screen.stats-right .ride-strip {
+    left: auto;
+    right: 0;
+    padding-left: 22px;
+    padding-right: calc(22px + env(safe-area-inset-right, 0px));
+    border-right: 0;
+    border-left: 1px solid var(--header-border);
+  }
+
+  .active-screen.stats-right .live-map {
+    left: 0;
+    right: var(--ride-column);
+  }
+
+  .active-screen.stats-right .ride-controls {
+    left: auto;
+    right: 0;
+    padding-left: 22px;
+    padding-right: calc(22px + env(safe-area-inset-right, 0px));
+  }
+
+  .active-screen.stats-right .map-chip.recenter {
+    left: calc(14px + env(safe-area-inset-left, 0px));
   }
 }
 

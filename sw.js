@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v1.4.1";
+const CACHE_VERSION = "v1.5.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -19,6 +19,7 @@ const ASSETS = [
   "./index.html",
   "./app.css",
   "./app.js",
+  "./pace-index.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/settings.svg",
@@ -32,6 +33,7 @@ const SHELL_ASSET_SUFFIXES = [
   "/index.html",
   "/app.css",
   "/app.js",
+  "/pace-index.js",
   "/manifest.webmanifest",
   "/icons/icon.svg",
   "/icons/settings.svg",
@@ -45,6 +47,7 @@ const UPDATE_WATCH_SUFFIXES = [
   "/index.html",
   "/app.css",
   "/app.js",
+  "/pace-index.js",
   "/manifest.webmanifest",
   "/vendor/maplibre/maplibre-gl.js",
   "/vendor/maplibre-contour/maplibre-contour.min.js",
