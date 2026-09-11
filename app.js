@@ -97,6 +97,9 @@ const CALENDAR_COLOR_NOTES = {
 	pace: "Longer bars and green mark your fastest rides and days for that activity, red your slowest.",
 };
 
+// This distance (in meters) determines which points are rejected for recording in processPoint
+const POINT_REJECTION_THRESHOLD = 1.0;
+
 const state = {
 	prefs: {
 		unit: "imperial",
@@ -1618,6 +1621,53 @@ function validateAndSpliceGapPoints(resumedGPSPoint) {
 	session.lastPoint = previous;
 }
 
+// Should we add this point, or make it the new end of the list?
+function determinePointRejection(point) {
+	var l = state.currentSession.points.length;
+
+	// we can't reject an intermediate point unless there are at least 3 points to compare
+	if (l<=2) return false;
+
+	// Are all the points inside a circle that's smaller than the rejection radius?
+	var centerLat = (point.lat + state.currentSession.points[l-1].lat + state.currentSession.points[l-2].lat)/3.0;
+	var centerLng = (point.lng + state.currentSession.points[l-1].lng + state.currentSession.points[l-2].lng)/3.0;
+	if (haversineMeters(centerLat, centerLng, point.lat, point.lng)<=POINT_REJECTION_THRESHOLD &&
+		haversineMeters(centerLat, centerLng, state.currentSession.points[l-1].lat, state.currentSession.points[l-2]) <= POINT_REJECTION_THRESHOLD &&
+		haversineMeters(centerLat, centerLng, state.currentSession.points[l-2].lat, state.currentSession.points[l-2].lng) <= POINT_REJECTION_THRESHOLD) {
+		console.log("rejecting point: within rejection radius");
+		return true;
+	}
+
+	// if the first and last point are the same but the intermediate point is wonky, let's just assume that
+	// there's something unpredictable about the data and store the extra point just in case
+	var d = {
+		lat: point.lat - state.currentSession.points[l-2].lat,
+		lng: point.lng - state.currentSession.points[l-2].lng
+	};
+	if (d.lat == 0 && d.lng == 0) return false;
+
+	// assume a line going from state.currentSession.points[l-2] to point defined as state.currentSession.points[l-2] + d*t;
+	// Find the point on the line that's closest to the line
+	var a = state.currentSession.points[l-2];
+	var b = state.currentSession.points[l-1];
+	var t = -((d.lat*(a.lat - b.lat) + d.lng*(a.lng-b.lng))/(d.lng*d.lng + d.lat*d.lat));
+	var nearestPoint = {
+		lat: a.lat + d.lat*t,
+		lng: a.lng + d.lng*t
+	};
+	// if the distance from the previous point to what would be the interpolated point is below
+	// the threshold, then we will reject the point
+	var distanceToLine = haversineMeters(b.lat, b.lng, nearestPoint.lat, nearestPoint.lng);
+	if (distanceToLine < POINT_REJECTION_THRESHOLD) {
+		console.log("rejecting point: along the interpolated line");
+		return true;
+	}
+
+	// by default, keep all data
+	return false;
+
+}
+
 function processPosition(position, forceAdd = false) {
 	const session = state.currentSession;
 	if (!session || session.paused) return;
@@ -1655,7 +1705,12 @@ function processPosition(position, forceAdd = false) {
 		session.totalDistance += haversineMeters(session.lastPoint.lat, session.lastPoint.lng, point.lat, point.lng);
 	}
 
-	session.points.push(point);
+	// determine if we can get rid of the previous point to save on storage space
+	if (determinePointRejection(point) == true) {
+		session.points[session.points.length-1] = point;
+	} else {
+		session.points.push(point);
+	}
 	session.lastPoint = point;
 	updateTravelHeading(session);
 
