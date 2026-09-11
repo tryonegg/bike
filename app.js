@@ -226,6 +226,8 @@ const el = {
 	exportDataBtn: document.getElementById("exportDataBtn"),
 	importDataBtn: document.getElementById("importDataBtn"),
 	importFileInput: document.getElementById("importFileInput"),
+	importGpxBtn: document.getElementById("importGpxBtn"),
+	importGpxFileInput: document.getElementById("importGpxFileInput"),
 	deleteAllRidesBtn: document.getElementById("deleteAllRidesBtn"),
 	keepScreenOnToggle: document.getElementById("keepScreenOnToggle"),
 	setupTopBar: document.getElementById("setupTopBar"),
@@ -403,6 +405,8 @@ function wireEvents() {
 	el.exportDataBtn.addEventListener("click", exportAllData);
 	el.importDataBtn.addEventListener("click", () => el.importFileInput.click());
 	el.importFileInput.addEventListener("change", importAllData);
+	el.importGpxBtn.addEventListener("click", () => el.importGpxFileInput.click());
+	el.importGpxFileInput.addEventListener("change", importGpxSession);
 	el.deleteAllRidesBtn.addEventListener("click", deleteAllRides);
 
 	el.openSettingsBtn.addEventListener("click", () => {
@@ -4098,6 +4102,184 @@ async function importAllData(event) {
 		el.importFileInput.value = "";
 		await showMessage("Import Error", `Failed to import data: ${error.message}`);
 	}
+}
+
+async function importGpxSession(event) {
+	const file = event.target.files[0];
+	if (!file) return;
+
+	try {
+		const text = await file.text();
+		const { points, activityType } = buildSessionFromGpx(text);
+
+		const confirmed = await confirmWithModal({
+			title: "Import GPX Ride",
+			message: `Import a ${ACTIVITIES[activityType].noun} with ${points.length} point(s)?`,
+			confirmText: "Import",
+			cancelText: "Cancel",
+		});
+
+		el.importGpxFileInput.value = "";
+
+		if (!confirmed) return;
+
+		const totalDistance = points.reduce((sum, p, i) => {
+			if (i === 0) return 0;
+			return sum + haversineMeters(points[i - 1].lat, points[i - 1].lng, p.lat, p.lng);
+		}, 0);
+		const movingTime = Math.max(0, points[points.length - 1].timestamp - points[0].timestamp);
+		const maxSpeed = points.reduce((max, p) => Math.max(max, p.speed), 0);
+
+		let elevationGain = 0;
+		let elevationDrop = 0;
+		const altitudeSamples = [];
+		let smoothAltitudePrev = null;
+		for (const p of points) {
+			if (!Number.isFinite(p.altitude)) continue;
+			altitudeSamples.push(p.altitude);
+			if (altitudeSamples.length > 5) altitudeSamples.shift();
+			const smooth = altitudeSamples.reduce((sum, v) => sum + v, 0) / altitudeSamples.length;
+			if (smoothAltitudePrev != null) {
+				const delta = smooth - smoothAltitudePrev;
+				if (delta > 0) elevationGain += delta;
+				if (delta < 0) elevationDrop += Math.abs(delta);
+			}
+			smoothAltitudePrev = smooth;
+		}
+
+		const session = {
+			date: new Date(points[0].timestamp).toISOString(),
+			unit: state.prefs.unit,
+			activityType,
+			keepScreenOn: false,
+			points,
+			totalDistance,
+			movingTime,
+			maxSpeed,
+			avgSpeed: movingTime > 0 ? totalDistance / (movingTime / 1000) : 0,
+			elevationGain,
+			elevationDrop,
+			segments: [],
+			segmentMarkers: [],
+			pauses: [],
+		};
+
+		const id = await addSession(session);
+		session.id = id;
+		await renderPastRides();
+		await showMessage("Import Success", "The ride has been imported.");
+	} catch (error) {
+		el.importGpxFileInput.value = "";
+		await showMessage("Import Error", `Failed to import GPX file: ${error.message}`);
+	}
+}
+
+// Parses a GPX file into track points shaped like a live-recorded session's,
+// deriving per-point speed from consecutive distance/time since GPX rarely
+// carries speed itself. Points without a <time> get one synthesised a second
+// apart so moving time and speed can still be computed.
+function buildSessionFromGpx(text) {
+	const doc = new DOMParser().parseFromString(text, "application/xml");
+	if (doc.querySelector("parsererror")) {
+		throw new Error("The file is not a valid GPX file.");
+	}
+
+	const nodes = Array.from(doc.getElementsByTagName("trkpt"));
+	const source = nodes.length ? nodes : Array.from(doc.getElementsByTagName("rtept"));
+	if (!source.length) {
+		throw new Error("No track points found in this GPX file.");
+	}
+
+	const raw = source
+		.map((node) => {
+			const lat = parseFloat(node.getAttribute("lat"));
+			const lng = parseFloat(node.getAttribute("lon"));
+			const eleNode = node.getElementsByTagName("ele")[0];
+			const altitude = eleNode ? parseFloat(eleNode.textContent) : NaN;
+			const timeNode = node.getElementsByTagName("time")[0];
+			const timestamp = timeNode ? new Date(timeNode.textContent).getTime() : NaN;
+			return {
+				lat,
+				lng,
+				altitude: Number.isFinite(altitude) ? altitude : null,
+				timestamp: Number.isFinite(timestamp) ? timestamp : null,
+			};
+		})
+		.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+
+	if (!raw.length) {
+		throw new Error("No valid track points found in this GPX file.");
+	}
+
+	if (raw.some((p) => p.timestamp != null)) {
+		let last = raw.find((p) => p.timestamp != null).timestamp;
+		for (const p of raw) {
+			if (p.timestamp == null) p.timestamp = last;
+			last = p.timestamp;
+		}
+		raw.sort((a, b) => a.timestamp - b.timestamp);
+	} else {
+		const base = Date.now() - (raw.length - 1) * 1000;
+		raw.forEach((p, i) => {
+			p.timestamp = base + i * 1000;
+		});
+	}
+
+	const speeds = smoothedGpxSpeeds(raw);
+	const points = raw.map((p, index) => ({
+		lat: p.lat,
+		lng: p.lng,
+		altitude: p.altitude,
+		speed: speeds[index],
+		accuracy: null,
+		timestamp: p.timestamp,
+	}));
+
+	const typeNode = doc.getElementsByTagName("type")[0];
+	const activityType = inferActivityType(typeNode ? typeNode.textContent : "");
+
+	return { points, activityType };
+}
+
+// GPX timestamps are commonly only second-precision, so consecutive points
+// often land on the same second (implying zero speed) followed by one that
+// jumps two seconds' worth of distance at once (implying double speed).
+// Speed per point, used only for the route/chart's slow-to-fast colouring,
+// is instead the distance covered over a trailing several-second window,
+// which rides out that jitter the way a device's own GPS speed already does.
+const GPX_SPEED_WINDOW_MS = 6000;
+
+function smoothedGpxSpeeds(points) {
+	const speeds = new Array(points.length).fill(0);
+	let windowStart = 0;
+	let windowDistance = 0;
+
+	for (let i = 1; i < points.length; i++) {
+		windowDistance += haversineMeters(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
+
+		while (windowStart < i - 1 && points[i].timestamp - points[windowStart].timestamp > GPX_SPEED_WINDOW_MS) {
+			windowDistance -= haversineMeters(
+				points[windowStart].lat,
+				points[windowStart].lng,
+				points[windowStart + 1].lat,
+				points[windowStart + 1].lng,
+			);
+			windowStart++;
+		}
+
+		const windowSeconds = (points[i].timestamp - points[windowStart].timestamp) / 1000;
+		speeds[i] = windowSeconds > 0 ? windowDistance / windowSeconds : 0;
+	}
+
+	return speeds;
+}
+
+function inferActivityType(typeText) {
+	const t = (typeText || "").toLowerCase();
+	if (t.includes("hik")) return "hike";
+	if (t.includes("kayak") || t.includes("paddle") || t.includes("canoe")) return "kayak";
+	if (t.includes("run") || t.includes("walk")) return "walk";
+	return "bike";
 }
 
 // One connection is shared by every store operation. Opening a fresh one per call

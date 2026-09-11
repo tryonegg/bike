@@ -1703,6 +1703,10 @@ button {
   font-size: 14px;
 }
 
+.data-buttons-note {
+  padding: 8px 22px 0;
+}
+
 .danger-zone {
   padding: 12px 22px 0;
 }
