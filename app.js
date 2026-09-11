@@ -39,6 +39,15 @@ const LIVE_CAMERA_EASE_MS = 900;
 // A three-quarter view that tilts the road ahead into sight. It stays fixed for
 // the ride: the tilt gestures are off and the follow camera never changes it.
 const LIVE_MAP_PITCH = 55;
+// Which way the map points. At or above HEADING_GPS_MIN_SPEED_MPS the phone's
+// own GPS heading is used: accurate when moving briskly, but unreliable when
+// slow. Below it, or when the phone gives no heading, the map turns once the
+// rider has moved HEADING_MIN_MOVE_M from where it last turned, pointing along
+// that movement. That works at walking pace, and holds still at a stop, where
+// GPS jitter rarely adds up to the distance. A shorter distance turns sooner but
+// wobbles more; GPS positions are only good to a few meters.
+const HEADING_GPS_MIN_SPEED_MPS = 2 / MPS_TO_MPH;
+const HEADING_MIN_MOVE_M = 12;
 const LIVE_ROUTE_SOURCE = "live-route";
 const LIVE_GUIDE_SOURCE = "live-guide";
 // The distance-to-start chip sits this far from the rider along the guide line,
@@ -1262,6 +1271,8 @@ async function startSession(initialPosition) {
 		segmentStartElapsed: 0,
 		shouldRecenter: true,
 		currentHeading: 0,
+		// Where the heading was last set from; see HEADING_MIN_MOVE_M.
+		headingAnchor: null,
 	};
 
 	await requestWakeLock();
@@ -1608,23 +1619,25 @@ function updateLiveMap(point, heading, speedMps) {
 	}
 
 	const session = state.currentSession;
-	const threshold = state.prefs.unit === "imperial" ? 3 / MPS_TO_MPH : 5 / MPS_TO_KPH;
 
-	// Below the threshold the last known heading is held. Resetting to north
-	// whipped the map round at every traffic light and back again on moving off.
+	// Until the rider has moved enough to tell, the last heading is held.
+	// Resetting to north whipped the map round at every traffic light and back
+	// again on moving off. See HEADING_MIN_MOVE_M for how slow riding is handled.
 	let nextHeading = session?.currentHeading ?? 0;
 
-	if (speedMps >= threshold) {
-		if (Number.isFinite(heading)) {
+	if (session) {
+		const anchor = session.headingAnchor;
+		if (speedMps >= HEADING_GPS_MIN_SPEED_MPS && Number.isFinite(heading)) {
 			nextHeading = heading;
-		} else if (session && session.points.length >= 2) {
-			const a = session.points[session.points.length - 2];
-			const b = session.points[session.points.length - 1];
-			nextHeading = bearingDegrees(a.lat, a.lng, b.lat, b.lng);
+			session.headingAnchor = point;
+		} else if (!anchor) {
+			session.headingAnchor = point;
+		} else if (haversineMeters(anchor.lat, anchor.lng, point.lat, point.lng) >= HEADING_MIN_MOVE_M) {
+			nextHeading = bearingDegrees(anchor.lat, anchor.lng, point.lat, point.lng);
+			session.headingAnchor = point;
 		}
+		session.currentHeading = nextHeading;
 	}
-
-	if (session) session.currentHeading = nextHeading;
 	followLiveMap(point, nextHeading);
 	updateBestPace(point, nextHeading);
 }
@@ -1864,6 +1877,8 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		segmentStartElapsed: checkpoint.segmentStartElapsed || 0,
 		shouldRecenter: true,
 		currentHeading: 0,
+		// Where the heading was last set from; see HEADING_MIN_MOVE_M.
+		headingAnchor: null,
 	};
 }
 

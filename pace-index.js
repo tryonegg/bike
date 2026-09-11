@@ -15,7 +15,7 @@ const MIN_CURRENT_WINDOW_M = 40;
 const GRADE_WINDOW_M = 200;
 
 // A past point counts as "here" within this distance and heading difference.
-const MATCH_RADIUS_M = 20;
+const MATCH_RADIUS_M = 25;
 const MATCH_HEADING_DEG = 35;
 
 // Grid cell size for the lookup; the 3x3 cells around a point cover the radius.
