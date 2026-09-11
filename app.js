@@ -118,6 +118,7 @@ const state = {
 		// What the calendar's top rule colours by: "distance", "time" or "pace".
 		calendarColor: "distance",
 		installDismissed: false,
+		dataSaver: false
 	},
 	// Which month the calendar view is paged to, as the 1st at local midnight.
 	// Null until the first calendar render picks a starting month from the rides.
@@ -232,6 +233,7 @@ const el = {
 	importGpxBtn: document.getElementById("importGpxBtn"),
 	importGpxFileInput: document.getElementById("importGpxFileInput"),
 	deleteAllRidesBtn: document.getElementById("deleteAllRidesBtn"),
+	dataSaverToggle: document.getElementById("dataSaverToggle"),
 	keepScreenOnToggle: document.getElementById("keepScreenOnToggle"),
 	setupTopBar: document.getElementById("setupTopBar"),
 	setupBottomPanel: document.getElementById("setupBottomPanel"),
@@ -346,6 +348,14 @@ function wireEvents() {
 		if (!btn) return;
 		state.prefs.comparePastRides = btn.dataset.compare === "on";
 		await setPref("comparePastRides", state.prefs.comparePastRides);
+		syncToggles();
+	});
+
+	el.dataSaverToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-data-saver");
+		if (!btn) return;
+		state.prefs.dataSaver = btn.dataset.dataSaver === "on";
+		await setPref("dataSaver", state.prefs.dataSaver);
 		syncToggles();
 	});
 
@@ -545,6 +555,9 @@ function syncToggles() {
 
 	const compareButtons = el.compareToggle.querySelectorAll("button");
 	compareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
+
+	const dataSaverButtons = el.dataSaverToggle.querySelectorAll("button");
+	dataSaverButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.dataSaver === "on") === state.prefs.dataSaver));
 
 	const sideButtons = el.statsSideToggle.querySelectorAll("button");
 	sideButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.statsSide === state.prefs.rideStatsSide));
@@ -1706,7 +1719,7 @@ function processPosition(position, forceAdd = false) {
 	}
 
 	// determine if we can get rid of the previous point to save on storage space
-	if (determinePointRejection(point) == true) {
+	if (state.prefs.dataSaver && determinePointRejection(point) == true) {
 		session.points[session.points.length-1] = point;
 	} else {
 		session.points.push(point);
@@ -4420,6 +4433,7 @@ async function loadPrefs() {
 	const calendarColor = await getPref("calendarColor", "distance");
 	state.prefs.calendarColor = CALENDAR_COLOR_NOTES[calendarColor] ? calendarColor : "distance";
 	state.prefs.installDismissed = await getPref("installDismissed", false);
+	state.prefs.dataSaver = await getPref("dataSaver", false);
 }
 
 async function addSession(session) {
