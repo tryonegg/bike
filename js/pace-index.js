@@ -49,23 +49,43 @@ const M_PER_DEG_LNG_AT_EQUATOR = 111320;
 // A track and point index packed into one number: track * REF_SCALE + point.
 const REF_SCALE = 2 ** 21;
 
+/** @param {number} lat - Degrees. @returns {number} Meters per degree of longitude at that latitude. */
 function metersPerDegLng(lat) {
 	return M_PER_DEG_LNG_AT_EQUATOR * Math.cos((lat * Math.PI) / 180);
 }
 
 // Flat-earth distance, plenty accurate at the tens of meters compared here.
+/**
+ * Flat-earth distance between two lat/lng points — plenty accurate at the
+ * tens-of-meters scale this module compares over, and much cheaper than a
+ * great-circle formula run millions of times while indexing.
+ *
+ * @param {number} lat1 @param {number} lng1 @param {number} lat2 @param {number} lng2
+ * @returns {number} Meters.
+ */
 function localDistance(lat1, lng1, lat2, lng2) {
 	const dx = (lng2 - lng1) * metersPerDegLng((lat1 + lat2) / 2);
 	const dy = (lat2 - lat1) * M_PER_DEG_LAT;
 	return Math.hypot(dx, dy);
 }
 
+/**
+ * Flat-earth bearing from one point to another (see `localDistance` for the
+ * same approximation).
+ * @param {number} lat1 @param {number} lng1 @param {number} lat2 @param {number} lng2
+ * @returns {number} Degrees clockwise from north, in [0, 360).
+ */
 function localBearing(lat1, lng1, lat2, lng2) {
 	const dx = (lng2 - lng1) * metersPerDegLng((lat1 + lat2) / 2);
 	const dy = (lat2 - lat1) * M_PER_DEG_LAT;
 	return ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
 }
 
+/**
+ * The angular difference between two headings, taking the shorter way around.
+ * @param {number} a @param {number} b - Degrees.
+ * @returns {number} Degrees, in [0, 180].
+ */
 function headingDifference(a, b) {
 	const diff = Math.abs(a - b) % 360;
 	return diff > 180 ? 360 - diff : diff;
@@ -73,21 +93,38 @@ function headingDifference(a, b) {
 
 // Each row's column width is set by that row's latitude, so every cell is
 // roughly square wherever the rides are.
+/**
+ * The spatial-hash grid row a latitude falls in. Row height is a fixed
+ * number of meters; column width (see `cellCol`) is scaled per-row by that
+ * row's latitude, so every cell stays roughly square wherever the rides are,
+ * despite longitude degrees shrinking toward the poles.
+ * @param {number} lat - Degrees.
+ * @returns {number} Row index.
+ */
 function cellRow(lat) {
 	return Math.floor((lat * M_PER_DEG_LAT) / CELL_M);
 }
 
+/** @param {number} row @param {number} lng - Degrees. @returns {number} Column index within `row`. */
 function cellCol(row, lng) {
 	const rowLat = ((row + 0.5) * CELL_M) / M_PER_DEG_LAT;
 	return Math.floor((lng * metersPerDegLng(rowLat)) / CELL_M);
 }
 
+/** @param {number} lat @param {number} lng @returns {string} This point's grid-cell key, `"row:col"`. */
 function cellKey(lat, lng) {
 	const row = cellRow(lat);
 	return `${row}:${cellCol(row, lng)}`;
 }
 
 // Every cell that could hold a point within radius meters.
+/**
+ * Every grid-cell key that could hold a point within `radius` meters of
+ * `(lat, lng)` — used for a radius search wider than the fixed 3x3
+ * neighborhood `neighborKeys` covers.
+ * @param {number} lat @param {number} lng @param {number} radius - Meters.
+ * @yields {string} Cell keys.
+ */
 function* cellKeysWithin(lat, lng, radius) {
 	const rowLow = cellRow(lat - radius / M_PER_DEG_LAT);
 	const rowHigh = cellRow(lat + radius / M_PER_DEG_LAT);
@@ -100,6 +137,14 @@ function* cellKeysWithin(lat, lng, radius) {
 	}
 }
 
+/**
+ * The 3x3 grid cells centered on `(lat, lng)` — enough to cover
+ * `MATCH_RADIUS_M`, since `CELL_M` is chosen to match. Cheaper than
+ * `cellKeysWithin` for the fixed-radius point match `matchPasses` does on
+ * every live fix.
+ * @param {number} lat @param {number} lng
+ * @yields {string} Cell keys.
+ */
 function* neighborKeys(lat, lng) {
 	const row = cellRow(lat);
 	for (let r = row - 1; r <= row + 1; r++) {
@@ -108,11 +153,32 @@ function* neighborKeys(lat, lng) {
 	}
 }
 
+/**
+ * Whether a step between two consecutive points is a pause/dropout that
+ * should break a pace/grade/run-joining stretch, rather than ordinary riding.
+ * @param {number} tMs - Milliseconds since the previous point.
+ * @param {number} dMeters - Distance from the previous point.
+ * @returns {boolean}
+ */
 function isGap(tMs, dMeters) {
 	return tMs > GAP_MS || dMeters > GAP_M;
 }
 
 // Typed arrays per saved ride, with pace, grade and heading worked out once.
+/**
+ * Converts one saved ride into the typed-array-backed "track" shape every
+ * other function in this module works with: cumulative distance, a
+ * smoothed altitude, and per-point heading/pace/grade, each computed once
+ * up front rather than recomputed on every lookup. Points the app itself
+ * estimated during a GPS dropout are excluded — a dead-reckoned guess isn't
+ * a real pace.
+ *
+ * @param {Object} session - A saved ride (`{id, date, points}}`).
+ * @returns {{id: number, date: string, n: number, lat: Float64Array,
+ *   lng: Float64Array, time: Float64Array, dist: Float64Array,
+ *   since: Int32Array, heading: Float32Array, pace: Float32Array,
+ *   grade: Float32Array}|null} `null` if the ride has fewer than 2 usable points.
+ */
 function prepareTrack(session) {
 	// Points the app estimated during a GPS dropout are a guess, not a pace.
 	const points = (session.points || []).filter(
@@ -191,6 +257,22 @@ function prepareTrack(session) {
 
 // Builds the lookup from saved sessions. Yields between rides so a large
 // history does not stall the ride screen while it builds.
+/**
+ * Builds the full pace index from a rider's saved rides of one activity
+ * type: prepares every track, thins its points to `INDEX_SPACING_M` spacing
+ * and files each into the spatial-hash grid, and samples the resulting
+ * pace distribution to pick a slow/fast color range. Yields to the event
+ * loop between rides (via a zero-delay `setTimeout`) so indexing a large
+ * ride history doesn't stall the ride screen while it runs.
+ *
+ * @param {Array<Object>} sessions - Saved rides, already filtered to one activity type.
+ * @returns {Promise<{tracks: Array<Object>, cells: Map<string, number[]>,
+ *   slow: number, fast: number, bestCache: Map<number, number>}>} The index,
+ *   ready for `bestPaceAt`/`pathsAhead`. `slow`/`fast` are the rider's own
+ *   10th/90th-percentile pace (m/s) — the color scale runs across their own
+ *   range, so red and green mean slow and fast for them, not for some fixed
+ *   speed. `bestCache` starts empty; see `bestAtTrackPoint`.
+ */
 export async function buildPaceIndex(sessions) {
 	const tracks = [];
 	const cells = new Map();
@@ -229,6 +311,18 @@ export async function buildPaceIndex(sessions) {
 }
 
 // The closest point of each earlier track that passes here heading the same way.
+/**
+ * Finds, per earlier track, the single closest indexed point within
+ * `MATCH_RADIUS_M`/`MATCH_HEADING_DEG` of `(lat, lng)` heading roughly the
+ * given way — i.e. every past pass through "here, going this direction",
+ * one per track.
+ *
+ * @param {Object} index - From `buildPaceIndex`.
+ * @param {number} lat @param {number} lng
+ * @param {number} heading - Degrees; returns `[]` if non-finite (no
+ *   reliable heading to match against yet).
+ * @returns {Array<{trackIndex: number, i: number, distance: number}>}
+ */
 function matchPasses(index, lat, lng, heading) {
 	const closest = new Map();
 	if (!Number.isFinite(heading)) return [];
@@ -251,6 +345,18 @@ function matchPasses(index, lat, lng, heading) {
 
 // Best past pace and average grade at a spot, heading a given way. best is NaN
 // when no earlier ride went this way here.
+/**
+ * The rider's best past pace at a spot, heading a given way, and the
+ * average grade earlier rides recorded there.
+ *
+ * @param {Object} index
+ * @param {number} lat @param {number} lng @param {number} heading - Degrees.
+ * @returns {{best: number, grade: number, passes: Array<Object>}} `best`
+ *   (m/s) is `NaN` when no earlier ride went this way here; `grade` is `NaN`
+ *   when no matching pass had a usable grade reading. `passes` is the raw
+ *   match list from `matchPasses`, reused by `pathsAhead`'s caller-adjacent
+ *   code where relevant.
+ */
 export function bestPaceAt(index, lat, lng, heading) {
 	const passes = matchPasses(index, lat, lng, heading);
 	let best = NaN;
@@ -271,6 +377,19 @@ export function bestPaceAt(index, lat, lng, heading) {
 
 // Best pace at one point of an earlier track, cached: the index does not change
 // during a ride, and the band ahead asks about the same points fix after fix.
+/**
+ * The best pace recorded at one specific indexed point of an earlier track,
+ * memoized in `index.bestCache`. The index never changes during a ride, and
+ * `pathsAhead` re-asks about the same points on nearly every fix as the
+ * rider moves, so caching avoids redoing the full `bestPaceAt` neighborhood
+ * search repeatedly for the same point.
+ *
+ * @param {Object} index
+ * @param {number} trackIndex
+ * @param {number} i - Point index within that track.
+ * @returns {number} Pace in m/s; falls back to the point's own recorded pace
+ *   if no other track's pass beat it (or matched at all).
+ */
 function bestAtTrackPoint(index, trackIndex, i) {
 	const key = trackIndex * REF_SCALE + i;
 	let best = index.bestCache.get(key);
@@ -290,6 +409,34 @@ function bestAtTrackPoint(index, trackIndex, i) {
 // every point carries the best pace any ride set there in that direction.
 // Returns lines of {coords, paces, distances}, distances being straight-line
 // from the rider.
+/**
+ * Finds every earlier ride's path in the half-circle ahead of the rider,
+ * out to `radius` meters — straight on and off to either side, but not
+ * behind. A point counts only where its track was heading away from the
+ * rider (keeping roads the rider could actually take, and dropping traffic
+ * that passed heading toward them). Where rides overlap, the road is
+ * deduplicated to a single drawn line so the map doesn't show N copies of
+ * a well-ridden route; every point on that line still carries the best pace
+ * any ride set there heading that direction (via `bestAtTrackPoint`).
+ *
+ * This is the module's most involved function: it (1) collects qualifying
+ * indexed points per track within the search radius, (2) breaks each
+ * track's points into unbroken runs (splitting on gaps or gaps in indexing
+ * spacing), (3) processes runs longest-first, matching each point against
+ * already-claimed ground so overlapping rides merge onto one line and a
+ * branch joins the existing line exactly rather than a GPS-error's width
+ * away, and (4) discards any resulting line whose genuinely new (unclaimed)
+ * road is shorter than `MIN_LINE_M` — a short scrap is treated as a second
+ * ride weaving in and out of the first, not a road of its own.
+ *
+ * @param {Object} index
+ * @param {{lat: number, lng: number}} from - The rider's current position.
+ * @param {number} heading - Degrees; returns `[]` if non-finite.
+ * @param {number} radius - Meters.
+ * @returns {Array<{coords: Array<[number, number]>, paces: number[],
+ *   distances: number[]}>} One entry per drawable path; `distances` is
+ *   straight-line distance from the rider to each coordinate.
+ */
 export function pathsAhead(index, from, heading, radius) {
 	if (!Number.isFinite(heading)) return [];
 
@@ -421,6 +568,7 @@ export function pathsAhead(index, from, heading, radius) {
 		.map(({ coords, paces, distances }) => smoothLine({ coords, paces, distances }));
 }
 
+/** @param {Array<[number, number]>} coords @returns {number} Total length in meters. */
 function lineLength(coords) {
 	let length = 0;
 	for (let k = 1; k < coords.length; k++) {
@@ -431,6 +579,16 @@ function lineLength(coords) {
 
 // GPS points zigzag either side of the road. A short weighted average along
 // the line settles them onto it; the ends stay put so joined paths still meet.
+/**
+ * Smooths a path's coordinates with a short weighted moving average, to
+ * settle GPS zigzag back onto the road it was tracking. The first and last
+ * points are left untouched so a smoothed line still meets exactly wherever
+ * it was joined to another (see the "on-road" join logic in `pathsAhead`).
+ *
+ * @param {{coords: Array<[number, number]>}} line
+ * @returns {Object} `line` with `coords` replaced by the smoothed version;
+ *   other properties (`paces`, `distances`) pass through unchanged.
+ */
 function smoothLine(line) {
 	const { coords } = line;
 	const weights = [1, 2, 3, 2, 1];
@@ -454,6 +612,17 @@ function smoothLine(line) {
 
 // The rider's own pace over the stretch just ridden, measured the same way as
 // the past paces. NaN until enough of the stretch exists since the last gap.
+/**
+ * The rider's own pace over the stretch just ridden, measured the same way
+ * `prepareTrack` measures past paces (a trailing window of at least
+ * `PACE_WINDOW_M`, never reaching back across a pause/dropout) — so the live
+ * "you vs. your best" comparison is apples-to-apples.
+ *
+ * @param {Array<{lat: number, lng: number, timestamp: number}>} points -
+ *   The current ride's recorded points so far.
+ * @returns {number} m/s, or `NaN` until at least `MIN_CURRENT_WINDOW_M` of
+ *   unbroken stretch exists behind the rider.
+ */
 export function trailingPace(points) {
 	const last = points.length - 1;
 	if (last < 1) return NaN;
