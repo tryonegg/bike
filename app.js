@@ -144,7 +144,14 @@ const state = {
 	currentPostSession: null,
 	wakeLockSentinel: null,
 	currentScreen: "home",
-	countdownRunToken: 0,
+	// Where the rider is in the pre-ride -> active hand-off on the active
+	// screen: null (not in the flow), "setup", "starting", "countdown",
+	// "revealing", or "active". Mirrored onto activeScreen's data-phase.
+	rideFlowPhase: null,
+	setupWatchId: null,
+	setupLocked: false,
+	setupPosition: null,
+	countdownIntervalId: null,
 	selectedActivityType: "bike",
 	selectedKeepScreenOn: false,
 	modalResolver: null,
@@ -178,8 +185,6 @@ const el = {
 	dismissInstallBtn: document.getElementById("dismissInstallBtn"),
 	screens: {
 		home: document.getElementById("homeScreen"),
-		countdown: document.getElementById("countdownScreen"),
-		activitySelect: document.getElementById("activitySelectScreen"),
 		active: document.getElementById("activeScreen"),
 		post: document.getElementById("postScreen"),
 		settings: document.getElementById("settingsScreen"),
@@ -223,12 +228,15 @@ const el = {
 	importFileInput: document.getElementById("importFileInput"),
 	deleteAllRidesBtn: document.getElementById("deleteAllRidesBtn"),
 	keepScreenOnToggle: document.getElementById("keepScreenOnToggle"),
-	cancelActivityBtn: document.getElementById("cancelActivityBtn"),
+	setupTopBar: document.getElementById("setupTopBar"),
+	setupBottomPanel: document.getElementById("setupBottomPanel"),
+	setupBackBtn: document.getElementById("setupBackBtn"),
+	setupLocatingLabel: document.getElementById("setupLocatingLabel"),
+	setupLocatingMessage: document.getElementById("setupLocatingMessage"),
+	setupStatusDot: document.getElementById("setupStatusDot"),
 	startActivityBtn: document.getElementById("startActivityBtn"),
+	startGpsHint: document.getElementById("startGpsHint"),
 	countdownNumber: document.getElementById("countdownNumber"),
-	countdownStatus: document.getElementById("countdownStatus"),
-	retryCountdownBtn: document.getElementById("retryCountdownBtn"),
-	cancelCountdownBtn: document.getElementById("cancelCountdownBtn"),
 	rideStrip: document.getElementById("rideStrip"),
 	speedLabel: document.getElementById("speedLabel"),
 	currentSpeed: document.getElementById("currentSpeed"),
@@ -367,10 +375,7 @@ function wireEvents() {
 	el.calNextBtn.addEventListener("click", () => shiftCalendarMonth(1));
 
 	el.startRideBtn.addEventListener("click", startCountdownFlow);
-	// Retry re-runs the countdown with the activity already chosen. Routing it back
-	// through startCountdownFlow reset the selection to Bike on every failed lock.
-	el.retryCountdownBtn.addEventListener("click", () => startActivityCountdown({ retry: true }));
-	el.cancelCountdownBtn.addEventListener("click", cancelCountdownAndReturnHome);
+	el.setupBackBtn.addEventListener("click", cancelSetupAndReturnHome);
 
 	document.querySelectorAll(".activity-btn").forEach((btn) => {
 		btn.addEventListener("click", (event) => {
@@ -393,8 +398,7 @@ function wireEvents() {
 		state.selectedKeepScreenOn = event.target.checked;
 	});
 
-	el.cancelActivityBtn.addEventListener("click", cancelActivityAndReturnHome);
-	el.startActivityBtn.addEventListener("click", startActivityCountdown);
+	el.startActivityBtn.addEventListener("click", handleStartRideClick);
 
 	el.exportDataBtn.addEventListener("click", exportAllData);
 	el.importDataBtn.addEventListener("click", () => el.importFileInput.click());
@@ -597,6 +601,15 @@ function navigateToScreen(name, mode = "push") {
 async function applyHistoryState(targetState, mode = "none", savedSession = null) {
 	state.handlingPopstate = true;
 	try {
+		// Backing out of the pre-ride setup/countdown, which never got as far as a
+		// recorded session. The active screen's own history entry pops straight to
+		// whatever came before it (usually home), never to a "countdown" entry of
+		// its own, so this has to be caught here rather than in the "active" case
+		// below.
+		if (state.rideFlowPhase && state.rideFlowPhase !== "active" && targetState.screen !== "active") {
+			abortRideSetup();
+		}
+
 		if (targetState.screen === "post") {
 			if (savedSession) {
 				await openPostSession(savedSession.id, savedSession, mode);
@@ -614,19 +627,9 @@ async function applyHistoryState(targetState, mode = "none", savedSession = null
 			return;
 		}
 
-		if (targetState.screen === "countdown") {
-			applyMapVisualPrefs();
-			navigateToScreen("home", mode);
-			return;
-		}
-
 		if (targetState.screen === "active") {
 			applyMapVisualPrefs();
-			if (state.currentSession) {
-				navigateToScreen("active", mode);
-			} else {
-				navigateToScreen("home", mode);
-			}
+			navigateToScreen(state.currentSession ? "active" : "home", mode);
 			return;
 		}
 
@@ -1173,70 +1176,181 @@ async function startCountdownFlow() {
 	el.keepScreenOnToggle.checked = true;
 	document.querySelectorAll(".activity-btn").forEach((b) => b.classList.remove("active"));
 	document.querySelector('[data-activity="bike"]').classList.add("active");
-	navigateToScreen("activitySelect");
+	beginRideSetup();
 }
 
-function cancelActivityAndReturnHome() {
+// The active screen doubles as the pre-ride setup screen: the map is already
+// live and centred on the rider before Start Ride is even tappable, so the
+// countdown and the ride that follows never have to swap screens or reload
+// the map. See the data-phase rules in app.css for how each phase looks.
+function beginRideSetup() {
+	state.rideFlowPhase = "setup";
+	state.setupLocked = false;
+	state.setupPosition = null;
+
+	// A map left over from a previous ride (finished or abandoned) would
+	// otherwise be reused as-is: handleSetupPosition only creates a fresh one
+	// when state.liveMap is empty, so its route/markers need clearing here.
+	if (state.liveMap) {
+		state.liveMap.remove();
+		state.liveMap = null;
+		state.liveRouteCoords = [];
+		state.liveGuideCoords = [];
+		state.markerLayer = null;
+		state.guideLabelMarker = null;
+		state.riderMarker = null;
+		state.bestPaceChip = null;
+		state.bestPaceBand = null;
+	}
+
+	el.screens.active.dataset.phase = "setup";
+	setSetupLocating(true);
+
+	navigateToScreen("active");
+	startSetupWatch();
+}
+
+function setSetupLocating(isLocating) {
+	el.setupLocatingLabel.textContent = isLocating ? "Finding you" : "Location ready";
+	el.setupLocatingMessage.textContent = isLocating
+		? "Getting your GPS lock — this can take a few seconds."
+		: "Your location is set. Ready when you are.";
+	el.setupStatusDot.classList.toggle("is-locating", isLocating);
+	el.startActivityBtn.disabled = isLocating;
+	el.startGpsHint.classList.toggle("hidden", !isLocating);
+}
+
+function startSetupWatch() {
+	stopSetupWatch();
+	state.setupWatchId = navigator.geolocation.watchPosition(handleSetupPosition, handleSetupPositionError, {
+		enableHighAccuracy: true,
+		maximumAge: 0,
+		timeout: 10000,
+	});
+}
+
+function stopSetupWatch() {
+	if (state.setupWatchId != null) {
+		navigator.geolocation.clearWatch(state.setupWatchId);
+		state.setupWatchId = null;
+	}
+}
+
+function handleSetupPosition(position) {
+	// Keeps tracking through starting/countdown/revealing too, not just setup,
+	// so the map (and the position finishRideSetup hands to startSession) stay
+	// current even while the rider is moving during the countdown.
+	if (!state.rideFlowPhase || state.rideFlowPhase === "active") return;
+	state.setupPosition = position;
+
+	const { latitude, longitude } = position.coords;
+	if (!state.liveMap) {
+		initLiveMap(latitude, longitude, { overhead: true });
+	} else {
+		animateMarkerTo(state.riderMarker, [longitude, latitude]);
+		const map = state.liveMap;
+		if (!map.isZooming() && !map.dragPan.isActive() && !map.touchZoomRotate.isActive()) {
+			map.easeTo({ center: [longitude, latitude], duration: 450 });
+		}
+	}
+
+	if (!state.setupLocked) {
+		state.setupLocked = true;
+		setSetupLocating(false);
+	}
+}
+
+function handleSetupPositionError(error) {
+	if (state.rideFlowPhase !== "setup") return;
+	if (error.code === error.PERMISSION_DENIED) {
+		abortRideSetup();
+		navigateToScreen("home");
+		showMessage("Location Needed", "Turn on location access to start a ride.");
+	}
+	// Any other error (timeout, position unavailable) just leaves the rider on
+	// the "Finding you" state; watchPosition keeps retrying on its own.
+}
+
+// Stops the setup watch/countdown and drops the screen back to its ordinary,
+// already-riding look. Used both by the explicit back button and by the
+// popstate handler when the rider backs out mid-flow.
+function abortRideSetup() {
+	stopSetupWatch();
+	if (state.countdownIntervalId) {
+		clearInterval(state.countdownIntervalId);
+		state.countdownIntervalId = null;
+	}
+	state.rideFlowPhase = null;
+	delete el.screens.active.dataset.phase;
+}
+
+function cancelSetupAndReturnHome() {
+	abortRideSetup();
 	navigateToScreen("home");
 }
 
-async function startActivityCountdown({ retry = false } = {}) {
+function handleStartRideClick() {
+	if (!state.setupLocked || state.rideFlowPhase !== "setup") return;
+
 	if (state.selectedActivityType === "bike") requestOrientationPermission();
 
-	const runToken = Date.now();
-	state.countdownRunToken = runToken;
-	// A retry is already sitting on the countdown entry, so replace it rather than
-	// stacking another one behind the back button.
-	navigateToScreen("countdown", retry ? "replace" : "push");
-	el.retryCountdownBtn.classList.add("hidden");
-	el.countdownStatus.textContent = "Getting GPS lock...";
+	state.rideFlowPhase = "starting";
+	el.screens.active.dataset.phase = "starting";
+
+	// Gives the setup bar and panel time to slide away before the bare
+	// countdown number appears over the now-uncovered map.
+	setTimeout(() => {
+		if (state.rideFlowPhase !== "starting") return;
+		beginCountdown();
+	}, 480);
+}
+
+function beginCountdown() {
+	state.rideFlowPhase = "countdown";
+	el.screens.active.dataset.phase = "countdown";
 
 	let countdown = COUNTDOWN_SECONDS;
 	el.countdownNumber.textContent = String(countdown);
 
-	// Acquire the fix while the countdown runs, not before it. Awaiting the fix
-	// first froze the display on the starting number for the whole timeout and
-	// only then began counting, so the rider waited twice over.
-	const lockRequest = Promise.race([
-		getCurrentPosition(COUNTDOWN_SECONDS * 1000),
-		new Promise((resolve) => setTimeout(() => resolve(null), COUNTDOWN_SECONDS * 1000)),
-	]).catch(() => null);
-
-	lockRequest.then((position) => {
-		if (state.countdownRunToken !== runToken || !position) return;
-		el.countdownStatus.textContent = "GPS lock acquired.";
-	});
-
-	const intervalId = setInterval(async () => {
-		if (state.countdownRunToken !== runToken) {
-			clearInterval(intervalId);
-			return;
-		}
-
+	state.countdownIntervalId = setInterval(() => {
 		countdown -= 1;
-		el.countdownNumber.textContent = String(Math.max(0, countdown));
 
-		if (countdown > 0) return;
-
-		clearInterval(intervalId);
-
-		const lockPosition = await lockRequest;
-		// The rider can cancel while that last await settles.
-		if (state.countdownRunToken !== runToken) return;
-
-		if (!lockPosition) {
-			el.countdownStatus.textContent = "GPS lock failed. Move to open sky and try again.";
-			el.retryCountdownBtn.classList.remove("hidden");
+		if (countdown <= 0) {
+			clearInterval(state.countdownIntervalId);
+			state.countdownIntervalId = null;
+			finishRideSetup();
 			return;
 		}
 
-		await startSession(lockPosition);
+		el.countdownNumber.textContent = String(countdown);
+		// The active screen's stats and controls slide into position while the
+		// last couple of numbers keep counting down on top of them.
+		if (countdown === 0) {
+			state.rideFlowPhase = "revealing";
+			el.screens.active.dataset.phase = "revealing";
+		}
 	}, 1000);
 }
 
-function cancelCountdownAndReturnHome() {
-	state.countdownRunToken = 0;
-	navigateToScreen("home");
+async function finishRideSetup() {
+	stopSetupWatch();
+	const position = state.setupPosition;
+	state.rideFlowPhase = "active";
+	delete el.screens.active.dataset.phase;
+
+	if (!position) {
+		await showMessage("Location Lost", "We lost your location just before starting. Try again.");
+		navigateToScreen("home");
+		return;
+	}
+
+	// The pre-ride preview stays flat and centred on whatever the setup bar and
+	// panel left uncovered; now it tilts and reframes into the riding camera.
+	if (state.liveMap) {
+		state.liveMap.easeTo({ pitch: LIVE_MAP_PITCH, padding: ridePadding(state.liveMap), duration: 900 });
+	}
+
+	await startSession(position);
 }
 
 async function startSession(initialPosition) {
@@ -1277,8 +1391,13 @@ async function startSession(initialPosition) {
 
 	await requestWakeLock();
 
-	navigateToScreen("active");
-	initLiveMap(initialPosition.coords.latitude, initialPosition.coords.longitude);
+	// The pre-ride setup already put us on the active screen with the map live
+	// and centred on the rider; only a caller outside that flow needs this screen
+	// switch and a fresh map.
+	if (!state.liveMap) {
+		navigateToScreen("active");
+		initLiveMap(initialPosition.coords.latitude, initialPosition.coords.longitude);
+	}
 	loadPaceIndex(state.currentSession);
 
 	// Initialize sensor fusion for GPS outage bridging
@@ -1606,7 +1725,7 @@ function updateLiveMap(point, heading, speedMps) {
 
 	state.liveRouteCoords.push([point.lng, point.lat]);
 	setLiveLineData(LIVE_ROUTE_SOURCE, state.liveRouteCoords);
-	state.riderMarker?.setLngLat([point.lng, point.lat]);
+	animateMarkerTo(state.riderMarker, [point.lng, point.lat]);
 
 	if (state.currentSession?.points?.length) {
 		const startPoint = state.currentSession.points[0];
@@ -1651,7 +1770,11 @@ function followLiveMap(point, heading) {
 	// mid-pan or mid-zoom is skipped rather than yanking the map from the finger.
 	if (map.isZooming() || map.dragPan.isActive() || map.touchZoomRotate.isActive()) return;
 
-	const camera = { bearing: heading, duration: LIVE_CAMERA_EASE_MS, easing: (t) => t };
+	// Also reasserted here, not just once in finishRideSetup: the first fix from
+	// the real ride watch usually lands while that initial ease is still
+	// mid-flight, and an easeTo that omits pitch/padding would otherwise cancel
+	// it partway and leave the camera stuck flat.
+	const camera = { bearing: heading, pitch: LIVE_MAP_PITCH, padding: ridePadding(map), duration: LIVE_CAMERA_EASE_MS, easing: (t) => t };
 	if (state.currentSession?.shouldRecenter) camera.center = [point.lng, point.lat];
 	map.easeTo(camera);
 }
@@ -1662,11 +1785,15 @@ function recenterLiveMap() {
 	session.shouldRecenter = true;
 	setLiveZoomAnchor(state.liveMap, true);
 	// Back to the rider's picked riding zoom as well as the rider, dropping any
-	// zoom from looking around.
+	// zoom from looking around. Pitch/padding are reasserted for the same reason
+	// as in followLiveMap: a tap right as the ride starts could otherwise cancel
+	// finishRideSetup's tilt-in partway through.
 	state.liveMap.easeTo({
 		center: [session.lastPoint.lng, session.lastPoint.lat],
 		zoom: state.prefs.liveMapZoom,
 		bearing: session.currentHeading ?? 0,
+		pitch: LIVE_MAP_PITCH,
+		padding: ridePadding(state.liveMap),
 	});
 }
 
@@ -1791,6 +1918,7 @@ async function finalizeSession() {
 	saved.id = id;
 	await clearActiveSessionCheckpoint();
 	state.currentSession = null;
+	state.rideFlowPhase = null;
 	setPauseButton(false);
 	return saved;
 }
@@ -1944,7 +2072,7 @@ async function resumeCheckpointedSession(restored) {
 	updateLiveStats();
 }
 
-function initLiveMap(lat, lng) {
+function initLiveMap(lat, lng, { overhead = false } = {}) {
 	if (state.liveMap) {
 		state.liveMap.remove();
 		state.liveMap = null;
@@ -1959,7 +2087,9 @@ function initLiveMap(lat, lng) {
 			center: [lng, lat],
 			zoom: state.prefs.liveMapZoom,
 			bearing: state.currentSession?.currentHeading ?? 0,
-			pitch: LIVE_MAP_PITCH,
+			// The pre-ride preview starts flat and tilts into the riding view once
+			// the countdown finishes; see finishRideSetup.
+			pitch: overhead ? 0 : LIVE_MAP_PITCH,
 		},
 		addLiveOverlayLayers,
 	);
@@ -1972,10 +2102,24 @@ function initLiveMap(lat, lng) {
 	// Its offset is in pixels, so its ground position depends on the zoom.
 	map.on("zoom", updateGuideLabel);
 
-	// The rider sits two-thirds of the way down, leaving the larger share of the
-	// tilted map for the road ahead. Padding moves the camera's centre, so the
-	// follow camera, rotation, Re-center and rider-anchored zooms all aim there.
-	const placeRider = () => map.setPadding({ top: map.getContainer().clientHeight / 3, bottom: 0, left: 0, right: 0 });
+	// Once riding, the rider sits two-thirds of the way down, leaving the larger
+	// share of the tilted map for the road ahead — see ridePadding. Before that,
+	// while the pre-ride setup bar and panel are the only chrome on screen, the
+	// rider instead sits centred in whatever map area they leave uncovered.
+	// Padding moves the camera's centre, so the follow camera, rotation,
+	// Re-center and rider-anchored zooms all aim wherever it points.
+	const placeRider = () => {
+		if (state.rideFlowPhase === "setup") {
+			map.setPadding({
+				top: el.setupTopBar.offsetHeight,
+				bottom: el.setupBottomPanel.offsetHeight,
+				left: 0,
+				right: 0,
+			});
+		} else {
+			map.setPadding(ridePadding(map));
+		}
+	};
 	placeRider();
 	map.on("resize", placeRider);
 	setLiveZoomAnchor(map, true);
@@ -2009,6 +2153,12 @@ function initLiveMap(lat, lng) {
 async function saveLiveMapZoom(zoom) {
 	state.prefs.liveMapZoom = zoom;
 	await setPref("liveMapZoom", zoom);
+}
+
+// The riding camera's padding: see placeRider in initLiveMap for why, and
+// finishRideSetup for where the pre-ride preview eases into this.
+function ridePadding(map) {
+	return { top: map.getContainer().clientHeight / 3, bottom: 0, left: 0, right: 0 };
 }
 
 // While following, zooms pivot on the rider so they stay put under the camera.
@@ -2368,6 +2518,28 @@ function createPointMarker(map, className, lngLat) {
 	return new maplibregl.Marker({ element }).setLngLat(lngLat).addTo(map);
 }
 
+// Glides a marker to its next GPS fix instead of snapping there, which read as
+// a jump every time a fix landed. Restarting from wherever the marker
+// currently sits (rather than its last target) keeps a run of fast-arriving
+// fixes smooth instead of stacking up queued jumps.
+function animateMarkerTo(marker, lngLat, durationMs = LIVE_CAMERA_EASE_MS) {
+	if (!marker) return;
+
+	const from = marker.getLngLat();
+	const toLng = lngLat[0];
+	const toLat = lngLat[1];
+	if (marker._moveFrame) cancelAnimationFrame(marker._moveFrame);
+
+	const start = performance.now();
+	const step = (now) => {
+		const t = Math.min(1, (now - start) / durationMs);
+		const eased = 1 - (1 - t) * (1 - t);
+		marker.setLngLat([from.lng + (toLng - from.lng) * eased, from.lat + (toLat - from.lat) * eased]);
+		marker._moveFrame = t < 1 ? requestAnimationFrame(step) : null;
+	};
+	marker._moveFrame = requestAnimationFrame(step);
+}
+
 // The distance back to the start, as a chip on the guide line. It takes the
 // guide line's colours so the two read as one, and the distance markers' size.
 function createGuideLabelMarker(map) {
@@ -2444,7 +2616,7 @@ async function loadPaceIndex(session) {
 function updateBestPace(point, heading) {
 	const session = state.currentSession;
 	const index = state.paceIndex;
-	state.bestPaceChip?.setLngLat([point.lng, point.lat]);
+	animateMarkerTo(state.bestPaceChip, [point.lng, point.lat]);
 
 	if (!state.prefs.comparePastRides || !index || !session || session.paused) {
 		hideBestPace();
@@ -3620,16 +3792,6 @@ function setupServiceWorkerUpdateChecks(registration) {
 	window.addEventListener("focus", triggerUpdateCheck);
 	document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState === "visible") triggerUpdateCheck();
-	});
-}
-
-function getCurrentPosition(timeoutMs) {
-	return new Promise((resolve, reject) => {
-		navigator.geolocation.getCurrentPosition(resolve, reject, {
-			enableHighAccuracy: true,
-			timeout: timeoutMs,
-			maximumAge: 0,
-		});
 	});
 }
 

@@ -81,37 +81,41 @@
       </div>
     </section>
 
-    <section id="countdownScreen" class="screen center hidden">
-      <div class="countdown-wrap">
-        <div id="countdownNumber" class="countdown-number">5</div>
-        <p id="countdownStatus" class="sub">Getting GPS lock...</p>
-        <button id="retryCountdownBtn" class="btn primary pill hidden">Try Again</button>
-        <button id="cancelCountdownBtn" class="btn pill">Cancel</button>
-      </div>
-    </section>
-
-    <section id="activitySelectScreen" class="screen center hidden">
-      <div class="activity-select-wrap">
-        <h2>Select Activity</h2>
-        <div class="activity-buttons">
-          <button class="activity-btn" data-activity="bike">🚴 Bike</button>
-          <button class="activity-btn" data-activity="walk">🚶 Walk</button>
-          <button class="activity-btn" data-activity="hike">🥾 Hike</button>
-          <button class="activity-btn" data-activity="kayak">🛶 Kayak</button>
-        </div>
-        <div class="setting-row" role="group" aria-label="Screen preference">
-          <label for="keepScreenOnToggle">Keep Screen On</label>
-          <input id="keepScreenOnToggle" type="checkbox">
-        </div>
-        <div class="row">
-          <button id="cancelActivityBtn" class="btn pill">Cancel</button>
-          <button id="startActivityBtn" class="btn primary pill">Start Activity</button>
-        </div>
-      </div>
-    </section>
-
     <section id="activeScreen" class="screen active-screen hidden">
       <div id="liveMap" class="map live-map"></div>
+
+      <header id="setupTopBar" class="setup-top-bar">
+        <button id="setupBackBtn" class="round-btn" aria-label="Back to home">←</button>
+        <div class="setup-locating-text">
+          <div id="setupLocatingLabel" class="label">Finding you</div>
+          <p id="setupLocatingMessage" class="setup-locating-message">Getting your GPS lock — this can take a few seconds.</p>
+        </div>
+        <span id="setupStatusDot" class="setup-status-dot is-locating" aria-hidden="true"></span>
+      </header>
+
+      <div id="setupBottomPanel" class="setup-bottom-panel">
+        <div class="setup-bottom-panel-inner">
+          <div class="label">Activity</div>
+          <div class="activity-buttons">
+            <button class="activity-btn" data-activity="bike">🚴 Bike</button>
+            <button class="activity-btn" data-activity="walk">🚶 Walk</button>
+            <button class="activity-btn" data-activity="hike">🥾 Hike</button>
+            <button class="activity-btn" data-activity="kayak">🛶 Kayak</button>
+          </div>
+          <div class="setting-row" role="group" aria-label="Screen preference">
+            <label for="keepScreenOnToggle">Keep Screen On</label>
+            <input id="keepScreenOnToggle" type="checkbox">
+          </div>
+          <div class="setup-start-wrap">
+            <button id="startActivityBtn" class="btn primary pill" disabled>Start Ride</button>
+            <p id="startGpsHint" class="setup-gps-hint">Waiting for GPS lock…</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="countdownOverlay" class="countdown-overlay">
+        <div id="countdownNumber" class="countdown-number">5</div>
+      </div>
 
       <header id="rideStrip" class="ride-strip">
         <div class="label" id="speedLabel">Speed</div>

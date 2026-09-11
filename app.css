@@ -677,39 +677,63 @@ button {
   }
 }
 
-/* ---- Countdown and activity choice ---- */
+/* ---- Pre-ride setup (an overlay on the active screen's map, not a screen of
+   its own — see "Pre-ride -> active transition" for how it hands off) ---- */
 
-.countdown-wrap {
-  display: grid;
-  gap: 14px;
-  justify-items: center;
-  text-align: center;
+.setup-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(20px + var(--safe-top)) 22px 18px;
+  background: var(--strip-bg);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--header-border);
+  transition: opacity 1s ease, transform 1s ease;
 }
 
-.countdown-number {
-  font-size: clamp(5rem, 28vw, 10rem);
-  font-weight: 700;
-  letter-spacing: -0.05em;
-  line-height: 0.9;
-  animation: pulse 900ms infinite;
-}
-
-.countdown-wrap .btn.pill {
-  min-width: 200px;
-}
-
-.activity-select-wrap {
-  width: min(100%, 340px);
+.setup-locating-text {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 2px;
+  min-width: 0;
 }
 
-.activity-select-wrap h2 {
-  text-align: center;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+.setup-locating-message {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.setup-status-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.setup-status-dot.is-locating {
+  background: #d08a2a;
+}
+
+.setup-bottom-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  padding: 20px 22px calc(24px + var(--safe-bottom));
+  background: var(--strip-bg);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--header-border);
+  transition: opacity 1s ease, transform 1s ease;
 }
 
 .activity-buttons {
@@ -738,19 +762,72 @@ button {
   color: var(--primary-contrast);
 }
 
-.activity-select-wrap .setting-row {
+.setup-bottom-panel .setting-row {
   padding: 14px 0;
+  border-top: 0;
   border-bottom: 1px solid var(--hairline);
 }
 
-.activity-select-wrap .setting-row input[type="checkbox"] {
+.setup-bottom-panel .setting-row input[type="checkbox"] {
   width: 22px;
   height: 22px;
   accent-color: var(--primary);
 }
 
-.activity-select-wrap .row .btn {
-  flex: 1;
+.setup-start-wrap {
+  position: relative;
+  margin-top: 16px;
+}
+
+.setup-start-wrap .btn {
+  width: 100%;
+}
+
+.setup-gps-hint {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  transition: opacity 0.3s ease;
+}
+
+/* A bare number over the map — no card behind it, just enough shadow to read
+   over any tile colour. */
+.countdown-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.countdown-number {
+  position: relative;
+  font-size: clamp(5rem, 20vw, 9rem);
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  color: #fff;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  animation: pulse 900ms infinite;
+}
+
+.countdown-overlay::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(70vw, 280px);
+  height: min(70vw, 280px);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20, 24, 26, 0.32) 0%, rgba(20, 24, 26, 0.14) 55%, rgba(20, 24, 26, 0) 78%);
+  transform: translate(-50%, -50%);
 }
 
 /* ---- Active ride ---- */
@@ -787,6 +864,7 @@ button {
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--header-border);
+  transition: opacity 2s ease, transform 2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ride-strip.is-paused #speedLabel {
@@ -897,6 +975,7 @@ button {
   gap: 14px;
   padding: 16px 22px calc(24px + var(--safe-bottom));
   background: linear-gradient(to top, var(--bg-fade) 40%, var(--bg-clear));
+  transition: opacity 2s ease, transform 2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ride-controls .btn.pill {
@@ -954,6 +1033,48 @@ button {
 .pause-btn.is-paused .pause-icon::before,
 .pause-btn.is-paused .pause-icon::after {
   content: none;
+}
+
+/* Pre-ride -> active transition. The active screen doubles as the pre-ride
+   setup screen so the map never has to reload or swap between them; data-phase
+   tracks where the rider is in that hand-off. No attribute (the default) is
+   the ordinary, already-riding screen. */
+.active-screen[data-phase="setup"] .ride-strip,
+.active-screen[data-phase="starting"] .ride-strip,
+.active-screen[data-phase="countdown"] .ride-strip {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+.active-screen[data-phase="setup"] .ride-controls,
+.active-screen[data-phase="starting"] .ride-controls,
+.active-screen[data-phase="countdown"] .ride-controls {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+}
+
+.active-screen:not([data-phase="setup"]) .setup-top-bar {
+  opacity: 0;
+  transform: translateY(-22px);
+  pointer-events: none;
+}
+
+.active-screen:not([data-phase="setup"]) .setup-bottom-panel {
+  opacity: 0;
+  transform: translateY(22px);
+  pointer-events: none;
+}
+
+.active-screen[data-phase="countdown"] .countdown-overlay,
+.active-screen[data-phase="revealing"] .countdown-overlay {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.active-screen[data-phase] .map-chip.recenter {
+  display: none;
 }
 
 /* MapLibre's attribution would otherwise sit under the ride controls. */
@@ -1161,6 +1282,37 @@ button {
 
   .active-screen.stats-right .map-chip.recenter {
     left: calc(14px + env(safe-area-inset-left, 0px));
+  }
+
+  /* Pre-ride -> active transition, landscape: the stats column slides in from
+     whichever edge Stats Side put it on instead of from the top/bottom. */
+  .active-screen[data-phase="setup"] .ride-strip,
+  .active-screen[data-phase="starting"] .ride-strip,
+  .active-screen[data-phase="countdown"] .ride-strip,
+  .active-screen[data-phase="setup"] .ride-controls,
+  .active-screen[data-phase="starting"] .ride-controls,
+  .active-screen[data-phase="countdown"] .ride-controls {
+    transform: translateX(-100%);
+  }
+
+  .active-screen.stats-right[data-phase="setup"] .ride-strip,
+  .active-screen.stats-right[data-phase="starting"] .ride-strip,
+  .active-screen.stats-right[data-phase="countdown"] .ride-strip,
+  .active-screen.stats-right[data-phase="setup"] .ride-controls,
+  .active-screen.stats-right[data-phase="starting"] .ride-controls,
+  .active-screen.stats-right[data-phase="countdown"] .ride-controls {
+    transform: translateX(100%);
+  }
+
+  /* The setup panel stays a full-width bar like in portrait, but its content
+     is centred so it doesn't stretch edge to edge on a wide phone. */
+  .setup-bottom-panel-inner {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+
+  .activity-buttons {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
