@@ -7,9 +7,10 @@
  * app.css keys its layout off via the screen's `data-phase` attribute.
  */
 
-import { COUNTDOWN_SECONDS, LIVE_MAP_PITCH } from "./constants.js";
+import { COUNTDOWN_SECONDS, LIVE_MAP_PITCH, HEADING_GPS_MIN_SPEED_MPS, HEADING_MIN_MOVE_M } from "./constants.js";
 import { state, el } from "./state.js";
 import { showMessage } from "./modal.js";
+import { haversineMeters, bearingDegrees } from "./format.js";
 import { initLiveMap, animateMarkerTo, ridePadding } from "./live-map.js";
 import { navigateToScreen } from "./navigation.js";
 import { startSession, requestOrientationPermission } from "./live-session.js";
@@ -49,6 +50,9 @@ export function beginRideSetup() {
 	state.rideFlowPhase = "setup";
 	state.setupLocked = false;
 	state.setupPosition = null;
+	// Where the rider was when GPS first locked; see handleSetupPosition and
+	// finishRideSetup for how this seeds the ride-start heading.
+	state.setupHeadingAnchor = null;
 
 	// A map left over from a previous ride (finished or abandoned) would
 	// otherwise be reused as-is: handleSetupPosition only creates a fresh one
@@ -135,6 +139,7 @@ function handleSetupPosition(position) {
 
 	if (!state.setupLocked) {
 		state.setupLocked = true;
+		state.setupHeadingAnchor = { lat: latitude, lng: longitude };
 		setSetupLocating(false);
 	}
 }
@@ -239,9 +244,11 @@ function beginCountdown() {
 
 /**
  * Ends the countdown: stops the setup watch, tilts the map from the flat
- * pre-ride preview into the riding camera, and starts the real ride using
- * whatever position `handleSetupPosition` most recently captured. Sends the
- * rider home with a message if no position ever came through.
+ * pre-ride preview into the riding camera (rotating to the rider's heading
+ * in the same motion, if one is already trustworthy — see below), and
+ * starts the real ride using whatever position `handleSetupPosition` most
+ * recently captured. Sends the rider home with a message if no position
+ * ever came through.
  *
  * @returns {Promise<void>}
  */
@@ -257,11 +264,44 @@ async function finishRideSetup() {
 		return;
 	}
 
-	// The pre-ride preview stays flat and centred on whatever the setup bar and
-	// panel left uncovered; now it tilts and reframes into the riding camera.
+	// The pre-ride preview stays flat, north-up, and centred on whatever the
+	// setup bar and panel left uncovered; now it tilts and reframes into the
+	// riding camera, rotating to the rider's heading in the same motion
+	// (rather than leaving that for a later, separate easeTo once a live fix
+	// happens to cross the heading threshold — see followLiveMap) whenever
+	// one can already be worked out: either straight from a trustworthy GPS
+	// heading, or, since the phone rarely reports one this early, from how
+	// far the rider has drifted from where GPS first locked during setup.
+	const initialHeading = computeInitialHeading(position);
+	console.log("[DEBUG] finishRideSetup initialHeading =", initialHeading);
+
 	if (state.liveMap) {
-		state.liveMap.easeTo({ pitch: LIVE_MAP_PITCH, padding: ridePadding(state.liveMap), duration: 900 });
+		const camera = { pitch: LIVE_MAP_PITCH, padding: ridePadding(state.liveMap), duration: 900 };
+		if (initialHeading != null) camera.bearing = initialHeading;
+		state.liveMap.easeTo(camera);
 	}
 
-	await startSession(position);
+	await startSession(position, initialHeading);
+}
+
+/**
+ * Works out the best available heading at the exact moment the countdown
+ * ends, so `finishRideSetup` can rotate the camera in the same motion as
+ * its tilt instead of waiting on a later fix. Prefers the phone's own GPS
+ * heading once it's moving fast enough to trust (mirrors the threshold
+ * `updateLiveMap` uses); otherwise falls back to the bearing from where GPS
+ * first locked during setup to now, if the rider has drifted far enough for
+ * that to be meaningful rather than GPS jitter.
+ *
+ * @param {GeolocationPosition} position
+ * @returns {number|null} Degrees, or `null` if neither source is trustworthy yet.
+ */
+function computeInitialHeading(position) {
+	const { heading, speed, latitude, longitude } = position.coords;
+	if (Number.isFinite(heading) && speed >= HEADING_GPS_MIN_SPEED_MPS) return heading;
+
+	const anchor = state.setupHeadingAnchor;
+	if (!anchor) return null;
+	if (haversineMeters(anchor.lat, anchor.lng, latitude, longitude) < HEADING_MIN_MOVE_M) return null;
+	return bearingDegrees(anchor.lat, anchor.lng, latitude, longitude);
 }

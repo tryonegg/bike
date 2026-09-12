@@ -71,6 +71,9 @@ export const state = {
 	setupWatchId: null,
 	setupLocked: false,
 	setupPosition: null,
+	// Where the rider was when GPS first locked during setup; see
+	// ride-setup.js's handleSetupPosition and finishRideSetup.
+	setupHeadingAnchor: null,
 	countdownIntervalId: null,
 	selectedActivityType: "bike",
 	selectedKeepScreenOn: false,

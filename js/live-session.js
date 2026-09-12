@@ -36,9 +36,12 @@ import { renderPastRides } from "./history-view.js";
  * @param {GeolocationPosition} initialPosition - The position captured
  *   during pre-ride setup (see ride-setup.js), forced onto the route as the
  *   first point regardless of its accuracy.
+ * @param {number|null} [initialHeading] - The heading `finishRideSetup`
+ *   already rotated the camera to, if any, so the map doesn't get eased back
+ *   to north the moment the first live fix lands — see `updateLiveMap`.
  * @returns {Promise<void>}
  */
-export async function startSession(initialPosition) {
+export async function startSession(initialPosition, initialHeading = null) {
 	const now = Date.now();
 	state.currentSession = {
 		date: new Date(now).toISOString(),
@@ -69,7 +72,10 @@ export async function startSession(initialPosition) {
 		nextSegmentDistance: getSegmentLengthMeters(state.prefs.unit),
 		segmentStartElapsed: 0,
 		shouldRecenter: true,
-		currentHeading: 0,
+		// Seeded from finishRideSetup's own heading guess, if it had one, so the
+		// first live fix's followLiveMap call reasserts the same bearing instead
+		// of easing back to north and then rotating again once it's known.
+		currentHeading: initialHeading ?? 0,
 		// Where the heading was last set from; see HEADING_MIN_MOVE_M.
 		headingAnchor: null,
 	};
