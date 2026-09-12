@@ -308,8 +308,19 @@
         </div>
       </div>
 
-      <h3 class="label settings-section-label">Home totals</h3>
+      <h3 class="label settings-section-label">Home Screen / Past rides</h3>
       <div class="settings-group">
+        <div class="setting-row stacked" role="group" aria-label="What the past ride bars show">
+          <div class="setting-row-main">
+            <span>Bars Show</span>
+            <div class="toggle-pill" id="calendarColorToggle">
+              <button data-calendar-color="distance" class="toggle-option">Distance</button>
+              <button data-calendar-color="time" class="toggle-option">Time</button>
+              <button data-calendar-color="pace" class="toggle-option">Pace</button>
+            </div>
+          </div>
+          <p class="setting-note" id="calendarColorNote">Longer bars and green mark your longest rides and days, red your shortest.</p>
+        </div>
         <div class="setting-row stacked">
           <div class="setting-row-main">
             <label for="statsActivitySelect">Activity</label>
@@ -327,20 +338,6 @@
         </div>
       </div>
 
-      <h3 class="label settings-section-label">Past rides</h3>
-      <div class="settings-group">
-        <div class="setting-row stacked" role="group" aria-label="What the past ride bars show">
-          <div class="setting-row-main">
-            <span>Bars Show</span>
-            <div class="toggle-pill" id="calendarColorToggle">
-              <button data-calendar-color="distance" class="toggle-option">Distance</button>
-              <button data-calendar-color="time" class="toggle-option">Time</button>
-              <button data-calendar-color="pace" class="toggle-option">Pace</button>
-            </div>
-          </div>
-          <p class="setting-note" id="calendarColorNote">Longer bars and green mark your longest rides and days, red your shortest.</p>
-        </div>
-      </div>
 
       <h3 class="label settings-section-label">Map tiles</h3>
       <div class="settings-group">
