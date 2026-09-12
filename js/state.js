@@ -18,6 +18,7 @@ export const state = {
 		theme: "light",
 		stadiaKey: "",
 		mapType: "road",
+		terrain3d: false,
 		liveMapZoom: LIVE_MAP_ZOOM,
 		comparePastRides: true,
 		// Which side of the map the ride stats sit on in landscape: "left" or "right".
@@ -121,7 +122,8 @@ export const el = {
 	},
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
-	mapTypeToggle: document.getElementById("mapTypeToggle"),
+	mapTypeSelect: document.getElementById("mapTypeSelect"),
+	terrain3dToggle: document.getElementById("terrain3dToggle"),
 	compareToggle: document.getElementById("compareToggle"),
 	statsSideToggle: document.getElementById("statsSideToggle"),
 	calendarColorToggle: document.getElementById("calendarColorToggle"),
@@ -131,7 +133,8 @@ export const el = {
 	// Debug screen's own copies of a few frequently-tweaked settings, kept in
 	// sync with the settings screen's originals — see navigation.js.
 	debugThemeToggle: document.getElementById("debugThemeToggle"),
-	debugMapTypeToggle: document.getElementById("debugMapTypeToggle"),
+	debugMapTypeSelect: document.getElementById("debugMapTypeSelect"),
+	debugTerrain3dToggle: document.getElementById("debugTerrain3dToggle"),
 	debugGuideContrastToggle: document.getElementById("debugGuideContrastToggle"),
 	debugMarkerSizeToggle: document.getElementById("debugMarkerSizeToggle"),
 	debugCompareToggle: document.getElementById("debugCompareToggle"),

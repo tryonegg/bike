@@ -258,15 +258,32 @@
             <button data-theme="dark" class="toggle-option">Dark</button>
           </div>
         </div>
-        <div class="setting-row stacked" role="group" aria-label="Map style">
+        <div class="setting-row stacked">
           <div class="setting-row-main">
-            <span>Map Style</span>
-            <div class="toggle-pill" id="mapTypeToggle">
-              <button data-map-type="road" class="toggle-option">Road</button>
-              <button data-map-type="topo" class="toggle-option">Topo</button>
+            <label for="mapTypeSelect">Map Style</label>
+            <span class="select-wrap">
+              <select id="mapTypeSelect">
+                <option value="road">Road</option>
+                <option value="topo">Topo</option>
+                <option value="bright">Bright</option>
+                <option value="classic">Classic</option>
+                <option value="satellite">Satellite</option>
+                <option value="toner">Toner</option>
+                <option value="terrain">Terrain</option>
+              </select>
+            </span>
+          </div>
+          <p class="setting-note">Topo adds hill shading and contour lines. Classic, Satellite, Toner, and Terrain need the Stadia Maps API key below.</p>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="3D terrain">
+          <div class="setting-row-main">
+            <span>3D Terrain</span>
+            <div class="toggle-pill" id="terrain3dToggle">
+              <button data-terrain3d="off" class="toggle-option">Off</button>
+              <button data-terrain3d="on" class="toggle-option">On</button>
             </div>
           </div>
-          <p class="setting-note">Topo adds hill shading and contour lines to the ride and summary maps.</p>
+          <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
         </div>
         <div class="setting-row" role="group" aria-label="Guide line contrast">
           <span>Guide Line Contrast</span>
@@ -347,7 +364,7 @@
             <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
             <button id="saveStadiaKeyBtn" class="btn">Save</button>
           </div>
-          <p class="setting-note">Without a key, maps use free OpenFreeMap tiles. With a key, it uses Stadia's Alidade Smooth (Outdoors for Topo) in light mode and Alidade Smooth Dark in dark mode. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
+          <p class="setting-note">Without a key, Map Style is limited to Road, Topo, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Satellite, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
         </div>
       </div>
 
@@ -398,15 +415,32 @@
             <button data-theme="dark" class="toggle-option">Dark</button>
           </div>
         </div>
-        <div class="setting-row stacked" role="group" aria-label="Map style">
+        <div class="setting-row stacked">
           <div class="setting-row-main">
-            <span>Map Style</span>
-            <div class="toggle-pill" id="debugMapTypeToggle">
-              <button data-map-type="road" class="toggle-option">Road</button>
-              <button data-map-type="topo" class="toggle-option">Topo</button>
+            <label for="debugMapTypeSelect">Map Style</label>
+            <span class="select-wrap">
+              <select id="debugMapTypeSelect">
+                <option value="road">Road</option>
+                <option value="topo">Topo</option>
+                <option value="bright">Bright</option>
+                <option value="classic">Classic</option>
+                <option value="satellite">Satellite</option>
+                <option value="toner">Toner</option>
+                <option value="terrain">Terrain</option>
+              </select>
+            </span>
+          </div>
+          <p class="setting-note">Topo adds hill shading and contour lines. Classic, Satellite, Toner, and Terrain need the Stadia Maps API key below.</p>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="3D terrain">
+          <div class="setting-row-main">
+            <span>3D Terrain</span>
+            <div class="toggle-pill" id="debugTerrain3dToggle">
+              <button data-terrain3d="off" class="toggle-option">Off</button>
+              <button data-terrain3d="on" class="toggle-option">On</button>
             </div>
           </div>
-          <p class="setting-note">Topo adds hill shading and contour lines to the ride and summary maps.</p>
+          <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
         </div>
         <div class="setting-row" role="group" aria-label="Guide line contrast">
           <span>Guide Line Contrast</span>

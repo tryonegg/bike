@@ -74,6 +74,21 @@ export const GUIDE_LABEL_MIN_LINE_PX = 70;
 // Width of the whole world in pixels at zoom 0, which MapLibre doubles per zoom.
 export const WORLD_SIZE_AT_ZOOM_0 = 512;
 
+// Base-style catalog for the "Map Style" setting, keyed by state.prefs.mapType.
+// `free` is the OpenFreeMap style name (null when that look has no free
+// equivalent, e.g. satellite imagery); `stadia` is the Stadia Maps style name,
+// used once state.prefs.stadiaKey is set. "road" isn't listed here: it's the
+// default, and the only style that also switches with the light/dark theme
+// (see mapStyleUrl in live-map.js).
+export const MAP_STYLE_NAMES = {
+	topo: { free: "liberty", stadia: "outdoors" },
+	bright: { free: "bright", stadia: "alidade_bright" },
+	classic: { free: null, stadia: "osm_bright" },
+	satellite: { free: null, stadia: "alidade_satellite" },
+	toner: { free: null, stadia: "stamen_toner" },
+	terrain: { free: null, stadia: "stamen_terrain" },
+};
+
 // Topo relief and contours are drawn from AWS's open terrain tiles. Zoom 13 is
 // fine enough for riding-scale contours and keeps the download per view small.
 export const DEM_TILE_URL = "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png";
@@ -82,6 +97,11 @@ export const DEM_ATTRIBUTION = '<a href="https://github.com/tilezen/joerd/blob/m
 export const FEET_PER_METER = 3.28084;
 export const TOPO_LAYER_IDS = ["topo-hillshade", "topo-contour-lines", "topo-contour-labels"];
 export const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
+
+// How strongly the live map's optional 3D terrain exaggerates real elevation.
+// 1 would be true-to-scale; a little above that keeps rolling terrain readable
+// at the live map's close riding zoom without looking cartoonish.
+export const TERRAIN_EXAGGERATION = 1.2;
 
 // Best past pace: the band colours the known paths within this distance ahead,
 // fading out, and a stretch at least this steep gets a climb tag in the readout.

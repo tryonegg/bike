@@ -124,6 +124,7 @@ export async function loadPrefs() {
 	state.prefs.theme = await getPref("theme", "light");
 	state.prefs.stadiaKey = await getPref("stadiaKey", "");
 	state.prefs.mapType = await getPref("mapType", "road");
+	state.prefs.terrain3d = (await getPref("terrain3d", false)) === true;
 	// Checked because an imported backup could carry anything, and a bad zoom
 	// would leave the live map unable to draw.
 	const liveMapZoom = await getPref("liveMapZoom", LIVE_MAP_ZOOM);

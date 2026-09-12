@@ -26,6 +26,8 @@ import {
 	BEST_PACE_LAYER,
 	BEST_PACE_SLOTS,
 	CLEAR_LINE_GRADIENT,
+	MAP_STYLE_NAMES,
+	TERRAIN_EXAGGERATION,
 } from "./constants.js";
 import { state, el } from "./state.js";
 import { haversineMeters, bearingDegrees, formatDistance, escapeHtml, formatElevation } from "./format.js";
@@ -171,6 +173,7 @@ export function initLiveMap(lat, lng, { overhead = false } = {}) {
 			pitch: overhead ? 0 : LIVE_MAP_PITCH,
 		},
 		addLiveOverlayLayers,
+		{ terrainCapable: true },
 	);
 	state.liveMap = map;
 	state.markerLayer = createMarkerLayer(map);
@@ -282,9 +285,13 @@ export function setLiveZoomAnchor(map, aroundRider) {
  *   style (and any topo layers) load, to add the caller's own
  *   sources/layers/markers. Re-invoked after every `setStyle` too, since a
  *   style swap discards everything that isn't part of the new style.
+ * @param {Object} [config]
+ * @param {boolean} [config.terrainCapable] - Whether this map should apply
+ *   `state.prefs.terrain3d`. Left off for the flat, north-up ride summary,
+ *   where real elevation displacement isn't visible anyway.
  * @returns {maplibregl.Map}
  */
-export function createVectorMap(options, addOverlays) {
+export function createVectorMap(options, addOverlays, { terrainCapable = false } = {}) {
 	const usesStadia = Boolean(state.prefs.stadiaKey);
 	const map = new maplibregl.Map({
 		...options,
@@ -299,13 +306,14 @@ export function createVectorMap(options, addOverlays) {
 	// No zoom buttons: both maps are pinch-to-zoom, and the stats strip sits
 	// where the buttons would go.
 	map.touchZoomRotate.disableRotation();
-	state.mapStatus.set(map, { usesStadia, styleReady: false });
+	state.mapStatus.set(map, { usesStadia, styleReady: false, terrainCapable });
 
 	// Fires for the first style and again after every setStyle, which discards
-	// the overlays along with the old style.
+	// the overlays (and terrain) along with the old style.
 	map.on("style.load", () => {
 		state.mapStatus.get(map).styleReady = true;
 		addTopoLayers(map);
+		if (terrainCapable) updateTerrain(map, state.prefs.terrain3d);
 		addOverlays(map);
 	});
 	map.on("error", (event) => handleMapError(map, event));
@@ -336,15 +344,27 @@ export function isMapStyleReady(map) {
  */
 function mapStyleUrl(useStadia) {
 	const dark = state.prefs.theme === "dark";
-	const topo = state.prefs.mapType === "topo";
+	const names = MAP_STYLE_NAMES[state.prefs.mapType];
 
 	if (useStadia) {
-		const styleName = dark ? "alidade_smooth_dark" : topo ? "outdoors" : "alidade_smooth";
+		const styleName = names?.stadia ?? (dark ? "alidade_smooth_dark" : "alidade_smooth");
 		return `https://tiles.stadiamaps.com/styles/${styleName}.json?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`;
 	}
 
-	const styleName = dark ? "dark" : topo ? "liberty" : "positron";
+	const styleName = names?.free ?? (dark ? "dark" : "positron");
 	return `https://tiles.openfreemap.org/styles/${styleName}`;
+}
+
+/**
+ * Whether a map-style choice has no free rendition and so needs
+ * `state.prefs.stadiaKey` to look like anything other than plain Road.
+ * Used by the settings UI to disable those options until a key is saved.
+ *
+ * @param {string} mapType
+ * @returns {boolean}
+ */
+export function mapTypeNeedsStadiaKey(mapType) {
+	return MAP_STYLE_NAMES[mapType]?.free === null;
 }
 
 /**
@@ -556,6 +576,62 @@ function getDemSource() {
 }
 
 /**
+ * Adds the shared "topo-dem" raster-dem source to a map if it isn't there
+ * already. Both the Topo hillshade and 3D terrain draw from it and can be on
+ * at once, so this is the one place either adds it — calling `map.addSource`
+ * a second time for an id that already exists throws.
+ *
+ * @param {maplibregl.Map} map
+ * @returns {boolean} Whether the source is present (already was, or just got
+ *   added) — `false` only if the `mlcontour` library hasn't loaded yet.
+ */
+function ensureDemSource(map) {
+	if (map.getSource("topo-dem")) return true;
+	const demSource = getDemSource();
+	if (!demSource) return false;
+	map.addSource("topo-dem", {
+		type: "raster-dem",
+		encoding: "terrarium",
+		tiles: [demSource.sharedDemProtocolUrl],
+		tileSize: 256,
+		maxzoom: DEM_MAX_ZOOM,
+		attribution: DEM_ATTRIBUTION,
+	});
+	return true;
+}
+
+/**
+ * Turns a terrain-capable map's real 3D terrain on or off, reusing whatever
+ * the Topo hillshade is also drawing from. Safe to call whether or not Topo
+ * is the current map-type — terrain doesn't depend on it, it just shares the
+ * same elevation source.
+ *
+ * @param {maplibregl.Map} map
+ * @param {boolean} enabled
+ */
+function updateTerrain(map, enabled) {
+	if (!enabled) {
+		map.setTerrain(null);
+		return;
+	}
+	if (!ensureDemSource(map)) return;
+	map.setTerrain({ source: "topo-dem", exaggeration: TERRAIN_EXAGGERATION });
+}
+
+/**
+ * Re-applies `state.prefs.terrain3d` to whichever terrain-capable map
+ * currently exists (the live map — the post-ride summary opts out, see
+ * `createVectorMap`). Called after the 3D-terrain setting changes; a style or
+ * topo-layer swap re-applies it on its own via `style.load`/`refreshTopoLayers`.
+ */
+export function rebuildTerrain() {
+	for (const map of [state.liveMap, state.postMap]) {
+		if (!isMapStyleReady(map) || !state.mapStatus.get(map)?.terrainCapable) continue;
+		updateTerrain(map, state.prefs.terrain3d);
+	}
+}
+
+/**
  * Finds where in a base style's layer stack the topo relief and label
  * layers should be inserted. Relief goes under roads and buildings so it
  * shades the land without dimming them. Anything labelled or highlighted
@@ -589,8 +665,11 @@ function styleLayerAnchors(map) {
  */
 function addTopoLayers(map) {
 	if (state.prefs.mapType !== "topo") return;
+	// The map-level raster-dem source is shared with 3D terrain (ensureDemSource
+	// skips re-adding it if terrain already did); the contour lines below still
+	// need the demSource object itself, for its contourProtocolUrl.
 	const demSource = getDemSource();
-	if (!demSource) return;
+	if (!demSource || !ensureDemSource(map)) return;
 
 	const dark = state.prefs.theme === "dark";
 	const imperial = state.prefs.unit === "imperial";
@@ -607,14 +686,6 @@ function addTopoLayers(map) {
 	const contourColor = dark ? "rgba(214, 196, 160, 0.4)" : "rgba(128, 88, 40, 0.5)";
 	const contourTextColor = dark ? "#d6c4a0" : "#6b4a22";
 
-	map.addSource("topo-dem", {
-		type: "raster-dem",
-		encoding: "terrarium",
-		tiles: [demSource.sharedDemProtocolUrl],
-		tileSize: 256,
-		maxzoom: DEM_MAX_ZOOM,
-		attribution: DEM_ATTRIBUTION,
-	});
 	map.addLayer(
 		{
 			id: "topo-hillshade",
@@ -698,6 +769,12 @@ function addTopoLayers(map) {
 export function refreshTopoLayers() {
 	for (const map of [state.liveMap, state.postMap]) {
 		if (!isMapStyleReady(map)) continue;
+		// "topo-dem" is torn down below along with the rest, but 3D terrain may
+		// still be pointed at it — clearing terrain first avoids removeSource
+		// throwing on a source that's still in use, and ensureDemSource (via
+		// addTopoLayers or the restore below) puts it straight back either way.
+		const hadTerrain = state.mapStatus.get(map)?.terrainCapable && state.prefs.terrain3d;
+		if (hadTerrain) map.setTerrain(null);
 		for (const layerId of TOPO_LAYER_IDS) {
 			if (map.getLayer(layerId)) map.removeLayer(layerId);
 		}
@@ -707,6 +784,7 @@ export function refreshTopoLayers() {
 		// Topo layers go under everything else, so re-adding them after the
 		// overlays still leaves the route on top.
 		addTopoLayers(map);
+		if (hadTerrain) updateTerrain(map, true);
 	}
 }
 

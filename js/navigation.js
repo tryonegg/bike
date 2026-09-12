@@ -14,7 +14,7 @@ import { setPref } from "./db.js";
 import { renderPastRides, shiftCalendarMonth } from "./history-view.js";
 import { updateLiveStats, togglePauseSession, endSessionWithConfirm, saveActiveSessionCheckpoint, finalizeSession } from "./live-session.js";
 import { applyMapVisualPrefs } from "./map-visuals.js";
-import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap } from "./live-map.js";
+import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, mapTypeNeedsStadiaKey, rebuildTerrain } from "./live-map.js";
 import { renderPostSummary, openPostSession } from "./post-session.js";
 import { renderElevationChart, clearChartHighlight } from "./chart.js";
 import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abortRideSetup } from "./ride-setup.js";
@@ -53,8 +53,11 @@ export function wireEvents() {
 	el.themeToggle.addEventListener("click", (event) => handleThemeClick(event));
 	el.debugThemeToggle.addEventListener("click", (event) => handleThemeClick(event));
 
-	el.mapTypeToggle.addEventListener("click", (event) => handleMapTypeClick(event));
-	el.debugMapTypeToggle.addEventListener("click", (event) => handleMapTypeClick(event));
+	el.mapTypeSelect.addEventListener("change", () => handleMapTypeChange(el.mapTypeSelect));
+	el.debugMapTypeSelect.addEventListener("change", () => handleMapTypeChange(el.debugMapTypeSelect));
+
+	el.terrain3dToggle.addEventListener("click", (event) => handleTerrain3dClick(event));
+	el.debugTerrain3dToggle.addEventListener("click", (event) => handleTerrain3dClick(event));
 
 	// Takes effect from the next ride, which is when the past rides are indexed.
 	el.compareToggle.addEventListener("click", (event) => handleCompareClick(event));
@@ -182,6 +185,7 @@ export function wireEvents() {
 		state.prefs.stadiaKey = el.stadiaKeyInput.value.trim();
 		el.stadiaKeyInput.value = state.prefs.stadiaKey;
 		await setPref("stadiaKey", state.prefs.stadiaKey);
+		syncToggles();
 		rebuildMapStyles();
 		flashButtonLabel(el.saveStadiaKeyBtn, "Saved");
 	});
@@ -302,14 +306,22 @@ async function handleThemeClick(event) {
 	if (state.currentPostSession) renderElevationChart(state.currentPostSession);
 }
 
-/** Shared handler for both map-style toggles (settings screen and debug screen). */
-async function handleMapTypeClick(event) {
-	const btn = event.target.closest("button[data-map-type]");
-	if (!btn) return;
-	state.prefs.mapType = btn.dataset.mapType;
+/** Shared handler for both map-style selects (settings screen and debug screen). */
+async function handleMapTypeChange(select) {
+	state.prefs.mapType = select.value;
 	await setPref("mapType", state.prefs.mapType);
 	syncToggles();
 	rebuildMapStyles();
+}
+
+/** Shared handler for both 3D-terrain toggles (settings screen and debug screen). */
+async function handleTerrain3dClick(event) {
+	const btn = event.target.closest("button[data-terrain3d]");
+	if (!btn) return;
+	state.prefs.terrain3d = btn.dataset.terrain3d === "on";
+	await setPref("terrain3d", state.prefs.terrain3d);
+	syncToggles();
+	rebuildTerrain();
 }
 
 /** Shared handler for both "compare with past rides" toggles (settings screen and debug screen). */
@@ -355,10 +367,21 @@ export function syncToggles() {
 	const debugThemeButtons = el.debugThemeToggle.querySelectorAll("button");
 	debugThemeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
 
-	const mapTypeButtons = el.mapTypeToggle.querySelectorAll("button");
-	mapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
-	const debugMapTypeButtons = el.debugMapTypeToggle.querySelectorAll("button");
-	debugMapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
+	// Styles with no free rendition (Classic, Satellite, Toner, Terrain) stay
+	// selectable — a saved choice shouldn't vanish — but are greyed out until a
+	// Stadia key makes them show anything but plain Road.
+	const noStadiaKey = !state.prefs.stadiaKey;
+	for (const select of [el.mapTypeSelect, el.debugMapTypeSelect]) {
+		select.value = state.prefs.mapType;
+		for (const option of select.options) {
+			option.disabled = noStadiaKey && mapTypeNeedsStadiaKey(option.value);
+		}
+	}
+
+	const terrain3dButtons = el.terrain3dToggle.querySelectorAll("button");
+	terrain3dButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.terrain3d === "on") === state.prefs.terrain3d));
+	const debugTerrain3dButtons = el.debugTerrain3dToggle.querySelectorAll("button");
+	debugTerrain3dButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.terrain3d === "on") === state.prefs.terrain3d));
 
 	const compareButtons = el.compareToggle.querySelectorAll("button");
 	compareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
