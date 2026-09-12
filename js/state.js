@@ -128,6 +128,13 @@ export const el = {
 	calendarColorNote: document.getElementById("calendarColorNote"),
 	debugAccuracyToggle: document.getElementById("debugAccuracyToggle"),
 	debugClipWarmupToggle: document.getElementById("debugClipWarmupToggle"),
+	// Debug screen's own copies of a few frequently-tweaked settings, kept in
+	// sync with the settings screen's originals — see navigation.js.
+	debugThemeToggle: document.getElementById("debugThemeToggle"),
+	debugMapTypeToggle: document.getElementById("debugMapTypeToggle"),
+	debugGuideContrastToggle: document.getElementById("debugGuideContrastToggle"),
+	debugMarkerSizeToggle: document.getElementById("debugMarkerSizeToggle"),
+	debugCompareToggle: document.getElementById("debugCompareToggle"),
 	monthDistance: document.getElementById("monthDistance"),
 	monthDistanceUnit: document.getElementById("monthDistanceUnit"),
 	monthCount: document.getElementById("monthCount"),

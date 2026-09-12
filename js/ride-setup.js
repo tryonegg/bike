@@ -273,7 +273,6 @@ async function finishRideSetup() {
 	// heading, or, since the phone rarely reports one this early, from how
 	// far the rider has drifted from where GPS first locked during setup.
 	const initialHeading = computeInitialHeading(position);
-	console.log("[DEBUG] finishRideSetup initialHeading =", initialHeading);
 
 	if (state.liveMap) {
 		const camera = { pitch: LIVE_MAP_PITCH, padding: ridePadding(state.liveMap), duration: 900 };

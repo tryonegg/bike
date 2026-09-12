@@ -314,6 +314,11 @@ button {
   padding: calc(14px + var(--safe-top)) 16px 0 0;
   pointer-events: none;
 }
+:has(#debugScreen.active){
+  .debug-fab-wrap {
+    z-index: -1;
+  }
+}
 
 .debug-fab-wrap .round-btn {
   pointer-events: auto;

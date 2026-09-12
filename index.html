@@ -389,6 +389,51 @@
         <h2>Debug</h2>
       </header>
 
+      <h3 class="label settings-section-label">Quick Settings</h3>
+      <div class="settings-group">
+        <div class="setting-row" role="group" aria-label="Theme">
+          <span>Theme</span>
+          <div class="toggle-pill" id="debugThemeToggle">
+            <button data-theme="light" class="toggle-option">Light</button>
+            <button data-theme="dark" class="toggle-option">Dark</button>
+          </div>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="Map style">
+          <div class="setting-row-main">
+            <span>Map Style</span>
+            <div class="toggle-pill" id="debugMapTypeToggle">
+              <button data-map-type="road" class="toggle-option">Road</button>
+              <button data-map-type="topo" class="toggle-option">Topo</button>
+            </div>
+          </div>
+          <p class="setting-note">Topo adds hill shading and contour lines to the ride and summary maps.</p>
+        </div>
+        <div class="setting-row" role="group" aria-label="Guide line contrast">
+          <span>Guide Line Contrast</span>
+          <div class="toggle-pill" id="debugGuideContrastToggle">
+            <button data-guide-contrast="medium" class="toggle-option">Normal</button>
+            <button data-guide-contrast="high" class="toggle-option">High</button>
+          </div>
+        </div>
+        <div class="setting-row" role="group" aria-label="Distance marker size">
+          <span>Distance Marker Size</span>
+          <div class="toggle-pill" id="debugMarkerSizeToggle">
+            <button data-marker-size="medium" class="toggle-option">Normal</button>
+            <button data-marker-size="large" class="toggle-option">Large</button>
+          </div>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="Compare with past rides">
+          <div class="setting-row-main">
+            <span>Compare with past rides</span>
+            <div class="toggle-pill" id="debugCompareToggle">
+              <button data-compare="off" class="toggle-option">Off</button>
+              <button data-compare="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">Shows your best pace on roads you've ridden before, in the direction you're heading.</p>
+        </div>
+      </div>
+
       <div class="settings-group">
         <div class="setting-row stacked" role="group" aria-label="GPS accuracy overlay">
           <div class="setting-row-main">

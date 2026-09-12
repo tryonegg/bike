@@ -50,35 +50,15 @@ export function wireEvents() {
 		}
 	});
 
-	el.themeToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-theme]");
-		if (!btn) return;
-		state.prefs.theme = btn.dataset.theme;
-		await setPref("theme", state.prefs.theme);
-		applyTheme();
-		syncToggles();
-		rebuildMapStyles();
-		// The chart reads its colours from the theme when it draws.
-		if (state.currentPostSession) renderElevationChart(state.currentPostSession);
-	});
+	el.themeToggle.addEventListener("click", (event) => handleThemeClick(event));
+	el.debugThemeToggle.addEventListener("click", (event) => handleThemeClick(event));
 
-	el.mapTypeToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-map-type]");
-		if (!btn) return;
-		state.prefs.mapType = btn.dataset.mapType;
-		await setPref("mapType", state.prefs.mapType);
-		syncToggles();
-		rebuildMapStyles();
-	});
+	el.mapTypeToggle.addEventListener("click", (event) => handleMapTypeClick(event));
+	el.debugMapTypeToggle.addEventListener("click", (event) => handleMapTypeClick(event));
 
 	// Takes effect from the next ride, which is when the past rides are indexed.
-	el.compareToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-compare]");
-		if (!btn) return;
-		state.prefs.comparePastRides = btn.dataset.compare === "on";
-		await setPref("comparePastRides", state.prefs.comparePastRides);
-		syncToggles();
-	});
+	el.compareToggle.addEventListener("click", (event) => handleCompareClick(event));
+	el.debugCompareToggle.addEventListener("click", (event) => handleCompareClick(event));
 
 	el.dataSaverToggle.addEventListener("click", async (event) => {
 		const btn = event.target.closest("button[data-data-saver");
@@ -182,23 +162,11 @@ export function wireEvents() {
 	});
 	el.debugBackBtn.addEventListener("click", () => history.back());
 
-	el.guideContrastToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-guide-contrast]");
-		if (!btn) return;
-		state.prefs.guideContrast = btn.dataset.guideContrast;
-		await setPref("guideContrast", state.prefs.guideContrast);
-		syncToggles();
-		applyMapVisualPrefs();
-	});
+	el.guideContrastToggle.addEventListener("click", (event) => handleGuideContrastClick(event));
+	el.debugGuideContrastToggle.addEventListener("click", (event) => handleGuideContrastClick(event));
 
-	el.markerSizeToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-marker-size]");
-		if (!btn) return;
-		state.prefs.markerSize = btn.dataset.markerSize;
-		await setPref("markerSize", state.prefs.markerSize);
-		syncToggles();
-		applyMapVisualPrefs();
-	});
+	el.markerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
+	el.debugMarkerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
 
 	el.statsActivitySelect.addEventListener("change", async () => {
 		state.prefs.statsActivity = el.statsActivitySelect.value;
@@ -317,6 +285,62 @@ export function wireEvents() {
 	});
 }
 
+// The five handlers below back both the settings screen's own toggles and
+// their duplicates on the debug screen (see index.html), so the two copies
+// share one place that actually changes state instead of drifting apart.
+
+/** Shared handler for both theme toggles (settings screen and debug screen). */
+async function handleThemeClick(event) {
+	const btn = event.target.closest("button[data-theme]");
+	if (!btn) return;
+	state.prefs.theme = btn.dataset.theme;
+	await setPref("theme", state.prefs.theme);
+	applyTheme();
+	syncToggles();
+	rebuildMapStyles();
+	// The chart reads its colours from the theme when it draws.
+	if (state.currentPostSession) renderElevationChart(state.currentPostSession);
+}
+
+/** Shared handler for both map-style toggles (settings screen and debug screen). */
+async function handleMapTypeClick(event) {
+	const btn = event.target.closest("button[data-map-type]");
+	if (!btn) return;
+	state.prefs.mapType = btn.dataset.mapType;
+	await setPref("mapType", state.prefs.mapType);
+	syncToggles();
+	rebuildMapStyles();
+}
+
+/** Shared handler for both "compare with past rides" toggles (settings screen and debug screen). */
+async function handleCompareClick(event) {
+	const btn = event.target.closest("button[data-compare]");
+	if (!btn) return;
+	state.prefs.comparePastRides = btn.dataset.compare === "on";
+	await setPref("comparePastRides", state.prefs.comparePastRides);
+	syncToggles();
+}
+
+/** Shared handler for both guide-line-contrast toggles (settings screen and debug screen). */
+async function handleGuideContrastClick(event) {
+	const btn = event.target.closest("button[data-guide-contrast]");
+	if (!btn) return;
+	state.prefs.guideContrast = btn.dataset.guideContrast;
+	await setPref("guideContrast", state.prefs.guideContrast);
+	syncToggles();
+	applyMapVisualPrefs();
+}
+
+/** Shared handler for both distance-marker-size toggles (settings screen and debug screen). */
+async function handleMarkerSizeClick(event) {
+	const btn = event.target.closest("button[data-marker-size]");
+	if (!btn) return;
+	state.prefs.markerSize = btn.dataset.markerSize;
+	await setPref("markerSize", state.prefs.markerSize);
+	syncToggles();
+	applyMapVisualPrefs();
+}
+
 /**
  * Re-applies every settings-toggle button's `active` class (and the
  * calendar-color note text) from the current `state.prefs`. Called after
@@ -328,12 +352,18 @@ export function syncToggles() {
 
 	const themeButtons = el.themeToggle.querySelectorAll("button");
 	themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
+	const debugThemeButtons = el.debugThemeToggle.querySelectorAll("button");
+	debugThemeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
 
 	const mapTypeButtons = el.mapTypeToggle.querySelectorAll("button");
 	mapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
+	const debugMapTypeButtons = el.debugMapTypeToggle.querySelectorAll("button");
+	debugMapTypeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mapType === state.prefs.mapType));
 
 	const compareButtons = el.compareToggle.querySelectorAll("button");
 	compareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
+	const debugCompareButtons = el.debugCompareToggle.querySelectorAll("button");
+	debugCompareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
 
 	const dataSaverButtons = el.dataSaverToggle.querySelectorAll("button");
 	dataSaverButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.dataSaver === "on") === state.prefs.dataSaver));
@@ -366,9 +396,15 @@ export function syncToggles() {
 	guideContrastButtons.forEach((btn) =>
 		btn.classList.toggle("active", btn.dataset.guideContrast === state.prefs.guideContrast),
 	);
+	const debugGuideContrastButtons = el.debugGuideContrastToggle.querySelectorAll("button");
+	debugGuideContrastButtons.forEach((btn) =>
+		btn.classList.toggle("active", btn.dataset.guideContrast === state.prefs.guideContrast),
+	);
 
 	const markerSizeButtons = el.markerSizeToggle.querySelectorAll("button");
 	markerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
+	const debugMarkerSizeButtons = el.debugMarkerSizeToggle.querySelectorAll("button");
+	debugMarkerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
 }
 
 // Briefly swaps a button's label to confirm an action, then restores it.
