@@ -21,6 +21,10 @@
     </div>
   </div>
 
+  <div class="debug-fab-wrap">
+    <button id="debugMenuBtn" class="round-btn" aria-label="Open debug menu">π</button>
+  </div>
+
   <main id="appRoot">
     <section id="homeScreen" class="screen has-bottom-bar active">
       <header class="app-header">
@@ -350,35 +354,6 @@
         </div>
       </div>
 
-      <h3 class="label settings-section-label">Debug</h3>
-      <div class="settings-group">
-        <div class="setting-row stacked" role="group" aria-label="GPS accuracy overlay">
-          <div class="setting-row-main">
-            <span>GPS Accuracy Overlay</span>
-            <div class="toggle-pill" id="debugAccuracyToggle">
-              <button data-debug-accuracy="off" class="toggle-option">Off</button>
-              <button data-debug-accuracy="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">On a ride's summary map, colors the route and dots each recorded point by GPS accuracy instead of speed — green is precise, red is imprecise — and flags the single best and worst points. Gaps between dots show where GPS dropped out.</p>
-          <div class="chart-legend accuracy-legend">
-            <span><i class="swatch fast"></i>Precise</span>
-            <span><i class="swatch slow"></i>Imprecise</span>
-            <span><i class="swatch unknown"></i>No accuracy data, or clipped warm-up</span>
-          </div>
-        </div>
-        <div class="setting-row stacked" role="group" aria-label="Clip GPS warm-up">
-          <div class="setting-row-main">
-            <span>Clip GPS Warm-up</span>
-            <div class="toggle-pill" id="debugClipWarmupToggle">
-              <button data-debug-clip-warmup="off" class="toggle-option">Off</button>
-              <button data-debug-clip-warmup="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">Grays out the start of the route until GPS accuracy settles down, so a shaky first fix doesn't skew the accuracy overlay's colors. Only affects the overlay above.</p>
-        </div>
-      </div>
-
       <h3 class="label settings-section-label">Data</h3>
       <div class="data-buttons">
         <button id="exportDataBtn" class="btn pill">Export Data</button>
@@ -408,6 +383,41 @@
           <p class="setting-note">Sacrifices some accuracy, but removes redundant data.</p>
         </div>
 
+      </div>
+    </section>
+
+    <section id="debugScreen" class="screen hidden">
+      <header class="app-bar">
+        <button id="debugBackBtn" class="round-btn" aria-label="Back">←</button>
+        <h2>Debug</h2>
+      </header>
+
+      <div class="settings-group">
+        <div class="setting-row stacked" role="group" aria-label="GPS accuracy overlay">
+          <div class="setting-row-main">
+            <span>GPS Accuracy Overlay</span>
+            <div class="toggle-pill" id="debugAccuracyToggle">
+              <button data-debug-accuracy="off" class="toggle-option">Off</button>
+              <button data-debug-accuracy="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">On a ride's summary map, colors the route and dots each recorded point by GPS accuracy instead of speed — green is precise, red is imprecise — and flags the single best and worst points. Gaps between dots show where GPS dropped out.</p>
+          <div class="chart-legend accuracy-legend">
+            <span><i class="swatch fast"></i>Precise</span>
+            <span><i class="swatch slow"></i>Imprecise</span>
+            <span><i class="swatch unknown"></i>No accuracy data, or clipped warm-up</span>
+          </div>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="Clip GPS warm-up">
+          <div class="setting-row-main">
+            <span>Clip GPS Warm-up</span>
+            <div class="toggle-pill" id="debugClipWarmupToggle">
+              <button data-debug-clip-warmup="off" class="toggle-option">Off</button>
+              <button data-debug-clip-warmup="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">Grays out the start of the route until GPS accuracy settles down, so a shaky first fix doesn't skew the accuracy overlay's colors. Only affects the overlay above.</p>
+        </div>
       </div>
     </section>
   </main>

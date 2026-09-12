@@ -298,6 +298,29 @@ button {
   mask: url("icons/settings.svg") center / contain no-repeat;
 }
 
+/* The debug menu's entry point: pinned above every screen, including the
+   active ride's fixed map overlay, so it's reachable no matter what's on
+   screen. Uses the same centered-column trick as .bottom-bar so it lines up
+   with the screen's right edge rather than the viewport's on wide displays. */
+.debug-fab-wrap {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  z-index: 1000;
+  width: min(100%, 720px);
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: flex-end;
+  padding: calc(14px + var(--safe-top)) 16px 0 0;
+  pointer-events: none;
+}
+
+.debug-fab-wrap .round-btn {
+  pointer-events: auto;
+  background: var(--raised);
+  box-shadow: var(--chip-shadow);
+}
+
 /* ---- Segmented toggle ---- */
 
 .toggle-pill {
@@ -345,6 +368,9 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  /* Extra clearance so the view toggle doesn't sit under the debug FAB
+     pinned to the top-right corner. */
+  padding-right: 40px;
 }
 
 .app-header h1 {

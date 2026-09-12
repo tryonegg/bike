@@ -174,6 +174,14 @@ export function wireEvents() {
 		navigateToScreen("settings");
 	});
 
+	// The debug FAB floats above every screen, so guard against pushing a
+	// duplicate "debug" history entry if it's tapped while already there.
+	el.debugMenuBtn.addEventListener("click", () => {
+		if (state.currentScreen === "debug") return;
+		navigateToScreen("debug");
+	});
+	el.debugBackBtn.addEventListener("click", () => history.back());
+
 	el.guideContrastToggle.addEventListener("click", async (event) => {
 		const btn = event.target.closest("button[data-guide-contrast]");
 		if (!btn) return;
@@ -424,7 +432,7 @@ export async function leavePostSession() {
 /**
  * Shows one screen and hides the rest, and records which one is current.
  * Does not touch browser history — see `navigateToScreen` for that.
- * @param {"home"|"active"|"post"|"settings"} name
+ * @param {"home"|"active"|"post"|"settings"|"debug"} name
  */
 export function showScreen(name) {
 	Object.entries(el.screens).forEach(([key, screen]) => {
@@ -438,7 +446,7 @@ export function showScreen(name) {
  * Shows a screen and updates browser history to match, so back/forward and
  * the popstate handler in `wireEvents` can navigate between the app's screens.
  *
- * @param {"home"|"active"|"post"|"settings"} name
+ * @param {"home"|"active"|"post"|"settings"|"debug"} name
  * @param {"push"|"replace"|string} [mode] - `"push"` adds a new history
  *   entry (the normal case, e.g. following a link/button); `"replace"` swaps
  *   the current entry (used when restoring state without wanting an extra
@@ -502,6 +510,11 @@ export async function applyHistoryState(targetState, mode = "none", savedSession
 		if (targetState.screen === "settings") {
 			fillSettingsForm();
 			navigateToScreen("settings", mode);
+			return;
+		}
+
+		if (targetState.screen === "debug") {
+			navigateToScreen("debug", mode);
 			return;
 		}
 
