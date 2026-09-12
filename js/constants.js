@@ -51,7 +51,7 @@ export const COUNTDOWN_SECONDS = 5;
 // over a little less than that to glide between fixes rather than jump. The
 // zoom is only the starting default; the rider's own pick is saved as a pref.
 export const LIVE_MAP_ZOOM = 16;
-export const LIVE_CAMERA_EASE_MS = 900;
+export const LIVE_CAMERA_EASE_MS = 1000;
 // A three-quarter view that tilts the road ahead into sight. It stays fixed for
 // the ride: the tilt gestures are off and the follow camera never changes it.
 export const LIVE_MAP_PITCH = 55;
