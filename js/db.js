@@ -5,7 +5,17 @@
  * `indexedDB` directly.
  */
 
-import { DB_NAME, DB_VERSION, SESSION_STORE, PREF_STORE, LIVE_MAP_ZOOM, ACTIVITIES, CALENDAR_COLOR_NOTES } from "./constants.js";
+import {
+	DB_NAME,
+	DB_VERSION,
+	SESSION_STORE,
+	PREF_STORE,
+	LIVE_MAP_ZOOM,
+	ACTIVITIES,
+	CALENDAR_COLOR_NOTES,
+	GUIDE_HIDE_DISTANCE_OPTIONS_M,
+	GUIDE_HIDE_DISTANCE_DEFAULT_M,
+} from "./constants.js";
 import { state } from "./state.js";
 
 // Shared IndexedDB connection, opened once by openDB(). Declared here because
@@ -133,6 +143,10 @@ export async function loadPrefs() {
 	state.prefs.rideStatsSide = (await getPref("rideStatsSide", "left")) === "right" ? "right" : "left";
 	state.prefs.guideContrast = await getPref("guideContrast", "high");
 	state.prefs.markerSize = await getPref("markerSize", "medium");
+	const guideHideDistance = await getPref("guideHideDistance", GUIDE_HIDE_DISTANCE_DEFAULT_M);
+	state.prefs.guideHideDistance = GUIDE_HIDE_DISTANCE_OPTIONS_M.includes(guideHideDistance)
+		? guideHideDistance
+		: GUIDE_HIDE_DISTANCE_DEFAULT_M;
 	state.prefs.ridesView = await getPref("ridesView", "list");
 	const statsActivity = await getPref("statsActivity", "all");
 	state.prefs.statsActivity = statsActivity === "all" || ACTIVITIES[statsActivity] ? statsActivity : "all";

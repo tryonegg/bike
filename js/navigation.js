@@ -11,6 +11,7 @@
 import { CALENDAR_COLOR_NOTES } from "./constants.js";
 import { state, el } from "./state.js";
 import { setPref } from "./db.js";
+import { formatElevation } from "./format.js";
 import { renderPastRides, shiftCalendarMonth } from "./history-view.js";
 import { updateLiveStats, togglePauseSession, endSessionWithConfirm, saveActiveSessionCheckpoint, finalizeSession } from "./live-session.js";
 import { applyMapVisualPrefs } from "./map-visuals.js";
@@ -170,6 +171,9 @@ export function wireEvents() {
 
 	el.markerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
 	el.debugMarkerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
+
+	el.guideHideDistanceSelect.addEventListener("change", () => handleGuideHideDistanceChange(el.guideHideDistanceSelect));
+	el.debugGuideHideDistanceSelect.addEventListener("change", () => handleGuideHideDistanceChange(el.debugGuideHideDistanceSelect));
 
 	el.statsActivitySelect.addEventListener("change", async () => {
 		state.prefs.statsActivity = el.statsActivitySelect.value;
@@ -353,6 +357,14 @@ async function handleMarkerSizeClick(event) {
 	applyMapVisualPrefs();
 }
 
+/** Shared handler for both "Hide Near Start" selects (settings screen and debug screen). */
+async function handleGuideHideDistanceChange(select) {
+	state.prefs.guideHideDistance = Number(select.value);
+	await setPref("guideHideDistance", state.prefs.guideHideDistance);
+	syncToggles();
+	applyMapVisualPrefs();
+}
+
 /**
  * Re-applies every settings-toggle button's `active` class (and the
  * calendar-color note text) from the current `state.prefs`. Called after
@@ -428,6 +440,15 @@ export function syncToggles() {
 	markerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
 	const debugMarkerSizeButtons = el.debugMarkerSizeToggle.querySelectorAll("button");
 	debugMarkerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
+
+	// Option values are meters, fixed; only the displayed label follows the unit.
+	for (const select of [el.guideHideDistanceSelect, el.debugGuideHideDistanceSelect]) {
+		select.value = String(state.prefs.guideHideDistance);
+		for (const option of select.options) {
+			const meters = Number(option.value);
+			option.textContent = meters === 0 ? "Off" : formatElevation(meters, state.prefs.unit);
+		}
+	}
 }
 
 // Briefly swaps a button's label to confirm an action, then restores it.

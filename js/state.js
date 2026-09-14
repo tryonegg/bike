@@ -5,7 +5,7 @@
  * immediately visible to every other module reading it.
  */
 
-import { LIVE_MAP_ZOOM } from "./constants.js";
+import { LIVE_MAP_ZOOM, GUIDE_HIDE_DISTANCE_DEFAULT_M } from "./constants.js";
 
 /**
  * The app's single mutable state object. `prefs` is the subset persisted to
@@ -25,6 +25,9 @@ export const state = {
 		rideStatsSide: "left",
 		guideContrast: "high",
 		markerSize: "medium",
+		// "Hide Near Start": once the rider is this close (meters) to the ride's
+		// start, the distance-to-start chip hides outright. See constants.js.
+		guideHideDistance: GUIDE_HIDE_DISTANCE_DEFAULT_M,
 		ridesView: "list",
 		// Which activity the home screen's month and week totals count, or "all".
 		statsActivity: "all",
@@ -137,6 +140,7 @@ export const el = {
 	debugTerrain3dToggle: document.getElementById("debugTerrain3dToggle"),
 	debugGuideContrastToggle: document.getElementById("debugGuideContrastToggle"),
 	debugMarkerSizeToggle: document.getElementById("debugMarkerSizeToggle"),
+	debugGuideHideDistanceSelect: document.getElementById("debugGuideHideDistanceSelect"),
 	debugCompareToggle: document.getElementById("debugCompareToggle"),
 	monthDistance: document.getElementById("monthDistance"),
 	monthDistanceUnit: document.getElementById("monthDistanceUnit"),
@@ -166,6 +170,7 @@ export const el = {
 	saveStadiaKeyBtn: document.getElementById("saveStadiaKeyBtn"),
 	guideContrastToggle: document.getElementById("guideContrastToggle"),
 	markerSizeToggle: document.getElementById("markerSizeToggle"),
+	guideHideDistanceSelect: document.getElementById("guideHideDistanceSelect"),
 	statsActivitySelect: document.getElementById("statsActivitySelect"),
 	exportDataBtn: document.getElementById("exportDataBtn"),
 	importDataBtn: document.getElementById("importDataBtn"),

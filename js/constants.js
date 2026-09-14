@@ -66,13 +66,23 @@ export const HEADING_GPS_MIN_SPEED_MPS = 2 / MPS_TO_MPH;
 export const HEADING_MIN_MOVE_M = 12;
 export const LIVE_ROUTE_SOURCE = "live-route";
 export const LIVE_GUIDE_SOURCE = "live-guide";
-// The distance-to-start chip sits this far from the rider along the guide line,
-// measured as if the map were flat; tilt shortens it on screen toward the
-// horizon. It hides when the whole line is shorter than the minimum.
-export const GUIDE_LABEL_OFFSET_PX = 90;
+// The distance-to-start chip sits halfway from the rider to whichever comes
+// first along the guide line: the start itself, or the screen edge the line
+// points toward. It hides outright when the whole line is shorter than the
+// minimum below, or once "Hide Near Start" (state.prefs.guideHideDistance)
+// says the rider is already close enough to start that the chip's just
+// clutter — see updateGuideLabel in live-map.js for both.
 export const GUIDE_LABEL_MIN_LINE_PX = 70;
 // Width of the whole world in pixels at zoom 0, which MapLibre doubles per zoom.
 export const WORLD_SIZE_AT_ZOOM_0 = 512;
+
+// "Hide Near Start" setting (Settings and Debug screens): once the rider is
+// this close to the start, in meters, the distance-to-start chip hides
+// rather than crowding the rider dot. 0 means never (the min-line-length
+// hide above still applies). Kept to this fixed set of presets, shown in
+// whichever unit is active, rather than free entry.
+export const GUIDE_HIDE_DISTANCE_OPTIONS_M = [0, 15, 30, 60];
+export const GUIDE_HIDE_DISTANCE_DEFAULT_M = 30;
 
 // Base-style catalog for the "Map Style" setting, keyed by state.prefs.mapType.
 // `free` is the OpenFreeMap style name (null when that look has no free

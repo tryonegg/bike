@@ -14,7 +14,6 @@ import {
 	HEADING_MIN_MOVE_M,
 	LIVE_ROUTE_SOURCE,
 	LIVE_GUIDE_SOURCE,
-	GUIDE_LABEL_OFFSET_PX,
 	GUIDE_LABEL_MIN_LINE_PX,
 	WORLD_SIZE_AT_ZOOM_0,
 	DEM_TILE_URL,
@@ -181,8 +180,10 @@ export function initLiveMap(lat, lng, { overhead = false } = {}) {
 	state.riderMarker = createPointMarker(map, "rider-dot", [lng, lat]);
 	state.bestPaceChip = createBestPaceChip(map, [lng, lat]);
 	state.bestPaceBand = null;
-	// Its offset is in pixels, so its ground position depends on the zoom.
+	// Its placement depends on the map's zoom (ground distance per pixel) and
+	// bearing (which screen edge the line points toward), not just the fix.
 	map.on("zoom", updateGuideLabel);
+	map.on("rotate", updateGuideLabel);
 
 	// Once riding, the rider sits two-thirds of the way down, leaving the larger
 	// share of the tilted map for the road ahead — see ridePadding. Before that,
@@ -935,13 +936,28 @@ export function styleGuideLabel(element, guideContrast, markerSize) {
 
 /**
  * Repositions and re-labels the "distance to start" chip along the guide
- * line, or hides it when there's nothing useful to show. Placed a fixed
- * pixel distance from the rider rather than at the line's midpoint (which
- * would be off the map on a long ride), worked out along the line in
- * Mercator space — where the guide line is drawn straight — because a start
- * far behind the tilted camera can't be reliably projected to screen space.
- * Called on every live fix and on every map zoom (the pixel offset's ground
- * distance depends on zoom).
+ * line, or hides it when there's nothing useful to show. Sits halfway
+ * between the rider and whichever comes first along the line: the start
+ * itself, if it's within the visible map, or the screen edge the line exits
+ * through otherwise — so the chip clears the rider dot by a margin that
+ * scales with the screen instead of a fixed pixel offset. Hides outright
+ * once the rider is within "Hide Near Start"'s distance of the real start,
+ * or (as before) once the line's too short to hold the chip without
+ * covering both ends.
+ *
+ * The line's own length is still worked out in Mercator space, as if the map
+ * were flat, rather than by projecting the start to screen space — a start
+ * far behind the tilted camera can't be reliably projected there. The screen
+ * edge the line points toward is worked out the same flattened way: the
+ * rider is assumed to sit at the riding camera's padded anchor point (see
+ * `ridePadding`) rather than its true projected position, and the line's
+ * on-screen direction comes from rotating its ground bearing by the map's
+ * current bearing — both safe, since neither needs the far (start) end
+ * projected.
+ *
+ * Called on every live fix, and whenever the map's zoom or bearing changes
+ * (both shift this placement: zoom changes the ground distance a pixel
+ * covers, bearing changes which screen edge the line points at).
  */
 export function updateGuideLabel() {
 	const map = state.liveMap;
@@ -955,6 +971,12 @@ export function updateGuideLabel() {
 	}
 
 	const [origin, rider] = state.liveGuideCoords;
+	const meters = haversineMeters(rider[1], rider[0], origin[1], origin[0]);
+	if (meters <= state.prefs.guideHideDistance) {
+		element.style.visibility = "hidden";
+		return;
+	}
+
 	const from = maplibregl.MercatorCoordinate.fromLngLat(rider);
 	const to = maplibregl.MercatorCoordinate.fromLngLat(origin);
 	const linePixels = Math.hypot(to.x - from.x, to.y - from.y) * WORLD_SIZE_AT_ZOOM_0 * 2 ** map.getZoom();
@@ -965,11 +987,43 @@ export function updateGuideLabel() {
 		return;
 	}
 
-	const fraction = Math.min(GUIDE_LABEL_OFFSET_PX / linePixels, 0.5);
+	const container = map.getContainer();
+	const { top, bottom, left, right } = ridePadding(map);
+	const anchorX = (container.clientWidth + left - right) / 2;
+	const anchorY = top + (container.clientHeight - top - bottom) / 2;
+
+	const bearingToOrigin = bearingDegrees(rider[1], rider[0], origin[1], origin[0]);
+	const screenAngle = ((bearingToOrigin - map.getBearing()) * Math.PI) / 180;
+	const edgePixels = rayBoxExitDistance(
+		anchorX,
+		anchorY,
+		Math.sin(screenAngle),
+		-Math.cos(screenAngle),
+		container.clientWidth,
+		container.clientHeight,
+	);
+
+	const fraction = Number.isFinite(edgePixels) ? Math.min(0.5, edgePixels / 2 / linePixels) : 0.5;
 	const at = new maplibregl.MercatorCoordinate(from.x + (to.x - from.x) * fraction, from.y + (to.y - from.y) * fraction);
 	marker.setLngLat(at.toLngLat());
 
-	const meters = haversineMeters(rider[1], rider[0], origin[1], origin[0]);
-	element.firstChild.textContent = `${formatDistance(meters, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)} to start`;
+	element.firstChild.textContent = `${formatDistance(meters, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)}`;
 	element.style.visibility = "visible";
+}
+
+/**
+ * Distance from a point inside a `w`×`h` box to where a ray cast from it in
+ * direction `(dx, dy)` (need not be a unit vector) first leaves the box.
+ * Used to find the screen edge the guide line points toward, from the
+ * assumed rider anchor point — see `updateGuideLabel`.
+ *
+ * @returns {number} `Infinity` only if `dx` and `dy` are both 0.
+ */
+function rayBoxExitDistance(x, y, dx, dy, w, h) {
+	let t = Infinity;
+	if (dx > 0) t = Math.min(t, (w - x) / dx);
+	else if (dx < 0) t = Math.min(t, -x / dx);
+	if (dy > 0) t = Math.min(t, (h - y) / dy);
+	else if (dy < 0) t = Math.min(t, -y / dy);
+	return t;
 }
