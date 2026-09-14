@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.6.0";
+const CACHE_VERSION = "v1.6.2";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -46,7 +46,7 @@ const APP_MODULES = [
   "./js/gpx.js",
 ];
 
-// Precached on install, and served cache-first-on-failure via networkFirst below.
+// Precached on install, and served cache-first (revalidated in the background) below.
 const ASSETS = [
   "./",
   "./index.html",
@@ -134,10 +134,12 @@ self.addEventListener("message", (event) => {
  * Routes every GET request to the right caching strategy: map data/style/
  * tile hosts get their own strategies (see the `MAP_DATA_HOSTS` branch and
  * the Stadia branch below), a same-origin navigation or shell asset is
- * network-first (falling back to cache offline, and diffed for update
- * notifications where `shouldWatchForUpdates` applies), and anything else
- * same-origin is cache-first. Non-GET requests and unrecognized
- * cross-origin requests are left to the browser's default handling.
+ * served cache-first with the network fetched in the background to refresh
+ * the cache (diffed for update notifications where `shouldWatchForUpdates`
+ * applies), and anything else same-origin is plain cache-first (fetched
+ * from the network only on a cache miss, with no background refresh).
+ * Non-GET requests and unrecognized cross-origin requests are left to the
+ * browser's default handling.
  */
 self.addEventListener("fetch", (event) => {
   const { request } = event;
@@ -148,11 +150,12 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) {
     if (MAP_DATA_HOSTS.includes(url.hostname)) {
       // Style JSON and the TileJSON change when OpenFreeMap publishes new data, so
-      // they are refreshed when online. Fonts, sprites and tiles live under
-      // versioned paths and never change, so those are served from cache first.
+      // they're served cache-first but revalidated in the background on every load.
+      // Fonts, sprites and tiles live under versioned paths and never change, so
+      // those are served cache-first with no revalidation at all.
       const { pathname } = url;
       if (pathname.startsWith("/styles/") || pathname === "/planet") {
-        event.respondWith(networkFirst(request, MAP_STYLE_CACHE));
+        event.respondWith(cacheFirstWithRevalidate(event, request, MAP_STYLE_CACHE));
       } else if (pathname.startsWith("/fonts/") || pathname.startsWith("/sprites/")) {
         event.respondWith(cacheFirst(request, MAP_STYLE_CACHE));
       } else {
@@ -167,12 +170,12 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, CACHE_NAME, true));
+    event.respondWith(cacheFirstWithRevalidate(event, request, CACHE_NAME, true));
     return;
   }
 
   if (isShellAsset(url.pathname)) {
-    event.respondWith(networkFirst(request, CACHE_NAME, shouldWatchForUpdates(url.pathname)));
+    event.respondWith(cacheFirstWithRevalidate(event, request, CACHE_NAME, shouldWatchForUpdates(url.pathname)));
     return;
   }
 
@@ -190,39 +193,52 @@ function shouldWatchForUpdates(pathname) {
 }
 
 /**
- * Network-first fetch: always tries the network (bypassing the HTTP cache
- * via `{cache: "no-cache"}`, so a conditional GET still revalidates),
- * updates the cache on success, and falls back to the cached response only
- * if the network is unreachable. Optionally diffs the fresh response
- * against whatever was previously cached to detect a shell update.
+ * Cache-first fetch with background revalidation: serves the cached
+ * response immediately when one exists, so the shell/style is never
+ * blocked on the network — unlike a network-first strategy, a slow or
+ * flaky connection can't make this hang, since the network is never on the
+ * critical path for a cache hit. A network fetch (bypassing the HTTP cache
+ * via `{cache: "no-cache"}`, so a conditional GET still revalidates) always
+ * runs alongside it to refresh the cache for next time and, optionally,
+ * diff the response against whatever was cached to detect a shell update.
+ * Registered with `event.waitUntil` so the worker stays alive to finish
+ * that background fetch even though it outlives the response already sent.
+ * Only waits on the network directly when there's nothing cached yet.
  *
+ * @param {FetchEvent} event
  * @param {Request} request
  * @param {string} cacheName
  * @param {boolean} [notifyOnChange] - When true (used for the shell's
  *   update-watched assets), compares the new response against the cached one
  *   and fires an update notification if they differ.
  * @returns {Promise<Response>}
- * @throws {Error} If the network fails and nothing is cached.
+ * @throws {Error} If nothing is cached and the network fails too.
  */
-async function networkFirst(request, cacheName, notifyOnChange = false) {
+async function cacheFirstWithRevalidate(event, request, cacheName, notifyOnChange = false) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
-  try {
-    const response = await fetch(request, { cache: "no-cache" });
-    if (notifyOnChange && cached && response && response.ok) {
-      const changed = await hasResponseChanged(cached, response);
-      if (changed) {
-        notifyUpdateAvailable(request.url);
+
+  const revalidate = fetch(request, { cache: "no-cache" })
+    .then(async (response) => {
+      if (notifyOnChange && cached && response && response.ok) {
+        const changed = await hasResponseChanged(cached, response);
+        if (changed) {
+          notifyUpdateAvailable(request.url);
+        }
       }
-    }
-    if (response && response.ok) {
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    if (cached) return cached;
-    throw new Error("Network unavailable and no cached response");
-  }
+      if (response && response.ok) {
+        cache.put(request, response.clone());
+      }
+      return response;
+    })
+    .catch(() => null);
+  event.waitUntil(revalidate);
+
+  if (cached) return cached;
+
+  const response = await revalidate;
+  if (!response) throw new Error("Network unavailable and no cached response");
+  return response;
 }
 
 /**
