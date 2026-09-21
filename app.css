@@ -1518,6 +1518,13 @@ button {
   pointer-events: none;
 }
 
+/* A point being dragged out of the planned line, before it's placed. */
+.plan-waypoint-new span {
+  background: #fff;
+  color: #6d4ad8;
+  border-color: #6d4ad8;
+}
+
 /* On the ride map, the planned points still to come; the next one stands out. */
 .live-waypoint span {
   width: 22px;

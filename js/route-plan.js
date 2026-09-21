@@ -50,6 +50,11 @@ const SNAP_REACH_PX = 40;
 const SNAP_MIN_M = 20;
 const SNAP_MAX_M = 400;
 const SNAP_TIMEOUT_MS = 2000;
+// Pressing within this many pixels of the planned line and dragging pulls a
+// new point out of it, between the points either side.
+const LINE_HIT_PX = 12;
+// The dashed guides shown while a new point is being dragged out.
+const PLAN_DRAG_SOURCE = "plan-drag";
 
 let worker = null;
 let nextRequestId = 1;
@@ -370,6 +375,23 @@ function moveWaypoint(index, lngLat) {
 		route.waypoints[index] = snapped;
 		if (index > 0) route.legs[index - 1] = routeLeg(route, index - 1);
 		if (index < route.legs.length) route.legs[index] = routeLeg(route, index);
+		routeChanged(route);
+	});
+}
+
+/**
+ * Inserts a waypoint, snapped to a way, into leg `leg` (between waypoints
+ * `leg` and `leg + 1`), routing the two legs it splits that leg into.
+ */
+function insertWaypoint(leg, lngLat) {
+	queueEdit(async () => {
+		const route = state.editingRoute;
+		if (!route || leg >= route.legs.length) return;
+		const snapped = await snapToWay(lngLat, route);
+		if (route !== state.editingRoute || leg >= route.legs.length) return;
+		remember();
+		route.waypoints.splice(leg + 1, 0, snapped);
+		route.legs.splice(leg, 1, routeLeg(route, leg), routeLeg(route, leg + 1));
 		routeChanged(route);
 	});
 }
@@ -728,8 +750,80 @@ function createPlanMap() {
 		if (event.originalEvent?.target?.closest?.(".plan-waypoint")) return;
 		addWaypoint([event.lngLat.lng, event.lngLat.lat]);
 	});
+	wireLineDrag(map);
 
 	if (!bounds) centerOnRider();
+}
+
+/**
+ * Lets a new point be pulled out of the planned line: press on the line
+ * (within LINE_HIT_PX of it), drag, and let go to insert a point there
+ * between the two it runs between. The map doesn't pan meanwhile, and
+ * dashed guides show the two legs the new point will make. A press on the
+ * line that doesn't move is left to be a plain tap (adding a point at the end).
+ */
+function wireLineDrag(map) {
+	let drag = null;
+
+	const legUnder = (point) => {
+		const route = state.editingRoute;
+		if (!route || route.source === "gpx" || !map.getLayer("plan-route-casing")) return null;
+		const box = [
+			[point.x - LINE_HIT_PX, point.y - LINE_HIT_PX],
+			[point.x + LINE_HIT_PX, point.y + LINE_HIT_PX],
+		];
+		const hit = map.queryRenderedFeatures(box, { layers: ["plan-route-casing"] })[0];
+		return hit ? hit.properties.leg : null;
+	};
+
+	const start = (event) => {
+		if (event.originalEvent?.target?.closest?.(".plan-waypoint")) return;
+		if (event.type === "touchstart" && event.points.length !== 1) return;
+		const leg = legUnder(event.point);
+		if (leg === null || leg === undefined) return;
+		// Keeps the map from panning for this gesture.
+		event.preventDefault();
+		drag = { leg, from: event.point, lngLat: event.lngLat, moved: false, marker: null };
+	};
+
+	const move = (event) => {
+		if (!drag) return;
+		drag.lngLat = event.lngLat;
+		if (!drag.moved && Math.hypot(event.point.x - drag.from.x, event.point.y - drag.from.y) < 4) return;
+		drag.moved = true;
+		const lngLat = [event.lngLat.lng, event.lngLat.lat];
+		if (!drag.marker) {
+			const element = document.createElement("div");
+			element.className = "plan-waypoint plan-waypoint-new";
+			element.innerHTML = "<span>+</span>";
+			drag.marker = new maplibregl.Marker({ element }).setLngLat(lngLat).addTo(map);
+		}
+		drag.marker.setLngLat(lngLat);
+		const { waypoints } = state.editingRoute;
+		map.getSource(PLAN_DRAG_SOURCE)?.setData(lineData([waypoints[drag.leg], lngLat, waypoints[drag.leg + 1]]));
+	};
+
+	const end = () => {
+		if (!drag) return;
+		const { leg, lngLat, moved, marker } = drag;
+		drag = null;
+		marker?.remove();
+		map.getSource(PLAN_DRAG_SOURCE)?.setData(lineData([]));
+		if (moved) insertWaypoint(leg, [lngLat.lng, lngLat.lat]);
+	};
+
+	map.on("mousedown", start);
+	map.on("touchstart", start);
+	map.on("mousemove", move);
+	map.on("touchmove", move);
+	map.on("mouseup", end);
+	map.on("touchend", end);
+	map.on("touchcancel", end);
+	// A hint on desktop that the line can be grabbed.
+	map.on("mousemove", (event) => {
+		if (drag) return;
+		map.getCanvas().style.cursor = legUnder(event.point) === null ? "" : "grab";
+	});
 }
 
 /** Moves the planner to the rider's location, unless a route has been drawn by then. */
@@ -805,6 +899,15 @@ function addPlanLayers(map) {
 		layout: round,
 		paint: { "line-color": "#6d4ad8", "line-width": 4, "line-dasharray": [1, 1.5], "line-opacity": 0.8 },
 	});
+	// Guides from the points either side to a point being dragged out of the line.
+	map.addSource(PLAN_DRAG_SOURCE, { type: "geojson", data: lineData([]) });
+	map.addLayer({
+		id: "plan-drag",
+		type: "line",
+		source: PLAN_DRAG_SOURCE,
+		layout: round,
+		paint: { "line-color": ROUTE_COLOR, "line-width": 3, "line-dasharray": [1, 1.5], "line-opacity": 0.7 },
+	});
 }
 
 /** One feature per leg, flagged by whether it follows roads. */
@@ -812,9 +915,9 @@ function planFeatures() {
 	const legs = state.editingRoute?.legs ?? [];
 	return {
 		type: "FeatureCollection",
-		features: legs.map((leg) => ({
+		features: legs.map((leg, index) => ({
 			...lineData(leg.coords),
-			properties: { routed: leg.routed && !leg.pending },
+			properties: { routed: leg.routed && !leg.pending, leg: index },
 		})),
 	};
 }
