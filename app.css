@@ -684,6 +684,72 @@ button {
   white-space: nowrap;
 }
 
+/* In calendar view the month stretches to fill whatever height is left between
+   the header and the bottom bar; the week rows share it equally. */
+#homeScreen:has(.rides-calendar:not(.hidden)) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+}
+
+#homeScreen:has(.rides-calendar:not(.hidden)) .past-rides,
+.rides-calendar:not(.hidden) {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rides-calendar:not(.hidden) .calendar-table,
+.rides-calendar:not(.hidden) .calendar-table tbody {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.rides-calendar:not(.hidden) .calendar-table {
+  margin-bottom: 8px;
+}
+
+.rides-calendar:not(.hidden) .calendar-table thead {
+  display: block;
+  flex: none;
+}
+
+/* Every week row takes an equal share of the height left over. */
+.rides-calendar:not(.hidden) .calendar-table tr {
+  display: flex;
+  gap: 3px;
+}
+
+.rides-calendar:not(.hidden) .calendar-table tbody tr {
+  flex: 1 1 0;
+  min-height: 56px;
+  margin-bottom: 3px;
+}
+
+.rides-calendar:not(.hidden) .calendar-table th,
+.rides-calendar:not(.hidden) .calendar-table td {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.rides-calendar:not(.hidden) .calendar-table td {
+  position: relative;
+  height: auto;
+}
+
+/* Out of flow so the cell takes the row's full height. */
+.rides-calendar:not(.hidden) .calendar-cell {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  justify-content: center;
+}
+
 @media (max-width: 380px) {
   .calendar-ride-time {
     font-size: 12px;
