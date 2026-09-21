@@ -14,6 +14,9 @@ import { haversineMeters, bearingDegrees } from "./format.js";
 import { initLiveMap, animateMarkerTo, ridePadding } from "./live-map.js";
 import { navigateToScreen } from "./navigation.js";
 import { startSession, requestOrientationPermission } from "./live-session.js";
+import { resetRouteHome } from "./route-home.js";
+import { populateSetupRoutes } from "./route-plan.js";
+import { resetRidePlan } from "./ride-plan.js";
 
 /**
  * The "Start New Ride" button's handler: resets the activity picker to the
@@ -62,6 +65,7 @@ export function beginRideSetup() {
 		state.liveMap = null;
 		state.liveRouteCoords = [];
 		state.liveGuideCoords = [];
+		state.liveGuideRouteMeters = null;
 		state.markerLayer = null;
 		state.guideLabelMarker = null;
 		state.riderMarker = null;
@@ -69,8 +73,15 @@ export function beginRideSetup() {
 		state.bestPaceBand = null;
 	}
 
+	// The last ride's routing, if its workers are somehow still around.
+	resetRouteHome();
+	resetRidePlan();
+
 	el.screens.active.dataset.phase = "setup";
 	setSetupLocating(true);
+	// None unless the Routes screen's Ride button picked one.
+	state.rideRoute = null;
+	populateSetupRoutes();
 
 	navigateToScreen("active");
 	startSetupWatch();

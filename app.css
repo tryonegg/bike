@@ -298,10 +298,10 @@ button {
   mask: url("icons/settings.svg") center / contain no-repeat;
 }
 
-/* The debug menu's entry point: pinned above every screen, including the
-   active ride's fixed map overlay, so it's reachable no matter what's on
-   screen. Uses the same centered-column trick as .bottom-bar so it lines up
-   with the screen's right edge rather than the viewport's on wide displays. */
+/* The debug menu's entry point, shown only while a ride is live (see
+   syncDebugButton in live-session.js). Pinned above the active ride's fixed
+   map overlay. Uses the same centered-column trick as .bottom-bar so it lines
+   up with the screen's right edge rather than the viewport's on wide displays. */
 .debug-fab-wrap {
   position: fixed;
   top: 0;
@@ -373,9 +373,6 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  /* Extra clearance so the view toggle doesn't sit under the debug FAB
-     pinned to the top-right corner. */
-  padding-right: 40px;
 }
 
 .app-header h1 {
@@ -1345,6 +1342,176 @@ button {
   .activity-buttons {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+
+/* ---- Route planner (a full-screen map like the active screen, reusing the
+   pre-ride setup's top bar and bottom panel) ---- */
+
+.plan-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  background: var(--map-bg);
+}
+
+.plan-map {
+  position: absolute;
+  inset: 0;
+}
+
+.plan-status {
+  min-height: 2.6em;
+  margin: 10px 0 12px;
+}
+
+.plan-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.plan-icon-btn {
+  padding: 0;
+}
+
+.plan-icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.plan-icon {
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask: url("icons/flag.svg") center / contain no-repeat;
+  mask: url("icons/flag.svg") center / contain no-repeat;
+}
+
+.plan-delete-btn {
+  margin-left: auto;
+  padding-right: 0;
+}
+
+/* The route's name, edited in place as the top bar's title. The border only
+   shows on focus, so it reads as a heading until tapped. */
+.plan-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.plan-title-input:hover,
+.plan-title-input:focus {
+  border-color: var(--btn-border);
+  background: var(--raised);
+  outline: none;
+}
+
+/* The planned route's numbers and elevation profile, atop the panel. */
+.plan-stats {
+  margin: 0 0 10px;
+}
+
+.plan-chart-wrap {
+  position: relative;
+  height: 72px;
+  margin-bottom: 6px;
+}
+
+.plan-chart-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* The distance and height under the finger, pinned to the chart's top edge. */
+.plan-chart-readout {
+  position: absolute;
+  top: -2px;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* On the ride map, the planned points still to come; the next one stands out. */
+.live-waypoint span {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.live-waypoint.next span {
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  opacity: 1;
+}
+
+.plan-chart-dot {
+  width: 14px;
+  height: 14px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #6d4ad8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* Saved routes: a list row to open the route, with a Ride button beside it. */
+.route-list-item {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--hairline);
+}
+
+.route-list-item .session-row {
+  border-top: 0;
+}
+
+.route-ride-btn {
+  flex: none;
+  min-height: 38px;
+  margin-right: 22px;
+  border-radius: 999px;
+}
+
+/* Waypoints: numbered dots in the planned line's colour. */
+.plan-waypoint {
+  cursor: pointer;
+}
+
+.plan-waypoint span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #6d4ad8;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 /* ---- Map markers ---- */

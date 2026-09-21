@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.6.2";
+const CACHE_VERSION = "v1.11.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -44,6 +44,15 @@ const APP_MODULES = [
   "./js/chart.js",
   "./js/data-io.js",
   "./js/gpx.js",
+  // Route home: the worker and what it imports load separately from app.js,
+  // so they are listed here to work offline too.
+  "./js/route-home.js",
+  "./js/route-follow.js",
+  "./js/ride-plan.js",
+  "./js/route-plan.js",
+  "./js/route-worker.js",
+  "./js/route-graph.js",
+  "./js/mvt.js",
 ];
 
 // Precached on install, and served cache-first (revalidated in the background) below.
@@ -56,6 +65,7 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/settings.svg",
+  "./icons/flag.svg",
   "./vendor/maplibre/maplibre-gl.css",
   "./vendor/maplibre/maplibre-gl.js",
   "./vendor/maplibre-contour/maplibre-contour.min.js",
@@ -72,6 +82,7 @@ const SHELL_ASSET_SUFFIXES = [
   "/manifest.webmanifest",
   "/icons/icon.svg",
   "/icons/settings.svg",
+  "/icons/flag.svg",
   "/vendor/maplibre/maplibre-gl.css",
   "/vendor/maplibre/maplibre-gl.js",
   "/vendor/maplibre-contour/maplibre-contour.min.js",
@@ -94,9 +105,18 @@ const UPDATE_WATCH_SUFFIXES = [
 // files (a whole new deploy) only prompts the rider once, not per file.
 let updateNotified = false;
 
-/** Precaches every app-shell asset. */
+/**
+ * Precaches every app-shell asset. Each is fetched past the browser's HTTP
+ * cache: a copy left there from the previous version would otherwise be
+ * precached alongside new files, and the app's modules only work with
+ * matching versions of each other.
+ */
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(ASSETS.map((asset) => new Request(asset, { cache: "reload" })))),
+  );
 });
 
 /**

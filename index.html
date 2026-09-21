@@ -21,7 +21,7 @@
     </div>
   </div>
 
-  <div class="debug-fab-wrap">
+  <div id="debugFab" class="debug-fab-wrap hidden">
     <button id="debugMenuBtn" class="round-btn" aria-label="Open debug menu">π</button>
   </div>
 
@@ -81,6 +81,7 @@
 
       <div class="bottom-bar">
         <button id="openSettingsBtn" class="round-btn bar-round-btn" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
+        <button id="openRoutesBtn" class="round-btn bar-round-btn" aria-label="Routes"><span class="plan-icon" aria-hidden="true"></span></button>
         <button id="startRideBtn" class="btn primary pill grow cta">Start New Ride</button>
       </div>
     </section>
@@ -105,6 +106,21 @@
             <button class="activity-btn" data-activity="walk">🚶 Walk</button>
             <button class="activity-btn" data-activity="hike">🥾 Hike</button>
             <button class="activity-btn" data-activity="kayak">🛶 Kayak</button>
+          </div>
+          <div class="setting-row setup-route-row">
+            <label for="setupRouteSelect">Route</label>
+            <span class="select-wrap">
+              <select id="setupRouteSelect">
+                <option value="">None</option>
+              </select>
+            </span>
+          </div>
+          <div id="setupRouteModeRow" class="setting-row" role="group" aria-label="How to follow the route" hidden>
+            <span>Follow</span>
+            <div class="toggle-pill" id="setupRouteModeToggle">
+              <button data-route-mode="asis" class="toggle-option">As is</button>
+              <button data-route-mode="points" class="toggle-option">To each point</button>
+            </div>
           </div>
           <div class="setting-row" role="group" aria-label="Screen preference">
             <label for="keepScreenOnToggle">Keep Screen On</label>
@@ -148,6 +164,64 @@
       <div class="ride-controls">
         <button id="pauseBtn" class="pause-btn" aria-label="Pause"><span class="pause-icon" aria-hidden="true"></span></button>
         <button id="stopBtn" class="btn primary pill">Finish ride</button>
+      </div>
+    </section>
+
+    <section id="routesScreen" class="screen has-bottom-bar hidden">
+      <header class="app-bar">
+        <button id="routesBackBtn" class="round-btn" aria-label="Back">←</button>
+        <h2>Routes</h2>
+      </header>
+      <ul id="routesList" class="sessions-list routes-list"></ul>
+      <p id="routesEmpty" class="empty">No saved routes yet. Plan one on the map, or import a GPX file.</p>
+      <div class="bottom-bar">
+        <button id="newRouteBtn" class="btn primary pill grow cta">New Route</button>
+      </div>
+    </section>
+
+    <section id="planScreen" class="screen plan-screen hidden">
+      <div id="planMap" class="map plan-map"></div>
+
+      <header id="planTopBar" class="setup-top-bar">
+        <button id="planBackBtn" class="round-btn" aria-label="Back to home">←</button>
+        <input id="planNameInput" class="plan-title-input" type="text" maxlength="60" autocomplete="off" placeholder="Route name" aria-label="Route name">
+        <button id="planDeleteBtn" class="text-danger plan-delete-btn">Delete</button>
+      </header>
+
+      <div id="planBottomPanel" class="setup-bottom-panel">
+        <div class="setup-bottom-panel-inner">
+          <div id="planProfile" class="plan-profile" hidden>
+            <dl class="header-stats plan-stats">
+              <div>
+                <dt>Distance</dt>
+                <dd id="planDistance">–</dd>
+              </div>
+              <div>
+                <dt>Climb</dt>
+                <dd id="planClimb">–</dd>
+              </div>
+              <div>
+                <dt>Descent</dt>
+                <dd id="planDescent">–</dd>
+              </div>
+            </dl>
+            <div class="plan-chart-wrap">
+              <canvas id="planChart" role="img" aria-label="Elevation along the planned route"></canvas>
+              <span id="planChartReadout" class="plan-chart-readout" hidden></span>
+            </div>
+          </div>
+          <p id="planStatus" class="setting-note plan-status" aria-live="polite"></p>
+          <div class="plan-actions">
+            <button id="planUndoBtn" class="btn plan-icon-btn" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+            <button id="planRedoBtn" class="btn plan-icon-btn" aria-label="Redo" title="Redo"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+            <button id="planImportBtn" class="btn plan-icon-btn" aria-label="Import GPX" title="Import GPX"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></button>
+            <button id="planExportBtn" class="btn plan-icon-btn" aria-label="Export GPX" title="Export GPX"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg></button>
+            <input id="planGpxInput" type="file" accept=".gpx,application/gpx+xml" hidden>
+          </div>
+          <div class="setup-start-wrap">
+            <button id="planDoneBtn" class="btn primary pill">Done</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -284,6 +358,27 @@
             </div>
           </div>
           <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="Back to start">
+          <div class="setting-row-main">
+            <span>Back to Start</span>
+            <div class="toggle-pill" id="backToStartToggle">
+              <button data-back-to-start="none" class="toggle-option">None</button>
+              <button data-back-to-start="direct" class="toggle-option">Direct</button>
+              <button data-back-to-start="route" class="toggle-option">Route</button>
+            </div>
+          </div>
+          <p class="setting-note">What the ride map shows to lead you home. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
+        </div>
+        <div class="setting-row stacked" id="avoidRetraceRow" role="group" aria-label="Avoid retracing">
+          <div class="setting-row-main">
+            <span>Avoid Retracing</span>
+            <div class="toggle-pill" id="avoidRetraceToggle">
+              <button data-avoid-retrace="off" class="toggle-option">Off</button>
+              <button data-avoid-retrace="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">Keeps the route home off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way home, like out of a dead end.</p>
         </div>
         <div class="setting-row" role="group" aria-label="Guide line contrast">
           <span>Guide Line Contrast</span>
@@ -455,6 +550,27 @@
             </div>
           </div>
           <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
+        </div>
+        <div class="setting-row stacked" role="group" aria-label="Back to start">
+          <div class="setting-row-main">
+            <span>Back to Start</span>
+            <div class="toggle-pill" id="debugBackToStartToggle">
+              <button data-back-to-start="none" class="toggle-option">None</button>
+              <button data-back-to-start="direct" class="toggle-option">Direct</button>
+              <button data-back-to-start="route" class="toggle-option">Route</button>
+            </div>
+          </div>
+          <p class="setting-note">What the ride map shows to lead you home. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
+        </div>
+        <div class="setting-row stacked" id="debugAvoidRetraceRow" role="group" aria-label="Avoid retracing">
+          <div class="setting-row-main">
+            <span>Avoid Retracing</span>
+            <div class="toggle-pill" id="debugAvoidRetraceToggle">
+              <button data-avoid-retrace="off" class="toggle-option">Off</button>
+              <button data-avoid-retrace="on" class="toggle-option">On</button>
+            </div>
+          </div>
+          <p class="setting-note">Keeps the route home off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way home, like out of a dead end.</p>
         </div>
         <div class="setting-row" role="group" aria-label="Guide line contrast">
           <span>Guide Line Contrast</span>

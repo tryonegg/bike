@@ -1,8 +1,9 @@
 /**
- * The post-ride elevation chart: drawing it onto a `<canvas>` (elevation
- * line colored by speed band, gridlines, min/max labels) and the mouse/touch
- * interaction that highlights a point on the post-ride map as the finger or
- * cursor moves along the chart.
+ * Elevation charts. Mostly the post-ride one: drawing it onto a `<canvas>`
+ * (elevation line colored by speed band, gridlines, min/max labels) and the
+ * mouse/touch interaction that highlights a point on the post-ride map as
+ * the finger or cursor moves along the chart. Also the route planner's
+ * simpler profile (`renderProfileChart`), which shares the grid and labels.
  */
 
 import { state, el } from "./state.js";
@@ -118,6 +119,77 @@ export function renderElevationChart(session) {
 
 	// Add event listeners for chart interaction
 	setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor);
+}
+
+/**
+ * Draws a planned route's elevation profile: one line in the route's own
+ * colour over a soft fill, with the grid and min/max labels the ride chart
+ * uses. With no points, draws `message` instead.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {Array<{distance: number, elevation: number}>} points - Meters.
+ * @param {string} color - The line colour, e.g. "#6d4ad8".
+ * @param {string} message - Shown when there are no points.
+ * @returns {{distanceAt: (x: number) => number, xAt: (distance: number) => number}|null}
+ *   Converts between CSS pixels across the canvas and meters along the
+ *   route, for the caller's own pointer handling; null when nothing's drawn.
+ */
+export function renderProfileChart(canvas, points, color, message) {
+	if (points.length < 2) {
+		drawEmptyChart(canvas, message);
+		return null;
+	}
+	const ctx = canvas.getContext("2d");
+	if (!ctx) return null;
+
+	const rect = canvas.getBoundingClientRect();
+	const dpr = window.devicePixelRatio || 1;
+	canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+	canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+	ctx.setTransform(1, 0, 0, 1, 0, 0);
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.scale(dpr, dpr);
+
+	const padding = { top: 4, right: 0, bottom: 4, left: 0 };
+	const width = rect.width;
+	const height = rect.height;
+	const chartHeight = height - padding.top - padding.bottom;
+	const totalDistance = Math.max(points[points.length - 1].distance, 1);
+	const minElevation = minOf(points, (point) => point.elevation);
+	const maxElevation = maxOf(points, (point) => point.elevation);
+	const xAt = (distance) => (distance / totalDistance) * width;
+	const yAt = (elevation) =>
+		maxElevation === minElevation
+			? padding.top + chartHeight / 2
+			: padding.top + chartHeight - ((elevation - minElevation) / (maxElevation - minElevation)) * chartHeight;
+
+	drawChartBackground(ctx, width, height, padding);
+
+	const floor = height - padding.bottom;
+	const fill = ctx.createLinearGradient(0, padding.top, 0, floor);
+	fill.addColorStop(0, `${color}38`);
+	fill.addColorStop(1, `${color}00`);
+	ctx.beginPath();
+	ctx.moveTo(xAt(points[0].distance), floor);
+	for (const point of points) ctx.lineTo(xAt(point.distance), yAt(point.elevation));
+	ctx.lineTo(xAt(points[points.length - 1].distance), floor);
+	ctx.closePath();
+	ctx.fillStyle = fill;
+	ctx.fill();
+
+	ctx.beginPath();
+	points.forEach((point, index) => ctx[index ? "lineTo" : "moveTo"](xAt(point.distance), yAt(point.elevation)));
+	ctx.lineWidth = 2.5;
+	ctx.lineCap = "round";
+	ctx.lineJoin = "round";
+	ctx.strokeStyle = color;
+	ctx.stroke();
+
+	drawElevationLabels(ctx, height, padding, minElevation, maxElevation, state.prefs.unit, themeColor("--strip-bg", "#fcfcfa"));
+	return {
+		distanceAt: (x) => Math.max(0, Math.min(1, x / width)) * totalDistance,
+		xAt,
+	};
 }
 
 /**
@@ -414,9 +486,10 @@ function drawChartBackground(ctx, width, height, padding) {
  * @param {number} minElevation - Meters.
  * @param {number} maxElevation - Meters.
  * @param {"imperial"|"metric"} unit
+ * @param {string} [background] - What's behind the chart, for the patch
+ *   under each label; the page background by default.
  */
-function drawElevationLabels(ctx, height, padding, minElevation, maxElevation, unit) {
-	const background = themeColor("--bg", "#fcfcfa");
+function drawElevationLabels(ctx, height, padding, minElevation, maxElevation, unit, background = themeColor("--bg", "#fcfcfa")) {
 	const muted = themeColor("--muted", "#6b7472");
 
 	ctx.save();

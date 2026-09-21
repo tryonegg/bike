@@ -6,9 +6,11 @@
  */
 
 export const DB_NAME = "bike-tracker-db";
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 export const SESSION_STORE = "sessions";
 export const PREF_STORE = "preferences";
+// Saved planned routes (see route-plan.js). Added in DB_VERSION 2.
+export const ROUTE_STORE = "routes";
 
 export const METERS_PER_MILE = 1609.344;
 export const METERS_PER_KM = 1000;
@@ -83,6 +85,39 @@ export const WORLD_SIZE_AT_ZOOM_0 = 512;
 // whichever unit is active, rather than free entry.
 export const GUIDE_HIDE_DISTANCE_OPTIONS_M = [0, 15, 30, 60];
 export const GUIDE_HIDE_DISTANCE_DEFAULT_M = 30;
+
+// "Back to Start" setting (Settings and Debug screens): what the live map
+// shows to lead the rider home. "direct" is the straight line to the start;
+// "route" follows roads, routed on the device from cached map tiles (see
+// route-home.js), and shows the straight line until a route is known.
+export const BACK_TO_START_MODES = ["none", "direct", "route"];
+export const BACK_TO_START_DEFAULT = "direct";
+// Route mode: once the rider is this far from the route, it's stale and a new
+// one is asked for, but no more often than every ROUTE_MIN_REQUEST_MS, or
+// ROUTE_RETRY_MS after a failure. Only this far along the route past the
+// rider's last match is searched when matching them to it, and the ride's
+// own track goes to the router thinned to this spacing.
+export const ROUTE_OFF_ROUTE_M = 35;
+export const ROUTE_MIN_REQUEST_MS = 4000;
+export const ROUTE_RETRY_MS = 20000;
+export const ROUTE_LOOKAHEAD_M = 500;
+export const ROUTE_TRACK_SPACING_M = 20;
+
+// Route planner (route-plan.js): the planner map's route source, and the
+// live map's copy of the route chosen for the ride. When an imported GPX
+// track is turned into routing points, it's simplified to the points where
+// it bends by more than this many meters, so its turns are kept but the
+// hundreds of points along each straight are not.
+export const PLAN_ROUTE_SOURCE = "plan-route";
+export const LIVE_PLAN_SOURCE = "live-plan";
+export const PLAN_SIMPLIFY_M = 30;
+// Riding a planned route point to point (ride-plan.js): a point counts as
+// reached within PLAN_ARRIVE_M of it. A later point than the next can be
+// reached instead (skipping those between), but only once the rider is
+// PLAN_SKIP_AWAY_M from the last point reached, so a loop's end, which is
+// back at its start, doesn't count as reached at the start.
+export const PLAN_ARRIVE_M = 30;
+export const PLAN_SKIP_AWAY_M = 60;
 
 // Base-style catalog for the "Map Style" setting, keyed by state.prefs.mapType.
 // `free` is the OpenFreeMap style name (null when that look has no free

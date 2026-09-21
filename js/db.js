@@ -1,7 +1,7 @@
 /**
  * The IndexedDB persistence layer: one shared connection, a generic
  * transaction helper, and thin CRUD wrappers over the "sessions" (saved
- * rides) and "preferences" object stores. No other module talks to
+ * rides), "preferences" and "routes" (saved planned routes) object stores. No other module talks to
  * `indexedDB` directly.
  */
 
@@ -10,11 +10,14 @@ import {
 	DB_VERSION,
 	SESSION_STORE,
 	PREF_STORE,
+	ROUTE_STORE,
 	LIVE_MAP_ZOOM,
 	ACTIVITIES,
 	CALENDAR_COLOR_NOTES,
 	GUIDE_HIDE_DISTANCE_OPTIONS_M,
 	GUIDE_HIDE_DISTANCE_DEFAULT_M,
+	BACK_TO_START_MODES,
+	BACK_TO_START_DEFAULT,
 } from "./constants.js";
 import { state } from "./state.js";
 
@@ -43,6 +46,9 @@ export function openDB() {
 			}
 			if (!db.objectStoreNames.contains(PREF_STORE)) {
 				db.createObjectStore(PREF_STORE, { keyPath: "key" });
+			}
+			if (!db.objectStoreNames.contains(ROUTE_STORE)) {
+				db.createObjectStore(ROUTE_STORE, { keyPath: "id", autoIncrement: true });
 			}
 		};
 
@@ -147,6 +153,11 @@ export async function loadPrefs() {
 	state.prefs.guideHideDistance = GUIDE_HIDE_DISTANCE_OPTIONS_M.includes(guideHideDistance)
 		? guideHideDistance
 		: GUIDE_HIDE_DISTANCE_DEFAULT_M;
+	const backToStart = await getPref("backToStart", BACK_TO_START_DEFAULT);
+	state.prefs.backToStart = BACK_TO_START_MODES.includes(backToStart) ? backToStart : BACK_TO_START_DEFAULT;
+	state.prefs.routeAvoidRetrace = (await getPref("routeAvoidRetrace", false)) === true;
+	state.prefs.rideRouteMode = (await getPref("rideRouteMode", "asis")) === "points" ? "points" : "asis";
+	await migratePlannedRoute();
 	state.prefs.ridesView = await getPref("ridesView", "list");
 	const statsActivity = await getPref("statsActivity", "all");
 	state.prefs.statsActivity = statsActivity === "all" || ACTIVITIES[statsActivity] ? statsActivity : "all";
@@ -156,6 +167,69 @@ export async function loadPrefs() {
 	state.prefs.debugGpsAccuracy = (await getPref("debugGpsAccuracy", false)) === true;
 	state.prefs.debugClipGpsWarmup = (await getPref("debugClipGpsWarmup", false)) === true;
 	state.prefs.dataSaver = await getPref("dataSaver", false);
+}
+
+/**
+ * Moves the single planned route that earlier versions kept as a preference
+ * (or that an old backup restored as one) into the routes store.
+ * @returns {Promise<void>}
+ */
+async function migratePlannedRoute() {
+	const plan = await getPref("plannedRoute", null);
+	if (!plan) return;
+	if (isRoute(plan)) {
+		const now = new Date().toISOString();
+		await putRoute({ ...plan, name: plan.name || "Planned route", created: now, updated: now });
+	}
+	await setPref("plannedRoute", null);
+}
+
+/**
+ * Whether a value looks like a saved route, for anything read back from
+ * storage or a backup file.
+ * @param {*} route
+ * @returns {boolean}
+ */
+export function isRoute(route) {
+	return Boolean(route) && Array.isArray(route.waypoints) && Array.isArray(route.legs) && Array.isArray(route.coords);
+}
+
+/**
+ * Saves a planned route, adding it when it has no id yet.
+ * @param {Object} route - See route-plan.js for the shape.
+ * @returns {Promise<number>} Its id.
+ */
+export async function putRoute(route) {
+	return withStore(ROUTE_STORE, "readwrite", (store) => store.put(route));
+}
+
+/**
+ * Reads every saved route, most recently changed first.
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getAllRoutes() {
+	const routes = (await withStore(ROUTE_STORE, "readonly", (store) => store.getAll())) || [];
+	return routes.filter(isRoute).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+}
+
+/**
+ * Reads one saved route.
+ * @param {number} id
+ * @returns {Promise<Object|undefined>}
+ */
+export async function getRoute(id) {
+	// For a missing key withStore hands back the request itself, not undefined.
+	const route = await withStore(ROUTE_STORE, "readonly", (store) => store.get(id));
+	return isRoute(route) ? route : undefined;
+}
+
+/**
+ * Deletes one saved route.
+ * @param {number} id
+ * @returns {Promise<void>}
+ */
+export async function deleteRoute(id) {
+	await withStore(ROUTE_STORE, "readwrite", (store) => store.delete(id));
 }
 
 /**

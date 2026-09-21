@@ -8,7 +8,7 @@
 import { ACTIVE_SESSION_KEY, PREF_STORE } from "./constants.js";
 import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
-import { deleteSessionById, getAllSessions, clearAllSessions, withStore, addSession, setPref, loadPrefs } from "./db.js";
+import { deleteSessionById, getAllSessions, clearAllSessions, withStore, addSession, setPref, loadPrefs, getAllRoutes, putRoute, isRoute } from "./db.js";
 import { navigateToScreen, applyRideLayout } from "./navigation.js";
 import { renderPastRides } from "./history-view.js";
 
@@ -76,13 +76,14 @@ export async function deleteAllRides() {
 }
 
 /**
- * Exports every saved ride and preference (excluding the machine-local
+ * Exports every saved ride, planned route and preference (excluding the machine-local
  * active-ride checkpoint) as a downloadable JSON backup file.
  * @returns {Promise<void>}
  */
 export async function exportAllData() {
 	try {
 		const sessions = await getAllSessions();
+		const routes = await getAllRoutes();
 		const prefs = await withStore(PREF_STORE, "readonly", (store) => store.getAll());
 		const prefsObj = {};
 		prefs.forEach((pref) => {
@@ -96,6 +97,7 @@ export async function exportAllData() {
 			version: 1,
 			exportDate: new Date().toISOString(),
 			sessions,
+			routes,
 			preferences: prefsObj,
 		};
 
@@ -144,7 +146,7 @@ export async function importAllData(event) {
 
 		const confirmed = await confirmWithModal({
 			title: "Import Confirmation",
-			message: `This will import ${data.sessions.length} session(s) and overwrite your preferences. Continue?`,
+			message: `This will import ${data.sessions.length} session(s)${Array.isArray(data.routes) && data.routes.length ? ` and ${data.routes.length} route(s)` : ""} and overwrite your preferences. Continue?`,
 			confirmText: "Import",
 			cancelText: "Cancel",
 		});
@@ -158,6 +160,13 @@ export async function importAllData(event) {
 			// one; re-adding a colliding id throws ConstraintError mid-loop.
 			const { id, ...rest } = session;
 			await addSession(rest);
+		}
+
+		// Planned routes, in backups made since they were added.
+		for (const route of Array.isArray(data.routes) ? data.routes : []) {
+			if (!isRoute(route)) continue;
+			const { id, ...rest } = route;
+			await putRoute(rest);
 		}
 
 		for (const [key, value] of Object.entries(data.preferences)) {

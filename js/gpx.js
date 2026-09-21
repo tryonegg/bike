@@ -1,6 +1,6 @@
 /**
- * Single-ride GPX interchange: exporting the currently-viewed ride as a
- * `.gpx` file, and importing a `.gpx` file (from any source — another
+ * GPX interchange: exporting the currently-viewed ride, or a planned route,
+ * as a `.gpx` file, and importing a `.gpx` file (from any source — another
  * device, a different tracking app) as a new saved ride, including deriving
  * speed from consecutive points since GPX files rarely carry it themselves.
  */
@@ -8,7 +8,7 @@
 import { ACTIVITIES } from "./constants.js";
 import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
-import { haversineMeters } from "./format.js";
+import { haversineMeters, escapeHtml } from "./format.js";
 import { addSession } from "./db.js";
 import { renderPastRides } from "./history-view.js";
 
@@ -20,13 +20,45 @@ export function exportCurrentGpx() {
 	const session = state.currentPostSession;
 	if (!session || !session.points?.length) return;
 
-	const gpx = buildGpx(session);
+	downloadGpx(buildGpx(session), `bike-ride-${new Date(session.date).toISOString().replace(/[:.]/g, "-")}.gpx`);
+}
+
+/**
+ * Downloads a planned route (see route-plan.js) as a `.gpx` file: one track
+ * following the whole route, which bike computers and other apps take as a
+ * course to follow. It has no times or elevations, since it hasn't been
+ * ridden yet.
+ *
+ * @param {Object} route
+ */
+export function exportRouteGpx(route) {
+	if (!route || route.coords.length < 2) return;
+	const name = route.name || "Planned route";
+	const trkpts = route.coords.map(([lng, lat]) => `<trkpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}"></trkpt>`).join("\n\t\t\t");
+	const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Bike Tracker" xmlns="http://www.topografix.com/GPX/1/1">
+	<metadata>
+		<name>${escapeHtml(name)}</name>
+	</metadata>
+	<trk>
+		<name>${escapeHtml(name)}</name>
+		<trkseg>
+			${trkpts}
+		</trkseg>
+	</trk>
+</gpx>`;
+	const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "route";
+	downloadGpx(gpx, `${slug}.gpx`);
+}
+
+/** Saves GPX text as a file through a temporary download link. */
+function downloadGpx(gpx, filename) {
 	const blob = new Blob([gpx], { type: "application/gpx+xml" });
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement("a");
 
 	a.href = url;
-	a.download = `bike-ride-${new Date(session.date).toISOString().replace(/[:.]/g, "-")}.gpx`;
+	a.download = filename;
 	a.click();
 
 	URL.revokeObjectURL(url);

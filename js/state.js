@@ -5,7 +5,7 @@
  * immediately visible to every other module reading it.
  */
 
-import { LIVE_MAP_ZOOM, GUIDE_HIDE_DISTANCE_DEFAULT_M } from "./constants.js";
+import { LIVE_MAP_ZOOM, GUIDE_HIDE_DISTANCE_DEFAULT_M, BACK_TO_START_DEFAULT } from "./constants.js";
 
 /**
  * The app's single mutable state object. `prefs` is the subset persisted to
@@ -28,6 +28,13 @@ export const state = {
 		// "Hide Near Start": once the rider is this close (meters) to the ride's
 		// start, the distance-to-start chip hides outright. See constants.js.
 		guideHideDistance: GUIDE_HIDE_DISTANCE_DEFAULT_M,
+		// "Back to Start": "none", "direct" or "route". See constants.js.
+		backToStart: BACK_TO_START_DEFAULT,
+		// Route mode: steer the route home off the roads ridden out on.
+		routeAvoidRetrace: false,
+		// How a planned route picked in ride setup is followed: "asis" draws it
+		// as planned; "points" routes live to each of its points in turn.
+		rideRouteMode: "asis",
 		ridesView: "list",
 		// Which activity the home screen's month and week totals count, or "all".
 		statsActivity: "all",
@@ -48,7 +55,12 @@ export const state = {
 	// whenever the style is swapped, so they are the record of what it shows.
 	liveMap: null,
 	liveRouteCoords: [],
+	// The guide line home, start first and rider last: two points for the
+	// straight line, or a whole route in Route mode.
 	liveGuideCoords: [],
+	// The guide line's length along the route, in Route mode; null when it's
+	// the straight line.
+	liveGuideRouteMeters: null,
 	markerLayer: null,
 	guideLabelMarker: null,
 	riderMarker: null,
@@ -58,6 +70,18 @@ export const state = {
 	// What the band shows, kept so a style swap can redraw it.
 	bestPaceBand: null,
 	postMap: null,
+	// The route planner's map, created the first time the planner opens.
+	planMap: null,
+	// The saved route open in the planner (see route-plan.js for its shape).
+	editingRoute: null,
+	// The saved route picked for the ride being set up or ridden, drawn on the
+	// live map, or null for none.
+	rideRoute: null,
+	// A route to preselect the next time ride setup opens (the routes list's
+	// Ride button), or null.
+	nextRideRouteId: null,
+	// What the live map draws of the ride's route; see ride-plan.js.
+	livePlanCoords: [],
 	postMarkerLayer: null,
 	// Per map: whether it is on Stadia and whether its current style has loaded.
 	mapStatus: new WeakMap(),
@@ -122,6 +146,8 @@ export const el = {
 		post: document.getElementById("postScreen"),
 		settings: document.getElementById("settingsScreen"),
 		debug: document.getElementById("debugScreen"),
+		plan: document.getElementById("planScreen"),
+		routes: document.getElementById("routesScreen"),
 	},
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
@@ -141,6 +167,9 @@ export const el = {
 	debugGuideContrastToggle: document.getElementById("debugGuideContrastToggle"),
 	debugMarkerSizeToggle: document.getElementById("debugMarkerSizeToggle"),
 	debugGuideHideDistanceSelect: document.getElementById("debugGuideHideDistanceSelect"),
+	debugBackToStartToggle: document.getElementById("debugBackToStartToggle"),
+	debugAvoidRetraceRow: document.getElementById("debugAvoidRetraceRow"),
+	debugAvoidRetraceToggle: document.getElementById("debugAvoidRetraceToggle"),
 	debugCompareToggle: document.getElementById("debugCompareToggle"),
 	monthDistance: document.getElementById("monthDistance"),
 	monthDistanceUnit: document.getElementById("monthDistanceUnit"),
@@ -162,8 +191,35 @@ export const el = {
 	calWeekdayRow: document.getElementById("calWeekdayRow"),
 	calBody: document.getElementById("calBody"),
 	startRideBtn: document.getElementById("startRideBtn"),
+	openRoutesBtn: document.getElementById("openRoutesBtn"),
+	routesBackBtn: document.getElementById("routesBackBtn"),
+	routesList: document.getElementById("routesList"),
+	routesEmpty: document.getElementById("routesEmpty"),
+	newRouteBtn: document.getElementById("newRouteBtn"),
+	planTopBar: document.getElementById("planTopBar"),
+	planBackBtn: document.getElementById("planBackBtn"),
+	planDeleteBtn: document.getElementById("planDeleteBtn"),
+	planNameInput: document.getElementById("planNameInput"),
+	planProfile: document.getElementById("planProfile"),
+	planDistance: document.getElementById("planDistance"),
+	planClimb: document.getElementById("planClimb"),
+	planDescent: document.getElementById("planDescent"),
+	planChart: document.getElementById("planChart"),
+	planChartReadout: document.getElementById("planChartReadout"),
+	planBottomPanel: document.getElementById("planBottomPanel"),
+	planStatus: document.getElementById("planStatus"),
+	planUndoBtn: document.getElementById("planUndoBtn"),
+	planRedoBtn: document.getElementById("planRedoBtn"),
+	planImportBtn: document.getElementById("planImportBtn"),
+	planExportBtn: document.getElementById("planExportBtn"),
+	planGpxInput: document.getElementById("planGpxInput"),
+	planDoneBtn: document.getElementById("planDoneBtn"),
+	setupRouteSelect: document.getElementById("setupRouteSelect"),
+	setupRouteModeRow: document.getElementById("setupRouteModeRow"),
+	setupRouteModeToggle: document.getElementById("setupRouteModeToggle"),
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
 	settingsBackBtn: document.getElementById("settingsBackBtn"),
+	debugFab: document.getElementById("debugFab"),
 	debugMenuBtn: document.getElementById("debugMenuBtn"),
 	debugBackBtn: document.getElementById("debugBackBtn"),
 	stadiaKeyInput: document.getElementById("stadiaKeyInput"),
@@ -171,6 +227,9 @@ export const el = {
 	guideContrastToggle: document.getElementById("guideContrastToggle"),
 	markerSizeToggle: document.getElementById("markerSizeToggle"),
 	guideHideDistanceSelect: document.getElementById("guideHideDistanceSelect"),
+	backToStartToggle: document.getElementById("backToStartToggle"),
+	avoidRetraceRow: document.getElementById("avoidRetraceRow"),
+	avoidRetraceToggle: document.getElementById("avoidRetraceToggle"),
 	statsActivitySelect: document.getElementById("statsActivitySelect"),
 	exportDataBtn: document.getElementById("exportDataBtn"),
 	importDataBtn: document.getElementById("importDataBtn"),

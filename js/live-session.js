@@ -19,11 +19,13 @@ import { haversineMeters, bearingDegrees, formatDistance, formatSpeed, formatDur
 import { getSegmentLengthMeters, segmentDistanceLabel, addSegmentMarkerToLayer, renderSegmentMarkers, distanceUnitLabel, speedUnitLabel } from "./map-visuals.js";
 import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
+import { resetRouteHome } from "./route-home.js";
+import { canFollowPoints, resetRidePlan } from "./ride-plan.js";
 import { navigateToScreen } from "./navigation.js";
 import { requestWakeLock, releaseWakeLock } from "./pwa.js";
 import { confirmWithModal } from "./modal.js";
 import { openPostSession } from "./post-session.js";
-import { addSession, setPref, getPref } from "./db.js";
+import { addSession, setPref, getPref, getRoute } from "./db.js";
 import { renderPastRides } from "./history-view.js";
 
 /**
@@ -48,6 +50,12 @@ export async function startSession(initialPosition, initialHeading = null) {
 		unit: state.prefs.unit,
 		activityType: state.selectedActivityType,
 		keepScreenOn: state.selectedKeepScreenOn,
+		// The saved route picked in ride setup, if any, so a recovered ride can
+		// show it again, and how it's followed (see ride-plan.js).
+		routeId: state.rideRoute?.id ?? null,
+		routeMode: canFollowPoints(state.rideRoute) ? state.prefs.rideRouteMode : "asis",
+		nextWaypoint: 0,
+		lastReached: null,
 		points: [],
 		totalDistance: 0,
 		movingTime: 0,
@@ -79,6 +87,7 @@ export async function startSession(initialPosition, initialHeading = null) {
 		// Where the heading was last set from; see HEADING_MIN_MOVE_M.
 		headingAnchor: null,
 	};
+	syncDebugButton();
 
 	await requestWakeLock();
 
@@ -621,6 +630,11 @@ export function updateLiveStats() {
 	el.elapsedTime.textContent = formatDuration(elapsed);
 }
 
+/** Shows the debug menu's floating button only while a ride is live (in progress, paused or not). */
+function syncDebugButton() {
+	el.debugFab.classList.toggle("hidden", !state.currentSession);
+}
+
 /**
  * Updates the pause button and ride strip's paused/unpaused visual state.
  * @param {boolean} paused
@@ -745,6 +759,9 @@ export async function finalizeSession() {
 	clearInterval(session.elapsedIntervalId);
 	await releaseWakeLock();
 	state.paceIndex = null;
+	state.rideRoute = null;
+	resetRouteHome();
+	resetRidePlan();
 
 	const saved = {
 		date: session.date,
@@ -768,6 +785,7 @@ export async function finalizeSession() {
 	await clearActiveSessionCheckpoint();
 	state.currentSession = null;
 	state.rideFlowPhase = null;
+	syncDebugButton();
 	setPauseButton(false);
 	return saved;
 }
@@ -791,6 +809,10 @@ export async function saveActiveSessionCheckpoint() {
 			unit: session.unit,
 			activityType: session.activityType,
 			keepScreenOn: Boolean(session.keepScreenOn),
+			routeId: session.routeId ?? null,
+			routeMode: session.routeMode ?? "asis",
+			nextWaypoint: session.nextWaypoint ?? 0,
+			lastReached: session.lastReached ?? null,
 			points: session.points,
 			totalDistance: session.totalDistance,
 			movingTime: getElapsedMs(),
@@ -857,6 +879,10 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		unit: checkpoint.unit || state.prefs.unit,
 		activityType: checkpoint.activityType || "bike",
 		keepScreenOn: Boolean(checkpoint.keepScreenOn),
+		routeId: checkpoint.routeId ?? null,
+		routeMode: checkpoint.routeMode === "points" ? "points" : "asis",
+		nextWaypoint: Number.isInteger(checkpoint.nextWaypoint) ? checkpoint.nextWaypoint : 0,
+		lastReached: Array.isArray(checkpoint.lastReached) ? checkpoint.lastReached : null,
 		points,
 		totalDistance: checkpoint.totalDistance || 0,
 		movingTime: checkpoint.movingTime || 0,
@@ -942,6 +968,7 @@ export async function maybeRecoverSession() {
  */
 async function resumeCheckpointedSession(restored) {
 	state.currentSession = restored;
+	syncDebugButton();
 	state.gpsOutageDetected = false;
 	state.estimatedPointsDuringGap = [];
 	state.velocityEstimate = 0;
@@ -949,6 +976,9 @@ async function resumeCheckpointedSession(restored) {
 	state.compassHeadingDegrees = null;
 	state.lastGPSTimestamp = Date.now();
 	state.lastCheckpointAt = Date.now();
+
+	// The route picked for the ride, unless it has been deleted since.
+	state.rideRoute = restored.routeId != null ? ((await getRoute(restored.routeId).catch(() => null)) ?? null) : null;
 
 	navigateToScreen("active", "replace");
 	initLiveMap(restored.lastPoint.lat, restored.lastPoint.lng);

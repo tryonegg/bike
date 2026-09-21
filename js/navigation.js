@@ -15,7 +15,9 @@ import { formatElevation } from "./format.js";
 import { renderPastRides, shiftCalendarMonth } from "./history-view.js";
 import { updateLiveStats, togglePauseSession, endSessionWithConfirm, saveActiveSessionCheckpoint, finalizeSession } from "./live-session.js";
 import { applyMapVisualPrefs } from "./map-visuals.js";
-import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, mapTypeNeedsStadiaKey, rebuildTerrain } from "./live-map.js";
+import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, mapTypeNeedsStadiaKey, rebuildTerrain, updateGuideLine } from "./live-map.js";
+import { resetRouteHome } from "./route-home.js";
+import { openPlanner, openRoutes, wirePlanner } from "./route-plan.js";
 import { renderPostSummary, openPostSession } from "./post-session.js";
 import { renderElevationChart, clearChartHighlight } from "./chart.js";
 import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abortRideSetup } from "./ride-setup.js";
@@ -121,6 +123,8 @@ export function wireEvents() {
 	el.calNextBtn.addEventListener("click", () => shiftCalendarMonth(1));
 
 	el.startRideBtn.addEventListener("click", startCountdownFlow);
+	el.openRoutesBtn.addEventListener("click", () => openRoutes());
+	wirePlanner();
 	el.setupBackBtn.addEventListener("click", cancelSetupAndReturnHome);
 
 	document.querySelectorAll(".activity-btn").forEach((btn) => {
@@ -158,7 +162,7 @@ export function wireEvents() {
 		navigateToScreen("settings");
 	});
 
-	// The debug FAB floats above every screen, so guard against pushing a
+	// The debug FAB stays up for the whole live ride, so guard against pushing a
 	// duplicate "debug" history entry if it's tapped while already there.
 	el.debugMenuBtn.addEventListener("click", () => {
 		if (state.currentScreen === "debug") return;
@@ -171,6 +175,12 @@ export function wireEvents() {
 
 	el.markerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
 	el.debugMarkerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
+
+	el.backToStartToggle.addEventListener("click", (event) => handleBackToStartClick(event));
+	el.debugBackToStartToggle.addEventListener("click", (event) => handleBackToStartClick(event));
+
+	el.avoidRetraceToggle.addEventListener("click", (event) => handleAvoidRetraceClick(event));
+	el.debugAvoidRetraceToggle.addEventListener("click", (event) => handleAvoidRetraceClick(event));
 
 	el.guideHideDistanceSelect.addEventListener("change", () => handleGuideHideDistanceChange(el.guideHideDistanceSelect));
 	el.debugGuideHideDistanceSelect.addEventListener("change", () => handleGuideHideDistanceChange(el.debugGuideHideDistanceSelect));
@@ -293,7 +303,7 @@ export function wireEvents() {
 	});
 }
 
-// The five handlers below back both the settings screen's own toggles and
+// The handlers below back both the settings screen's own toggles and
 // their duplicates on the debug screen (see index.html), so the two copies
 // share one place that actually changes state instead of drifting apart.
 
@@ -355,6 +365,36 @@ async function handleMarkerSizeClick(event) {
 	await setPref("markerSize", state.prefs.markerSize);
 	syncToggles();
 	applyMapVisualPrefs();
+}
+
+/**
+ * Shared handler for both "Back to Start" toggles (settings screen and debug
+ * screen). The debug screen can be opened mid-ride, so the live guide line
+ * is redrawn straight away. Leaving Route drops its route and worker.
+ */
+async function handleBackToStartClick(event) {
+	const btn = event.target.closest("button[data-back-to-start]");
+	if (!btn) return;
+	state.prefs.backToStart = btn.dataset.backToStart;
+	await setPref("backToStart", state.prefs.backToStart);
+	syncToggles();
+	if (state.prefs.backToStart !== "route") resetRouteHome();
+	updateGuideLine();
+}
+
+/**
+ * Shared handler for both "Avoid Retracing" toggles (settings screen and
+ * debug screen). Drops the current route so, mid-ride, the next one follows
+ * the new setting straight away.
+ */
+async function handleAvoidRetraceClick(event) {
+	const btn = event.target.closest("button[data-avoid-retrace]");
+	if (!btn) return;
+	state.prefs.routeAvoidRetrace = btn.dataset.avoidRetrace === "on";
+	await setPref("routeAvoidRetrace", state.prefs.routeAvoidRetrace);
+	syncToggles();
+	resetRouteHome();
+	updateGuideLine();
 }
 
 /** Shared handler for both "Hide Near Start" selects (settings screen and debug screen). */
@@ -441,6 +481,22 @@ export function syncToggles() {
 	const debugMarkerSizeButtons = el.debugMarkerSizeToggle.querySelectorAll("button");
 	debugMarkerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
 
+	for (const toggle of [el.backToStartToggle, el.debugBackToStartToggle]) {
+		toggle.querySelectorAll("button").forEach((btn) =>
+			btn.classList.toggle("active", btn.dataset.backToStart === state.prefs.backToStart),
+		);
+	}
+	// Avoid Retracing only means anything for Route, so it only shows then.
+	for (const [row, toggle] of [
+		[el.avoidRetraceRow, el.avoidRetraceToggle],
+		[el.debugAvoidRetraceRow, el.debugAvoidRetraceToggle],
+	]) {
+		row.hidden = state.prefs.backToStart !== "route";
+		toggle.querySelectorAll("button").forEach((btn) =>
+			btn.classList.toggle("active", (btn.dataset.avoidRetrace === "on") === state.prefs.routeAvoidRetrace),
+		);
+	}
+
 	// Option values are meters, fixed; only the displayed label follows the unit.
 	for (const select of [el.guideHideDistanceSelect, el.debugGuideHideDistanceSelect]) {
 		select.value = String(state.prefs.guideHideDistance);
@@ -512,7 +568,7 @@ export async function leavePostSession() {
 /**
  * Shows one screen and hides the rest, and records which one is current.
  * Does not touch browser history — see `navigateToScreen` for that.
- * @param {"home"|"active"|"post"|"settings"|"debug"} name
+ * @param {"home"|"active"|"post"|"settings"|"debug"|"plan"|"routes"} name
  */
 export function showScreen(name) {
 	Object.entries(el.screens).forEach(([key, screen]) => {
@@ -526,16 +582,18 @@ export function showScreen(name) {
  * Shows a screen and updates browser history to match, so back/forward and
  * the popstate handler in `wireEvents` can navigate between the app's screens.
  *
- * @param {"home"|"active"|"post"|"settings"|"debug"} name
+ * @param {"home"|"active"|"post"|"settings"|"debug"|"plan"|"routes"} name
  * @param {"push"|"replace"|string} [mode] - `"push"` adds a new history
  *   entry (the normal case, e.g. following a link/button); `"replace"` swaps
  *   the current entry (used when restoring state without wanting an extra
  *   back-stop, e.g. after a browser-driven navigation already changed the
  *   entry); anything else updates the screen without touching history at all.
+ * @param {Object} [extra] - More fields for the history entry, e.g. the
+ *   planner's `routeId`, so back/forward can reopen the same thing.
  */
-export function navigateToScreen(name, mode = "push") {
+export function navigateToScreen(name, mode = "push", extra = {}) {
 	showScreen(name);
-	const navState = { screen: name };
+	const navState = { screen: name, ...extra };
 	if (mode === "replace") {
 		history.replaceState(navState, "");
 	} else if (mode === "push") {
@@ -595,6 +653,16 @@ export async function applyHistoryState(targetState, mode = "none", savedSession
 
 		if (targetState.screen === "debug") {
 			navigateToScreen("debug", mode);
+			return;
+		}
+
+		if (targetState.screen === "routes") {
+			await openRoutes(mode);
+			return;
+		}
+
+		if (targetState.screen === "plan") {
+			await openPlanner(targetState.routeId ?? null, mode);
 			return;
 		}
 

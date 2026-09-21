@@ -14,6 +14,7 @@ import {
 	HEADING_MIN_MOVE_M,
 	LIVE_ROUTE_SOURCE,
 	LIVE_GUIDE_SOURCE,
+	LIVE_PLAN_SOURCE,
 	GUIDE_LABEL_MIN_LINE_PX,
 	WORLD_SIZE_AT_ZOOM_0,
 	DEM_TILE_URL,
@@ -33,6 +34,13 @@ import { haversineMeters, bearingDegrees, formatDistance, escapeHtml, formatElev
 import { getGuideLineStyle, getMarkerSizeConfig, distanceUnitLabel } from "./map-visuals.js";
 import { setPref } from "./db.js";
 import { updateBestPace, createBestPaceChip } from "./pace.js";
+import { routeHomeFrom, onRouteHomeChange } from "./route-home.js";
+import { ridePlanLine, onRidePlanChange } from "./ride-plan.js";
+
+// A route home, or to a planned route's next point, arrives from its worker
+// between fixes; draw it straight away.
+onRouteHomeChange(() => updateGuideLine());
+onRidePlanChange(() => updatePlanLine());
 
 /**
  * Called on every live GPS fix: extends the route and guide lines, moves the
@@ -51,15 +59,8 @@ export function updateLiveMap(point, heading, speedMps) {
 	setLiveLineData(LIVE_ROUTE_SOURCE, state.liveRouteCoords);
 	animateMarkerTo(state.riderMarker, [point.lng, point.lat]);
 
-	if (state.currentSession?.points?.length) {
-		const startPoint = state.currentSession.points[0];
-		state.liveGuideCoords = [
-			[startPoint.lng, startPoint.lat],
-			[point.lng, point.lat],
-		];
-		setLiveLineData(LIVE_GUIDE_SOURCE, state.liveGuideCoords);
-		updateGuideLabel();
-	}
+	updatePlanLine(point);
+	updateGuideLine(point);
 
 	const session = state.currentSession;
 
@@ -83,6 +84,59 @@ export function updateLiveMap(point, heading, speedMps) {
 	}
 	followLiveMap(point, nextHeading);
 	updateBestPace(point, nextHeading);
+}
+
+/**
+ * Redraws the ride's planned route (see ride-plan.js) for the rider at
+ * `point`. Nothing to do without a ride under way; ride setup's preview
+ * draws the plan through `setLivePlanData` instead.
+ *
+ * @param {{lat: number, lng: number}} [point] - The rider; defaults to the
+ *   ride's latest fix.
+ */
+export function updatePlanLine(point = state.currentSession?.lastPoint) {
+	const session = state.currentSession;
+	if (!state.liveMap || !session || !point) return;
+	state.livePlanCoords = ridePlanLine(point, session);
+	setLiveLineData(LIVE_PLAN_SOURCE, state.livePlanCoords);
+}
+
+/**
+ * Redraws the guide line home per the "Back to Start" setting: nothing, the
+ * straight line to the start, or the route along roads (the straight line
+ * standing in until a route is known, and for kayaking, which has no roads
+ * to follow). Called on every fix, when a route arrives, and when the
+ * setting changes mid-ride.
+ *
+ * @param {{lat: number, lng: number}} [point] - The rider; defaults to the
+ *   ride's latest fix.
+ */
+export function updateGuideLine(point = state.currentSession?.lastPoint) {
+	const session = state.currentSession;
+	if (!state.liveMap || !session?.points?.length || !point) return;
+
+	const mode = state.prefs.backToStart;
+	const start = session.points[0];
+	let coords = [];
+	let routeMeters = null;
+	if (mode === "route" && session.activityType !== "kayak") {
+		const route = routeHomeFrom(point, session);
+		if (route) {
+			coords = route.coords;
+			routeMeters = route.meters;
+		}
+	}
+	if (mode !== "none" && !coords.length) {
+		coords = [
+			[start.lng, start.lat],
+			[point.lng, point.lat],
+		];
+	}
+
+	state.liveGuideCoords = coords;
+	state.liveGuideRouteMeters = routeMeters;
+	setLiveLineData(LIVE_GUIDE_SOURCE, coords);
+	updateGuideLabel();
 }
 
 /**
@@ -160,6 +214,7 @@ export function initLiveMap(lat, lng, { overhead = false } = {}) {
 
 	state.liveRouteCoords = [];
 	state.liveGuideCoords = [];
+	state.liveGuideRouteMeters = null;
 
 	const map = createVectorMap(
 		{
@@ -389,7 +444,7 @@ function setMapStyle(map, useStadia) {
  * or Stadia-key change.
  */
 export function rebuildMapStyles() {
-	for (const map of [state.liveMap, state.postMap]) {
+	for (const map of [state.liveMap, state.postMap, state.planMap]) {
 		if (map) setMapStyle(map, Boolean(state.prefs.stadiaKey));
 	}
 }
@@ -443,8 +498,19 @@ export function setLiveLineData(sourceId, coords) {
 }
 
 /**
- * Adds the live map's own overlay sources/layers: the route line, the guide
- * line (with halo), and one pre-allocated line layer per best-pace-band slot.
+ * Redraws the ride's chosen route on the live map from `state.rideRoute`,
+ * when it's picked in ride setup. (A new live map, or one whose style was
+ * swapped, picks it up itself.)
+ */
+export function setLivePlanData() {
+	state.livePlanCoords = state.rideRoute?.coords ?? [];
+	setLiveLineData(LIVE_PLAN_SOURCE, state.livePlanCoords);
+}
+
+/**
+ * Adds the live map's own overlay sources/layers: the ride's chosen route
+ * (if any), the route line, the guide line (with halo), and one pre-allocated
+ * line layer per best-pace-band slot.
  * Passed to `createVectorMap` as its `addOverlays` callback, so it also runs
  * again after every style swap.
  *
@@ -455,6 +521,7 @@ function addLiveOverlayLayers(map) {
 	const round = { "line-cap": "round", "line-join": "round" };
 
 	map.addSource(LIVE_ROUTE_SOURCE, { type: "geojson", data: lineData(state.liveRouteCoords) });
+	map.addSource(LIVE_PLAN_SOURCE, { type: "geojson", data: lineData(state.livePlanCoords) });
 	map.addSource(LIVE_GUIDE_SOURCE, { type: "geojson", data: lineData(state.liveGuideCoords) });
 
 	// The best-pace band sits under the road names, like a highlighter on the
@@ -480,6 +547,22 @@ function addLiveOverlayLayers(map) {
 		);
 	}
 
+	// The planned route sits under the ride's own line, which draws over it as
+	// the rider follows it.
+	map.addLayer({
+		id: "live-plan-casing",
+		type: "line",
+		source: LIVE_PLAN_SOURCE,
+		layout: round,
+		paint: { "line-color": "#ffffff", "line-width": 10, "line-opacity": 0.85 },
+	});
+	map.addLayer({
+		id: "live-plan",
+		type: "line",
+		source: LIVE_PLAN_SOURCE,
+		layout: round,
+		paint: { "line-color": "#6d4ad8", "line-width": 6, "line-opacity": 0.85 },
+	});
 	map.addLayer({
 		id: "live-route",
 		type: "line",
@@ -768,7 +851,7 @@ function addTopoLayers(map) {
  * the display unit, so a unit change has to redraw them.
  */
 export function refreshTopoLayers() {
-	for (const map of [state.liveMap, state.postMap]) {
+	for (const map of [state.liveMap, state.postMap, state.planMap]) {
 		if (!isMapStyleReady(map)) continue;
 		// "topo-dem" is torn down below along with the rest, but 3D terrain may
 		// still be pointed at it — clearing terrain first avoids removeSource
@@ -938,48 +1021,78 @@ export function styleGuideLabel(element, guideContrast, markerSize) {
  * Repositions and re-labels the "distance to start" chip along the guide
  * line, or hides it when there's nothing useful to show. Sits halfway
  * between the rider and whichever comes first along the line: the start
- * itself, if it's within the visible map, or the screen edge the line exits
- * through otherwise — so the chip clears the rider dot by a margin that
- * scales with the screen instead of a fixed pixel offset. Hides outright
- * once the rider is within "Hide Near Start"'s distance of the real start,
- * or (as before) once the line's too short to hold the chip without
- * covering both ends.
+ * itself, if the line reaches it within the visible map, or the screen edge
+ * the line leaves through otherwise — so the chip clears the rider dot by a
+ * margin that scales with the screen instead of a fixed pixel offset. Hides
+ * outright once the rider is within "Hide Near Start"'s distance of the real
+ * start (as the crow flies, whatever the line), or once the line's too short
+ * to hold the chip without covering both ends. It reads the distance along
+ * the route in Route mode, and the straight-line distance otherwise.
  *
- * The line's own length is still worked out in Mercator space, as if the map
- * were flat, rather than by projecting the start to screen space — a start
- * far behind the tilted camera can't be reliably projected there. The screen
- * edge the line points toward is worked out the same flattened way: the
- * rider is assumed to sit at the riding camera's padded anchor point (see
- * `ridePadding`) rather than its true projected position, and the line's
- * on-screen direction comes from rotating its ground bearing by the map's
- * current bearing — both safe, since neither needs the far (start) end
- * projected.
+ * The line is walked from the rider in Mercator space, as if the map were
+ * flat, rather than by projecting its points to the screen — points far
+ * behind the tilted camera can't be reliably projected there. The rider is
+ * assumed to sit at the riding camera's padded anchor point (see
+ * `ridePadding`) rather than its true projected position, and each step's
+ * on-screen direction comes from rotating it by the map's current bearing.
  *
- * Called on every live fix, and whenever the map's zoom or bearing changes
- * (both shift this placement: zoom changes the ground distance a pixel
- * covers, bearing changes which screen edge the line points at).
+ * Called whenever the guide line changes, and whenever the map's zoom or
+ * bearing changes (both shift this placement: zoom changes the ground
+ * distance a pixel covers, bearing changes which screen edge the line
+ * points at).
  */
 export function updateGuideLabel() {
 	const map = state.liveMap;
 	const marker = state.guideLabelMarker;
 	if (!map || !marker) return;
 	const element = marker.getElement();
+	const coords = state.liveGuideCoords;
 
-	if (state.liveGuideCoords.length < 2) {
+	if (coords.length < 2) {
 		element.style.visibility = "hidden";
 		return;
 	}
 
-	const [origin, rider] = state.liveGuideCoords;
-	const meters = haversineMeters(rider[1], rider[0], origin[1], origin[0]);
-	if (meters <= state.prefs.guideHideDistance) {
+	const origin = coords[0];
+	const rider = coords[coords.length - 1];
+	const straightMeters = haversineMeters(rider[1], rider[0], origin[1], origin[0]);
+	if (straightMeters <= state.prefs.guideHideDistance) {
 		element.style.visibility = "hidden";
 		return;
 	}
 
-	const from = maplibregl.MercatorCoordinate.fromLngLat(rider);
-	const to = maplibregl.MercatorCoordinate.fromLngLat(origin);
-	const linePixels = Math.hypot(to.x - from.x, to.y - from.y) * WORLD_SIZE_AT_ZOOM_0 * 2 ** map.getZoom();
+	const container = map.getContainer();
+	const width = container.clientWidth;
+	const height = container.clientHeight;
+	const { top, bottom, left, right } = ridePadding(map);
+	const scale = WORLD_SIZE_AT_ZOOM_0 * 2 ** map.getZoom();
+	const bearing = (map.getBearing() * Math.PI) / 180;
+	const cos = Math.cos(bearing);
+	const sin = Math.sin(bearing);
+
+	// Rider first. Mercator x runs east and y south; a step of (dx, dy) shows
+	// on the heading-up screen rotated by the map's bearing.
+	const points = coords.map((lngLat) => maplibregl.MercatorCoordinate.fromLngLat(lngLat)).reverse();
+	const steps = [0];
+	let screenX = (width + left - right) / 2;
+	let screenY = top + (height - top - bottom) / 2;
+	let linePixels = 0;
+	let edgePixels = Infinity;
+	for (let i = 1; i < points.length; i++) {
+		const dx = (points[i].x - points[i - 1].x) * scale;
+		const dy = (points[i].y - points[i - 1].y) * scale;
+		const length = Math.hypot(dx, dy);
+		steps.push(length);
+		if (edgePixels === Infinity && length > 0) {
+			const stepX = dx * cos + dy * sin;
+			const stepY = dy * cos - dx * sin;
+			const exit = rayBoxExitDistance(screenX, screenY, stepX, stepY, width, height);
+			if (exit <= 1) edgePixels = linePixels + exit * length;
+			screenX += stepX;
+			screenY += stepY;
+		}
+		linePixels += length;
+	}
 
 	// Too short to hold the chip without covering the rider and the start.
 	if (linePixels < GUIDE_LABEL_MIN_LINE_PX) {
@@ -987,26 +1100,16 @@ export function updateGuideLabel() {
 		return;
 	}
 
-	const container = map.getContainer();
-	const { top, bottom, left, right } = ridePadding(map);
-	const anchorX = (container.clientWidth + left - right) / 2;
-	const anchorY = top + (container.clientHeight - top - bottom) / 2;
-
-	const bearingToOrigin = bearingDegrees(rider[1], rider[0], origin[1], origin[0]);
-	const screenAngle = ((bearingToOrigin - map.getBearing()) * Math.PI) / 180;
-	const edgePixels = rayBoxExitDistance(
-		anchorX,
-		anchorY,
-		Math.sin(screenAngle),
-		-Math.cos(screenAngle),
-		container.clientWidth,
-		container.clientHeight,
-	);
-
-	const fraction = Number.isFinite(edgePixels) ? Math.min(0.5, edgePixels / 2 / linePixels) : 0.5;
+	let remaining = Math.min(linePixels, edgePixels) / 2;
+	let i = 1;
+	while (i < points.length - 1 && remaining > steps[i]) remaining -= steps[i++];
+	const fraction = steps[i] ? Math.min(1, remaining / steps[i]) : 0;
+	const from = points[i - 1];
+	const to = points[i];
 	const at = new maplibregl.MercatorCoordinate(from.x + (to.x - from.x) * fraction, from.y + (to.y - from.y) * fraction);
 	marker.setLngLat(at.toLngLat());
 
+	const meters = state.liveGuideRouteMeters ?? straightMeters;
 	element.firstChild.textContent = `${formatDistance(meters, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)}`;
 	element.style.visibility = "visible";
 }
