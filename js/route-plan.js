@@ -41,6 +41,15 @@ const ROUTE_COLOR = "#6d4ad8";
 // Climb and descent ignore wiggles smaller than this, in meters, so terrain
 // noise along a flat road doesn't add up to a hill.
 const CLIMB_THRESHOLD_M = 3;
+// A placed or dragged point snaps to the nearest usable way within about
+// this many screen pixels (a fingertip's slop), kept between the meter
+// limits so it neither snaps from across town when zoomed out nor misses the
+// road it's beside when zoomed in. A snap that takes too long (downloading
+// tiles on a slow connection) is given up, leaving the point where it was put.
+const SNAP_REACH_PX = 40;
+const SNAP_MIN_M = 20;
+const SNAP_MAX_M = 400;
+const SNAP_TIMEOUT_MS = 2000;
 
 let worker = null;
 let nextRequestId = 1;
@@ -50,6 +59,9 @@ let markers = [];
 // states undone since the last edit, for Redo.
 let undoStack = [];
 let redoStack = [];
+// Edits run one after another: adding or moving a point waits for its snap,
+// and a quick second tap mustn't overtake it.
+let editQueue = Promise.resolve();
 let nameSaveTimer = null;
 // The routes offered by ride setup's picker.
 let setupRoutes = [];
@@ -234,8 +246,8 @@ export function wirePlanner() {
 	el.planBackBtn.addEventListener("click", () => history.back());
 	el.planDoneBtn.addEventListener("click", () => history.back());
 	el.planDeleteBtn.addEventListener("click", deleteEditingRoute);
-	el.planUndoBtn.addEventListener("click", undo);
-	el.planRedoBtn.addEventListener("click", redo);
+	el.planUndoBtn.addEventListener("click", () => queueEdit(undo));
+	el.planRedoBtn.addEventListener("click", () => queueEdit(redo));
 	el.planImportBtn.addEventListener("click", () => el.planGpxInput.click());
 	el.planGpxInput.addEventListener("change", importPlanGpx);
 	el.planExportBtn.addEventListener("click", () => exportRouteGpx(state.editingRoute));
@@ -308,29 +320,68 @@ function redo() {
 	routeChanged(route);
 }
 
-/** Adds a waypoint at the end, routed on from the last one. */
-function addWaypoint(lngLat) {
-	const route = state.editingRoute;
-	if (!route || route.source === "gpx") return;
-	remember();
-	route.waypoints.push(lngLat);
-	if (route.waypoints.length > 1) route.legs.push(routeLeg(route, route.waypoints.length - 2));
-	routeChanged(route);
+/** Runs an edit after any still in progress. */
+function queueEdit(edit) {
+	editQueue = editQueue.then(edit).catch((error) => console.warn("Editing the route failed", error));
+	return editQueue;
 }
 
-/** Moves a waypoint, re-routing the legs either side of it. */
+/**
+ * The nearest point on a road, path or cycleway the route can use, within
+ * reach of where a point was put (see SNAP_REACH_PX), or the point itself
+ * when there's none in reach or the snap can't be had in time.
+ */
+async function snapToWay(lngLat, route) {
+	const zoom = state.planMap?.getZoom() ?? PLAN_ZOOM;
+	const metersPerPixel = (40075016.686 * Math.cos((lngLat[1] * Math.PI) / 180)) / (512 * 2 ** zoom);
+	const radius = Math.min(SNAP_MAX_M, Math.max(SNAP_MIN_M, SNAP_REACH_PX * metersPerPixel));
+	const timeout = new Promise((resolve) => setTimeout(() => resolve(null), SNAP_TIMEOUT_MS));
+	try {
+		const answer = await Promise.race([request({ type: "snap", point: lngLat, profile: route.profile ?? "bike", radius }), timeout]);
+		return answer?.snapped ?? lngLat;
+	} catch (error) {
+		console.warn("Snapping a point failed", error);
+		return lngLat;
+	}
+}
+
+/** Adds a waypoint at the end, snapped to a way and routed on from the last one. */
+function addWaypoint(lngLat) {
+	queueEdit(async () => {
+		const route = state.editingRoute;
+		if (!route || route.source === "gpx") return;
+		const snapped = await snapToWay(lngLat, route);
+		if (route !== state.editingRoute) return;
+		remember();
+		route.waypoints.push(snapped);
+		if (route.waypoints.length > 1) route.legs.push(routeLeg(route, route.waypoints.length - 2));
+		routeChanged(route);
+	});
+}
+
+/** Moves a waypoint, snapped to a way, re-routing the legs either side of it. */
 function moveWaypoint(index, lngLat) {
-	const route = state.editingRoute;
-	remember();
-	route.waypoints[index] = lngLat;
-	if (index > 0) route.legs[index - 1] = routeLeg(route, index - 1);
-	if (index < route.legs.length) route.legs[index] = routeLeg(route, index);
-	routeChanged(route);
+	queueEdit(async () => {
+		const route = state.editingRoute;
+		if (!route) return;
+		const snapped = await snapToWay(lngLat, route);
+		if (route !== state.editingRoute || index >= route.waypoints.length) return;
+		remember();
+		route.waypoints[index] = snapped;
+		if (index > 0) route.legs[index - 1] = routeLeg(route, index - 1);
+		if (index < route.legs.length) route.legs[index] = routeLeg(route, index);
+		routeChanged(route);
+	});
 }
 
 /** Removes a waypoint, joining its neighbours with a new leg. */
 function removeWaypoint(index) {
+	queueEdit(() => removeWaypointNow(index));
+}
+
+function removeWaypointNow(index) {
 	const route = state.editingRoute;
+	if (!route || index >= route.waypoints.length) return;
 	remember();
 	route.waypoints.splice(index, 1);
 	if (index === 0) {

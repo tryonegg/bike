@@ -140,6 +140,18 @@ export function tileFor(lngLat) {
 }
 
 /**
+ * Whether a way (a tile feature's properties) can be used at all under a
+ * profile, by the same rules routing follows.
+ *
+ * @param {Object} props
+ * @param {"bike"|"foot"} profileName
+ * @returns {boolean}
+ */
+export function usableWay(props, profileName) {
+	return wayRule(props, PROFILES[profileName] ?? PROFILES.bike) !== null;
+}
+
+/**
  * Works out how a way may be ridden or walked under a profile.
  *
  * @param {Object} props - The tile feature's OpenMapTiles properties.

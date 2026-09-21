@@ -17,13 +17,16 @@
  *   passes through, for the map and route home to use offline.
  * - {id, type: "elevation", coords} — the height profile along a route, from
  *   the terrain tiles topo mode uses (cached, or downloaded and cached).
+ * - {id, type: "snap", point, profile, radius} — the nearest point, within
+ *   `radius` meters, on a way the profile can use, for placing a planned
+ *   route's point on the road or path the rider meant.
  * Message out: {id, route: {coords, meters}|null, stats}, {id, fetched},
- * {id, profile}, or {id, error}.
+ * {id, profile}, {id, snapped: [lng, lat]|null, meters}, or {id, error}.
  */
 
 import { decodeLineLayer } from "./mvt.js";
 import { DEM_TILE_URL, DEM_MAX_ZOOM } from "./constants.js";
-import { buildGraph, findRoute, markRetraced, tileFor, toUnits, TILE_ZOOM } from "./route-graph.js";
+import { buildGraph, findRoute, markRetraced, tileFor, toUnits, toLngLat, usableWay, TILE_ZOOM } from "./route-graph.js";
 
 // The service worker's tile caches, matched by prefix so a version bump there
 // doesn't need a matching change here.
@@ -71,7 +74,7 @@ self.addEventListener("message", async (event) => {
 	// goalKey is only passed back, so a follower can tell which goal it asked about.
 	const { id, type, goalKey } = event.data;
 	try {
-		const handler = { leg: routeLeg, prefetch: prefetchLine, elevation: elevationProfile }[type] ?? routeHome;
+		const handler = { leg: routeLeg, prefetch: prefetchLine, elevation: elevationProfile, snap: snapPoint }[type] ?? routeHome;
 		self.postMessage({ id, goalKey, ...(await handler(event.data)) });
 	} catch (error) {
 		self.postMessage({ id, goalKey, error: String(error?.message ?? error) });
@@ -126,6 +129,58 @@ async function routeLeg({ from, to, profile }) {
 		route: findRoute(graph, from),
 		stats: { tiles: tiles.length, fetched, ...graph.stats, ms: Math.round(performance.now() - began) },
 	};
+}
+
+/**
+ * The nearest point to `point` on any way the profile can use, within
+ * `radius` meters: from the tiles that reach that far (downloading any
+ * missing ones, as planning does).
+ *
+ * @returns {Promise<{snapped: [number, number]|null, meters: number|null}>}
+ */
+async function snapPoint({ point, profile, radius }) {
+	const [x, y] = toUnits(point);
+	const reach = radius / metersPerUnitAt(point[1]);
+	const wanted = [];
+	for (let tx = Math.floor((x - reach) / 4096); tx <= Math.floor((x + reach) / 4096); tx++) {
+		for (let ty = Math.floor((y - reach) / 4096); ty <= Math.floor((y + reach) / 4096); ty++) wanted.push(`${tx}/${ty}`);
+	}
+	const cached = await cachedTiles();
+	await fetchMissing(wanted, cached);
+
+	let best = null;
+	let bestDistance = reach;
+	for (const key of wanted) {
+		const url = cached.get(key);
+		const tile = url && (await loadTile(url));
+		if (!tile) continue;
+		const scale = 4096 / tile.extent;
+		const originX = tile.x * 4096;
+		const originY = tile.y * 4096;
+		for (const feature of tile.features) {
+			if (!usableWay(feature.properties, profile)) continue;
+			for (const line of feature.lines) {
+				for (let i = 1; i < line.length; i++) {
+					const ax = originX + line[i - 1][0] * scale;
+					const ay = originY + line[i - 1][1] * scale;
+					const dx = originX + line[i][0] * scale - ax;
+					const dy = originY + line[i][1] * scale - ay;
+					const lengthSq = dx * dx + dy * dy;
+					const t = lengthSq ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / lengthSq)) : 0;
+					const px = ax + dx * t;
+					const py = ay + dy * t;
+					const distance = Math.hypot(x - px, y - py);
+					if (distance <= bestDistance) {
+						bestDistance = distance;
+						best = [px, py];
+					}
+				}
+			}
+		}
+	}
+	return best
+		? { snapped: toLngLat(best), meters: bestDistance * metersPerUnitAt(point[1]) }
+		: { snapped: null, meters: null };
 }
 
 /** Downloads the tiles a line passes through that aren't cached yet. */
