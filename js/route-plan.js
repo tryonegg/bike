@@ -237,10 +237,16 @@ function showPlanner(route, mode) {
  * Opens a route from a shared link in the planner as a preview: routed
  * between its waypoints and drawn, but not stored until the rider taps Save.
  * @param {Array<[number, number]>} waypoints
+ * @param {string} [name] - The sender's name for the route, offered as a
+ *   starting point; the recipient can still rename it before or after saving.
  */
-async function openSharedRoute(waypoints) {
+async function openSharedRoute(waypoints, name) {
 	const route = await newRoute();
 	route.preview = true;
+	if (name) {
+		route.name = name;
+		route.autoNamed = false;
+	}
 	route.waypoints = waypoints;
 	route.legs = [];
 	for (let i = 0; i + 1 < waypoints.length; i++) route.legs.push(routeLeg(route, i));
@@ -276,12 +282,12 @@ export async function openSharedRouteFromUrl(url) {
 	if (hash === location.hash) history.replaceState(history.state, "", location.pathname + location.search);
 	// A ride in progress isn't interrupted.
 	if (state.currentSession) return;
-	const waypoints = parseShareHash(hash);
-	if (!waypoints) {
+	const shared = parseShareHash(hash);
+	if (!shared) {
 		await showMessage("Shared Route", `This link couldn't be read as a route, or has more than ${MAX_SHARED_WAYPOINTS} points.`);
 		return;
 	}
-	await openSharedRoute(waypoints);
+	await openSharedRoute(shared.waypoints, shared.name);
 }
 
 /** A new, unsaved route, named after how many there are already. */
@@ -354,7 +360,7 @@ function saveSharedRoute() {
 async function shareRoute() {
 	const route = state.editingRoute;
 	if (!route || route.waypoints.length < 2) return;
-	const url = buildShareUrl(route.waypoints.slice(0, MAX_SHARED_WAYPOINTS));
+	const url = buildShareUrl(route.waypoints.slice(0, MAX_SHARED_WAYPOINTS), route.name);
 	if (route.waypoints.length > MAX_SHARED_WAYPOINTS) {
 		await showMessage("Share Route", `Only routes of up to ${MAX_SHARED_WAYPOINTS} points can be shared.`);
 		return;
