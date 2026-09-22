@@ -11,12 +11,27 @@ import { renderPastRides } from "./js/history-view.js";
 import { maybeRecoverSession } from "./js/live-session.js";
 import { registerServiceWorker, maybeShowInstallBanner } from "./js/pwa.js";
 import { showMessage } from "./js/modal.js";
-import { openSharedRouteFromHash } from "./js/route-plan.js";
+import { openSharedRouteFromHash, openSharedRouteFromUrl } from "./js/route-plan.js";
 
-init().catch((error) => {
+const ready = init().catch((error) => {
 	console.error(error);
 	showMessage("Initialization Failed", "App initialization failed. Please refresh.");
 });
+
+// An installed, already-running app is normally just focused, not navigated,
+// when a link to it (e.g. a shared route) is tapped again, so this is the
+// only way such a tap reaches the app at all: the Launch Handler API hands
+// the tapped URL straight to the page instead of a real navigation. Set
+// outside `init()`, so a launch already queued before this script ran isn't
+// missed (the browser holds it until a consumer exists), but every call
+// waits for `init()`'s own setup (screen wiring, the initial history entry)
+// so it can't run ahead of that.
+if ("launchQueue" in window) {
+	window.launchQueue.setConsumer((launchParams) => {
+		if (!launchParams.targetURL) return;
+		ready.then(() => openSharedRouteFromUrl(launchParams.targetURL)).catch((error) => console.warn("Opening a launched route failed", error));
+	});
+}
 
 /**
  * Boots the app: loads preferences, applies the theme/layout they imply,

@@ -4,6 +4,7 @@
   "description": "Offline bike tracking PWA",
   "start_url": "./index.html",
   "display": "standalone",
+  "launch_handler": { "client_mode": "navigate-existing" },
   "background_color": "#f2f7f3",
   "theme_color": "#0b5d3b",
   "icons": [

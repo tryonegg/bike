@@ -73,6 +73,10 @@ let editQueue = Promise.resolve();
 let nameSaveTimer = null;
 // The routes offered by ride setup's picker.
 let setupRoutes = [];
+// The last shared-route hash acted on, so a link that reaches the app twice
+// (e.g. a normal navigation and the Launch Handler API both reporting the
+// same launch) opens it once, not twice. See `openSharedRouteFromUrl`.
+let lastHandledShareHash = null;
 // The planner chart's pixel ↔ distance conversions, and the map dot that
 // follows a finger along it.
 let chartGeometry = null;
@@ -250,9 +254,26 @@ async function openSharedRoute(waypoints) {
  * when the hash changes while the app is open.
  */
 export async function openSharedRouteFromHash() {
-	const hash = location.hash;
-	if (!isShareHash(hash)) return;
-	history.replaceState(history.state, "", location.pathname + location.search);
+	await openSharedRouteFromUrl(location.href);
+}
+
+/**
+ * Same as `openSharedRouteFromHash`, but for a URL that hasn't (and may
+ * never) become `location.href` — an installed PWA that's already running
+ * is usually just focused, not navigated, when a link to it is tapped
+ * again, so the Launch Handler API (see `wirePlanner`) hands the tapped URL
+ * to this directly instead of relying on the hash changing under it.
+ * @param {string} url
+ */
+export async function openSharedRouteFromUrl(url) {
+	const hash = new URL(url, location.href).hash;
+	if (!isShareHash(hash) || hash === lastHandledShareHash) return;
+	lastHandledShareHash = hash;
+	// Clears it from the bar (whether or not it ever actually got there — an
+	// already-running install is often just focused at its old URL, with the
+	// tapped one passed only through the Launch Handler API) so a refresh
+	// can't reopen it, and a share link never lingers as a back-stop.
+	if (hash === location.hash) history.replaceState(history.state, "", location.pathname + location.search);
 	// A ride in progress isn't interrupted.
 	if (state.currentSession) return;
 	const waypoints = parseShareHash(hash);
