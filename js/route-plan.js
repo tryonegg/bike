@@ -13,7 +13,9 @@
  *    legs: [{coords, meters, routed}...],      // one per pair of waypoints
  *    coords: [[lng, lat]...], meters,          // the whole route, joined
  *    elevation: {key, distances, heights, climb, descent}}  // its profile, see below
- * In memory, a leg still being routed also carries `pending: true`.
+ * In memory, a leg still being routed also carries `pending: true`, and a
+ * route opened from a shared link carries `preview: true` until it's saved
+ * (nothing is stored, and it can't be edited, before then).
  *
  * The elevation profile comes from the worker once every leg is routed, and
  * is saved with the route. `key` (see `elevationKey`) says which version of
@@ -32,6 +34,7 @@ import { confirmWithModal, showMessage, showModal } from "./modal.js";
 import { exportRouteGpx } from "./gpx.js";
 import { renderProfileChart } from "./chart.js";
 import { canFollowPoints } from "./ride-plan.js";
+import { buildShareUrl, isShareHash, parseShareHash, MAX_SHARED_WAYPOINTS } from "./route-share.js";
 
 // Where the planner opens with no route and no GPS fix yet.
 const FALLBACK_VIEW = { center: [-98.5, 39.8], zoom: 3 };
@@ -201,6 +204,11 @@ async function handleRouteModeClick(event) {
 export async function openPlanner(routeId = null, mode = "push") {
 	const saved = routeId != null ? await getRoute(routeId) : null;
 	const route = saved ? { ...saved, autoNamed: false } : await newRoute();
+	showPlanner(route, mode);
+}
+
+/** Opens the planner screen on `route`, which becomes the one being edited. */
+function showPlanner(route, mode) {
 	state.editingRoute = route;
 	undoStack = [];
 	redoStack = [];
@@ -219,6 +227,40 @@ export async function openPlanner(routeId = null, mode = "push") {
 		fitRoute();
 	}
 	renderPlan();
+}
+
+/**
+ * Opens a route from a shared link in the planner as a preview: routed
+ * between its waypoints and drawn, but not stored until the rider taps Save.
+ * @param {Array<[number, number]>} waypoints
+ */
+async function openSharedRoute(waypoints) {
+	const route = await newRoute();
+	route.preview = true;
+	route.waypoints = waypoints;
+	route.legs = [];
+	for (let i = 0; i + 1 < waypoints.length; i++) route.legs.push(routeLeg(route, i));
+	routeChanged(route);
+	showPlanner(route, "push");
+}
+
+/**
+ * Opens the route in the page's URL hash, if it holds a shared one, and
+ * clears the hash so a refresh doesn't open it again. Called at startup and
+ * when the hash changes while the app is open.
+ */
+export async function openSharedRouteFromHash() {
+	const hash = location.hash;
+	if (!isShareHash(hash)) return;
+	history.replaceState(history.state, "", location.pathname + location.search);
+	// A ride in progress isn't interrupted.
+	if (state.currentSession) return;
+	const waypoints = parseShareHash(hash);
+	if (!waypoints) {
+		await showMessage("Shared Route", `This link couldn't be read as a route, or has more than ${MAX_SHARED_WAYPOINTS} points.`);
+		return;
+	}
+	await openSharedRoute(waypoints);
 }
 
 /** A new, unsaved route, named after how many there are already. */
@@ -249,7 +291,9 @@ export function wirePlanner() {
 	el.setupRouteModeToggle.addEventListener("click", handleRouteModeClick);
 
 	el.planBackBtn.addEventListener("click", () => history.back());
-	el.planDoneBtn.addEventListener("click", () => history.back());
+	el.planDoneBtn.addEventListener("click", saveSharedRoute);
+	el.planShareBtn.addEventListener("click", shareRoute);
+	window.addEventListener("hashchange", openSharedRouteFromHash);
 	el.planDeleteBtn.addEventListener("click", deleteEditingRoute);
 	el.planUndoBtn.addEventListener("click", () => queueEdit(undo));
 	el.planRedoBtn.addEventListener("click", () => queueEdit(redo));
@@ -271,6 +315,43 @@ export function wirePlanner() {
 	window.addEventListener("resize", () => {
 		if (state.currentScreen === "plan") renderProfile(state.editingRoute);
 	});
+}
+
+/** The planner's Done button: keeps a previewed shared route, or else leaves the planner. */
+function saveSharedRoute() {
+	const route = state.editingRoute;
+	if (!route?.preview) {
+		history.back();
+		return;
+	}
+	route.preview = false;
+	saveRoute(route);
+	renderPlan();
+}
+
+/** The planner's Share button: shares a link to the route through the system share sheet, or else copies it. */
+async function shareRoute() {
+	const route = state.editingRoute;
+	if (!route || route.waypoints.length < 2) return;
+	const url = buildShareUrl(route.waypoints.slice(0, MAX_SHARED_WAYPOINTS));
+	if (route.waypoints.length > MAX_SHARED_WAYPOINTS) {
+		await showMessage("Share Route", `Only routes of up to ${MAX_SHARED_WAYPOINTS} points can be shared.`);
+		return;
+	}
+	if (navigator.share) {
+		try {
+			await navigator.share({ title: route.name || "Route", url });
+		} catch (error) {
+			if (error.name !== "AbortError") console.warn("Sharing the route failed", error);
+		}
+		return;
+	}
+	try {
+		await navigator.clipboard.writeText(url);
+		await showMessage("Link Copied", "Send it to anyone with the app to open this route.");
+	} catch {
+		await showMessage("Share Route", url);
+	}
 }
 
 /** The planner's Delete button: removes the route (after confirming) and goes back to the list. */
@@ -327,6 +408,7 @@ function redo() {
 
 /** Runs an edit after any still in progress. */
 function queueEdit(edit) {
+	if (state.editingRoute?.preview) return editQueue;
 	editQueue = editQueue.then(edit).catch((error) => console.warn("Editing the route failed", error));
 	return editQueue;
 }
@@ -537,7 +619,7 @@ function summarizeProfile({ distances, heights }) {
  * saved at all.
  */
 function saveRoute(route) {
-	if (route.id == null && isEmpty(route)) return;
+	if (route.preview || (route.id == null && isEmpty(route))) return;
 	route.updated = new Date().toISOString();
 	const record = {
 		name: route.name || "Untitled route",
@@ -767,7 +849,7 @@ function wireLineDrag(map) {
 
 	const legUnder = (point) => {
 		const route = state.editingRoute;
-		if (!route || route.source === "gpx" || !map.getLayer("plan-route-casing")) return null;
+		if (!route || route.preview || route.source === "gpx" || !map.getLayer("plan-route-casing")) return null;
 		const box = [
 			[point.x - LINE_HIT_PX, point.y - LINE_HIT_PX],
 			[point.x + LINE_HIT_PX, point.y + LINE_HIT_PX],
@@ -942,20 +1024,25 @@ function renderPlan() {
 	const hasRoute = route?.coords?.length >= 2;
 	const pending = route?.legs.some((leg) => leg.pending);
 	const unrouted = route?.legs.some((leg) => !leg.routed && !leg.pending);
+	el.screens.plan.classList.toggle("previewing", !!route?.preview);
+	el.planDoneBtn.textContent = route?.preview ? "Save Route" : "Done";
 	el.planStatus.textContent = pending
 		? "Finding roads…"
 		: unrouted
 			? "Dashed legs couldn't follow roads, so they're straight lines."
-			: route?.source === "gpx"
-				? "Imported as drawn, so it can't be edited here."
-				: hasRoute
-					? "Tap to add a point, drag one to move it, tap one to remove it."
-					: "Tap the map to add your first point.";
+			: route?.preview
+				? "Shared route. Save it to keep it, or go back to discard it."
+				: route?.source === "gpx"
+					? "Imported as drawn, so it can't be edited here."
+					: hasRoute
+						? "Tap to add a point, drag one to move it, tap one to remove it."
+						: "Tap the map to add your first point.";
 	renderProfile(route);
 	el.planUndoBtn.disabled = !undoStack.length;
 	el.planRedoBtn.disabled = !redoStack.length;
 	// Not while legs are still straight placeholders.
 	el.planExportBtn.disabled = !hasRoute || pending;
+	el.planShareBtn.disabled = route?.source === "gpx" || (route?.waypoints.length ?? 0) < 2;
 }
 
 /**
@@ -1044,7 +1131,7 @@ function createWaypointMarker(map, lngLat, label, index) {
 	const element = document.createElement("div");
 	element.className = "plan-waypoint";
 	element.innerHTML = `<span>${escapeHtml(label)}</span>`;
-	const editable = index >= 0;
+	const editable = index >= 0 && !state.editingRoute?.preview;
 	const marker = new maplibregl.Marker({ element, draggable: editable }).setLngLat(lngLat).addTo(map);
 	if (!editable) return marker;
 

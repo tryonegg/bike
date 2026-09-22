@@ -1436,8 +1436,14 @@ button {
 
 .plan-actions {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 10px;
+}
+
+/* A shared route being previewed can't be edited, only saved or left. */
+.plan-screen.previewing .plan-actions,
+.plan-screen.previewing .plan-delete-btn {
+  display: none;
 }
 
 .plan-icon-btn {

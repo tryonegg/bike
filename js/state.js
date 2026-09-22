@@ -212,6 +212,7 @@ export const el = {
 	planRedoBtn: document.getElementById("planRedoBtn"),
 	planImportBtn: document.getElementById("planImportBtn"),
 	planExportBtn: document.getElementById("planExportBtn"),
+	planShareBtn: document.getElementById("planShareBtn"),
 	planGpxInput: document.getElementById("planGpxInput"),
 	planDoneBtn: document.getElementById("planDoneBtn"),
 	setupRouteSelect: document.getElementById("setupRouteSelect"),

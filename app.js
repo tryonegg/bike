@@ -11,6 +11,7 @@ import { renderPastRides } from "./js/history-view.js";
 import { maybeRecoverSession } from "./js/live-session.js";
 import { registerServiceWorker, maybeShowInstallBanner } from "./js/pwa.js";
 import { showMessage } from "./js/modal.js";
+import { openSharedRouteFromHash } from "./js/route-plan.js";
 
 init().catch((error) => {
 	console.error(error);
@@ -36,6 +37,7 @@ async function init() {
 	history.replaceState({ screen: "home" }, "");
 	await renderPastRides();
 	await maybeRecoverSession();
+	await openSharedRouteFromHash();
 	registerServiceWorker();
 	maybeShowInstallBanner();
 }
