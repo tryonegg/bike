@@ -8,6 +8,9 @@ import { state } from "./state.js";
 import { createRouteFollower } from "./route-follow.js";
 
 const home = createRouteFollower("Route home");
+// The latest route home as followed (rider first, with its steps and the
+// rider's progress), for directions (directions.js).
+let latest = null;
 
 /**
  * Registers the function called whenever a new route home arrives, so the
@@ -33,7 +36,18 @@ export function routeHomeFrom(rider, session) {
 		profile: session.activityType === "bike" ? "bike" : "foot",
 		avoidRetrace: state.prefs.routeAvoidRetrace,
 	});
+	latest = route;
 	return route && { coords: [...route.coords].reverse(), meters: route.meters };
+}
+
+/**
+ * The route home as last followed, rider first, with its turn-by-turn steps
+ * and the rider's progress (see `FollowedRoute` in route-follow.js); null
+ * when there's none.
+ * @returns {Object|null}
+ */
+export function latestRouteHome() {
+	return latest;
 }
 
 /**
@@ -43,4 +57,5 @@ export function routeHomeFrom(rider, session) {
  */
 export function resetRouteHome() {
 	home.reset();
+	latest = null;
 }

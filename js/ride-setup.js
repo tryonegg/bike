@@ -17,6 +17,7 @@ import { startSession, requestOrientationPermission } from "./live-session.js";
 import { resetRouteHome } from "./route-home.js";
 import { populateSetupRoutes } from "./route-plan.js";
 import { resetRidePlan } from "./ride-plan.js";
+import { hideDirections } from "./directions.js";
 
 /**
  * The "Start New Ride" button's handler: resets the activity picker to the
@@ -76,6 +77,7 @@ export function beginRideSetup() {
 	// The last ride's routing, if its workers are somehow still around.
 	resetRouteHome();
 	resetRidePlan();
+	hideDirections();
 
 	el.screens.active.dataset.phase = "setup";
 	setSetupLocating(true);

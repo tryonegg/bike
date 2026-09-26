@@ -157,6 +157,15 @@ export async function loadPrefs() {
 	state.prefs.backToStart = BACK_TO_START_MODES.includes(backToStart) ? backToStart : BACK_TO_START_DEFAULT;
 	state.prefs.routeAvoidRetrace = (await getPref("routeAvoidRetrace", false)) === true;
 	state.prefs.rideRouteMode = (await getPref("rideRouteMode", "asis")) === "points" ? "points" : "asis";
+	state.prefs.navRouteVisual = (await getPref("navRouteVisual", true)) !== false;
+	state.prefs.navRouteVoice = (await getPref("navRouteVoice", false)) === true;
+	state.prefs.navHomeVisual = (await getPref("navHomeVisual", false)) === true;
+	state.prefs.navHomeVoice = (await getPref("navHomeVoice", false)) === true;
+	const voiceURI = await getPref("voiceURI", "");
+	state.prefs.voiceURI = typeof voiceURI === "string" ? voiceURI : "";
+	const inRange = (value, min, max, fallback) => (Number.isFinite(value) && value >= min && value <= max ? value : fallback);
+	state.prefs.voiceRate = inRange(await getPref("voiceRate", 1), 0.5, 2, 1);
+	state.prefs.voicePitch = inRange(await getPref("voicePitch", 1), 0, 2, 1);
 	await migratePlannedRoute();
 	state.prefs.ridesView = await getPref("ridesView", "list");
 	const statsActivity = await getPref("statsActivity", "all");

@@ -36,11 +36,24 @@ import { setPref } from "./db.js";
 import { updateBestPace, createBestPaceChip } from "./pace.js";
 import { routeHomeFrom, onRouteHomeChange } from "./route-home.js";
 import { ridePlanLine, onRidePlanChange } from "./ride-plan.js";
+import { updateDirections, setDirectionsRedraw } from "./directions.js";
 
-// A route home, or to a planned route's next point, arrives from its worker
-// between fixes; draw it straight away.
-onRouteHomeChange(() => updateGuideLine());
-onRidePlanChange(() => updatePlanLine());
+// A route home, or to a planned route's next point (or the steps along a
+// route followed as is), arrives from its worker between fixes; draw it,
+// and its directions, straight away.
+onRouteHomeChange(() => {
+	updateGuideLine();
+	updateDirections();
+});
+onRidePlanChange(() => {
+	updatePlanLine();
+	updateDirections();
+});
+// Skipping a stop or cancelling the route redraws at once too.
+setDirectionsRedraw(() => {
+	updatePlanLine();
+	updateDirections();
+});
 
 /**
  * Called on every live GPS fix: extends the route and guide lines, moves the
@@ -61,6 +74,7 @@ export function updateLiveMap(point, heading, speedMps) {
 
 	updatePlanLine(point);
 	updateGuideLine(point);
+	updateDirections(point);
 
 	const session = state.currentSession;
 

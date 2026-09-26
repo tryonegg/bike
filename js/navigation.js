@@ -17,12 +17,15 @@ import { updateLiveStats, togglePauseSession, endSessionWithConfirm, saveActiveS
 import { applyMapVisualPrefs } from "./map-visuals.js";
 import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, mapTypeNeedsStadiaKey, rebuildTerrain, updateGuideLine } from "./live-map.js";
 import { resetRouteHome } from "./route-home.js";
+import { updateDirections, wireDirections } from "./directions.js";
+import { unlockVoice, voiceChoices, onVoicesChanged, testVoice, speechSupported } from "./voice.js";
 import { openPlanner, openRoutes, wirePlanner } from "./route-plan.js";
 import { renderPostSummary, openPostSession } from "./post-session.js";
 import { renderElevationChart, clearChartHighlight } from "./chart.js";
 import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abortRideSetup } from "./ride-setup.js";
 import { exportAllData, importAllData, deleteAllRides, deleteCurrentRide } from "./data-io.js";
 import { importGpxSession, exportCurrentGpx } from "./gpx.js";
+import { openPathLab, wirePathLab } from "./path-lab.js";
 import { confirmWithModal, closeModal } from "./modal.js";
 import { requestWakeLock, releaseWakeLock, maybeShowInstallBanner } from "./pwa.js";
 
@@ -54,25 +57,10 @@ export function wireEvents() {
 	});
 
 	el.themeToggle.addEventListener("click", (event) => handleThemeClick(event));
-	el.debugThemeToggle.addEventListener("click", (event) => handleThemeClick(event));
 
 	el.mapTypeSelect.addEventListener("change", () => handleMapTypeChange(el.mapTypeSelect));
-	el.debugMapTypeSelect.addEventListener("change", () => handleMapTypeChange(el.debugMapTypeSelect));
 
-	el.terrain3dToggle.addEventListener("click", (event) => handleTerrain3dClick(event));
-	el.debugTerrain3dToggle.addEventListener("click", (event) => handleTerrain3dClick(event));
-
-	// Takes effect from the next ride, which is when the past rides are indexed.
-	el.compareToggle.addEventListener("click", (event) => handleCompareClick(event));
-	el.debugCompareToggle.addEventListener("click", (event) => handleCompareClick(event));
-
-	el.dataSaverToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-data-saver");
-		if (!btn) return;
-		state.prefs.dataSaver = btn.dataset.dataSaver === "on";
-		await setPref("dataSaver", state.prefs.dataSaver);
-		syncToggles();
-	});
+	for (const toggle of el.settingSwitches) toggle.addEventListener("click", handleSwitchClick);
 
 	el.statsSideToggle.addEventListener("click", async (event) => {
 		const btn = event.target.closest("button[data-stats-side]");
@@ -90,24 +78,6 @@ export function wireEvents() {
 		await setPref("calendarColor", state.prefs.calendarColor);
 		syncToggles();
 		await renderPastRides();
-	});
-
-	// Takes effect next time a ride's summary map is opened, not on the map
-	// underneath settings, since there isn't one — settings only opens from home.
-	el.debugAccuracyToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-debug-accuracy]");
-		if (!btn) return;
-		state.prefs.debugGpsAccuracy = btn.dataset.debugAccuracy === "on";
-		await setPref("debugGpsAccuracy", state.prefs.debugGpsAccuracy);
-		syncToggles();
-	});
-
-	el.debugClipWarmupToggle.addEventListener("click", async (event) => {
-		const btn = event.target.closest("button[data-debug-clip-warmup]");
-		if (!btn) return;
-		state.prefs.debugClipGpsWarmup = btn.dataset.debugClipWarmup === "on";
-		await setPref("debugClipGpsWarmup", state.prefs.debugClipGpsWarmup);
-		syncToggles();
 	});
 
 	el.ridesViewToggle.addEventListener("click", async (event) => {
@@ -148,6 +118,8 @@ export function wireEvents() {
 		state.selectedKeepScreenOn = event.target.checked;
 	});
 
+	// Starting a ride is a tap, which is what lets spoken directions play later.
+	el.startActivityBtn.addEventListener("click", unlockVoice);
 	el.startActivityBtn.addEventListener("click", handleStartRideClick);
 
 	el.exportDataBtn.addEventListener("click", exportAllData);
@@ -157,33 +129,22 @@ export function wireEvents() {
 	el.importGpxFileInput.addEventListener("change", importGpxSession);
 	el.deleteAllRidesBtn.addEventListener("click", deleteAllRides);
 
-	el.openSettingsBtn.addEventListener("click", () => {
-		fillSettingsForm();
-		navigateToScreen("settings");
-	});
-
-	// The debug FAB stays up for the whole live ride, so guard against pushing a
-	// duplicate "debug" history entry if it's tapped while already there.
-	el.debugMenuBtn.addEventListener("click", () => {
-		if (state.currentScreen === "debug") return;
-		navigateToScreen("debug");
-	});
-	el.debugBackBtn.addEventListener("click", () => history.back());
+	el.openSettingsBtn.addEventListener("click", openSettings);
+	// Mid-ride, settings is pushed over the active screen, so its back button
+	// returns to the ride without tripping the leave-ride guard.
+	el.rideSettingsBtn.addEventListener("click", openSettings);
+	wirePathLab();
 
 	el.guideContrastToggle.addEventListener("click", (event) => handleGuideContrastClick(event));
-	el.debugGuideContrastToggle.addEventListener("click", (event) => handleGuideContrastClick(event));
 
 	el.markerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
-	el.debugMarkerSizeToggle.addEventListener("click", (event) => handleMarkerSizeClick(event));
 
 	el.backToStartToggle.addEventListener("click", (event) => handleBackToStartClick(event));
-	el.debugBackToStartToggle.addEventListener("click", (event) => handleBackToStartClick(event));
 
-	el.avoidRetraceToggle.addEventListener("click", (event) => handleAvoidRetraceClick(event));
-	el.debugAvoidRetraceToggle.addEventListener("click", (event) => handleAvoidRetraceClick(event));
+	wireDirections();
+	wireVoicePickers();
 
 	el.guideHideDistanceSelect.addEventListener("change", () => handleGuideHideDistanceChange(el.guideHideDistanceSelect));
-	el.debugGuideHideDistanceSelect.addEventListener("change", () => handleGuideHideDistanceChange(el.debugGuideHideDistanceSelect));
 
 	el.statsActivitySelect.addEventListener("change", async () => {
 		state.prefs.statsActivity = el.statsActivitySelect.value;
@@ -303,11 +264,7 @@ export function wireEvents() {
 	});
 }
 
-// The handlers below back both the settings screen's own toggles and
-// their duplicates on the debug screen (see index.html), so the two copies
-// share one place that actually changes state instead of drifting apart.
-
-/** Shared handler for both theme toggles (settings screen and debug screen). */
+/** Handles the theme toggle. */
 async function handleThemeClick(event) {
 	const btn = event.target.closest("button[data-theme]");
 	if (!btn) return;
@@ -320,7 +277,7 @@ async function handleThemeClick(event) {
 	if (state.currentPostSession) renderElevationChart(state.currentPostSession);
 }
 
-/** Shared handler for both map-style selects (settings screen and debug screen). */
+/** Handles the map-style select. */
 async function handleMapTypeChange(select) {
 	state.prefs.mapType = select.value;
 	await setPref("mapType", state.prefs.mapType);
@@ -328,26 +285,49 @@ async function handleMapTypeChange(select) {
 	rebuildMapStyles();
 }
 
-/** Shared handler for both 3D-terrain toggles (settings screen and debug screen). */
-async function handleTerrain3dClick(event) {
-	const btn = event.target.closest("button[data-terrain3d]");
-	if (!btn) return;
-	state.prefs.terrain3d = btn.dataset.terrain3d === "on";
-	await setPref("terrain3d", state.prefs.terrain3d);
+/**
+ * What else has to happen once a switch's preference flips, keyed by the
+ * preference. Switches not listed here only need saving: Compare with past
+ * rides takes effect from the next ride, when past rides are indexed, and the
+ * GPS accuracy ones next time a ride's summary map is opened.
+ */
+const SWITCH_EFFECTS = {
+	terrain3d: rebuildTerrain,
+	// Drops the current route so, mid-ride, the next one follows the new
+	// setting straight away.
+	routeAvoidRetrace: () => {
+		resetRouteHome();
+		updateGuideLine();
+	},
+	navRouteVisual: applyNavPref,
+	navRouteVoice: applyNavPref,
+	navHomeVisual: applyNavPref,
+	navHomeVoice: applyNavPref,
+};
+
+/** Flips the preference a settings switch names, saves it, and applies it. */
+async function handleSwitchClick(event) {
+	const key = event.currentTarget.dataset.switch;
+	if (!(key in state.prefs)) return;
+	state.prefs[key] = !state.prefs[key];
+	await setPref(key, state.prefs[key]);
 	syncToggles();
-	rebuildTerrain();
+	SWITCH_EFFECTS[key]?.(state.prefs[key]);
 }
 
-/** Shared handler for both "compare with past rides" toggles (settings screen and debug screen). */
-async function handleCompareClick(event) {
-	const btn = event.target.closest("button[data-compare]");
-	if (!btn) return;
-	state.prefs.comparePastRides = btn.dataset.compare === "on";
-	await setPref("comparePastRides", state.prefs.comparePastRides);
-	syncToggles();
+/**
+ * Applies a directions switch (route and Back to Start, shown and spoken).
+ * Takes effect mid-ride straight away.
+ *
+ * @param {boolean} on - The switch's new state.
+ */
+function applyNavPref(on) {
+	// Turning one on is a tap, which is what lets the voice play.
+	if (on) unlockVoice();
+	updateDirections();
 }
 
-/** Shared handler for both guide-line-contrast toggles (settings screen and debug screen). */
+/** Handles the guide-line-contrast toggle. */
 async function handleGuideContrastClick(event) {
 	const btn = event.target.closest("button[data-guide-contrast]");
 	if (!btn) return;
@@ -357,7 +337,7 @@ async function handleGuideContrastClick(event) {
 	applyMapVisualPrefs();
 }
 
-/** Shared handler for both distance-marker-size toggles (settings screen and debug screen). */
+/** Handles the distance-marker-size toggle. */
 async function handleMarkerSizeClick(event) {
 	const btn = event.target.closest("button[data-marker-size]");
 	if (!btn) return;
@@ -368,9 +348,9 @@ async function handleMarkerSizeClick(event) {
 }
 
 /**
- * Shared handler for both "Back to Start" toggles (settings screen and debug
- * screen). The debug screen can be opened mid-ride, so the live guide line
- * is redrawn straight away. Leaving Route drops its route and worker.
+ * Handles the "Back to Start" toggle. Settings can be opened mid-ride, so the
+ * live guide line is redrawn straight away. Leaving Route drops its route and
+ * worker.
  */
 async function handleBackToStartClick(event) {
 	const btn = event.target.closest("button[data-back-to-start]");
@@ -380,24 +360,68 @@ async function handleBackToStartClick(event) {
 	syncToggles();
 	if (state.prefs.backToStart !== "route") resetRouteHome();
 	updateGuideLine();
+	updateDirections();
 }
 
 /**
- * Shared handler for both "Avoid Retracing" toggles (settings screen and
- * debug screen). Drops the current route so, mid-ride, the next one follows
- * the new setting straight away.
+ * Wires the voice picker: the voice, its speed and pitch (each saved as it's changed), and the test button. The browser
+ * loads its voices late, so the list is filled in again whenever they change.
  */
-async function handleAvoidRetraceClick(event) {
-	const btn = event.target.closest("button[data-avoid-retrace]");
-	if (!btn) return;
-	state.prefs.routeAvoidRetrace = btn.dataset.avoidRetrace === "on";
-	await setPref("routeAvoidRetrace", state.prefs.routeAvoidRetrace);
-	syncToggles();
-	resetRouteHome();
-	updateGuideLine();
+function wireVoicePickers() {
+	onVoicesChanged(syncVoicePickers);
+	for (const block of el.voiceSettings) {
+		block.querySelector(".voice-select").addEventListener("change", async (event) => {
+			state.prefs.voiceURI = event.target.value;
+			await setPref("voiceURI", state.prefs.voiceURI);
+			syncVoicePickers();
+		});
+		for (const [selector, key] of [
+			[".voice-rate", "voiceRate"],
+			[".voice-pitch", "voicePitch"],
+		]) {
+			const slider = block.querySelector(selector);
+			// The label follows the slider as it moves; the value's saved once let go.
+			slider.addEventListener("input", () => {
+				state.prefs[key] = Number(slider.value);
+				syncVoicePickers();
+			});
+			slider.addEventListener("change", () => setPref(key, state.prefs[key]));
+		}
+		block.querySelector(".voice-test").addEventListener("click", testVoice);
+	}
+	syncVoicePickers();
 }
 
-/** Shared handler for both "Hide Near Start" selects (settings screen and debug screen). */
+/** Brings the voice picker up to date: the device's voices, and the picked voice, speed and pitch. */
+function syncVoicePickers() {
+	const choices = voiceChoices();
+	for (const block of el.voiceSettings) {
+		const select = block.querySelector(".voice-select");
+		const options = [{ value: "", label: "Device default" }, ...choices];
+		if (select.options.length !== options.length || [...select.options].some((option, i) => option.value !== options[i].value)) {
+			// Grouped (your language, other English, …) so a long list can be scanned.
+			const children = [new Option("Device default", "")];
+			for (const choice of choices) {
+				let group = children[children.length - 1];
+				if (!(group instanceof HTMLOptGroupElement) || group.label !== choice.group) {
+					group = document.createElement("optgroup");
+					group.label = choice.group;
+					children.push(group);
+				}
+				group.append(new Option(choice.label, choice.value));
+			}
+			select.replaceChildren(...children);
+		}
+		// A voice picked on another device (or since removed) falls back to the default.
+		select.value = choices.some((choice) => choice.value === state.prefs.voiceURI) ? state.prefs.voiceURI : "";
+		block.querySelector(".voice-rate").value = String(state.prefs.voiceRate);
+		block.querySelector(".voice-pitch").value = String(state.prefs.voicePitch);
+		block.querySelector(".voice-rate-value").textContent = `${state.prefs.voiceRate.toFixed(1)}×`;
+		block.querySelector(".voice-pitch-value").textContent = state.prefs.voicePitch.toFixed(1);
+	}
+}
+
+/** Handles the "Hide Near Start" select. */
 async function handleGuideHideDistanceChange(select) {
 	state.prefs.guideHideDistance = Number(select.value);
 	await setPref("guideHideDistance", state.prefs.guideHideDistance);
@@ -416,32 +440,19 @@ export function syncToggles() {
 
 	const themeButtons = el.themeToggle.querySelectorAll("button");
 	themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
-	const debugThemeButtons = el.debugThemeToggle.querySelectorAll("button");
-	debugThemeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
 
 	// Styles with no free rendition (Classic, Satellite, Toner, Terrain) stay
 	// selectable — a saved choice shouldn't vanish — but are greyed out until a
 	// Stadia key makes them show anything but plain Road.
 	const noStadiaKey = !state.prefs.stadiaKey;
-	for (const select of [el.mapTypeSelect, el.debugMapTypeSelect]) {
-		select.value = state.prefs.mapType;
-		for (const option of select.options) {
-			option.disabled = noStadiaKey && mapTypeNeedsStadiaKey(option.value);
-		}
+	el.mapTypeSelect.value = state.prefs.mapType;
+	for (const option of el.mapTypeSelect.options) {
+		option.disabled = noStadiaKey && mapTypeNeedsStadiaKey(option.value);
 	}
 
-	const terrain3dButtons = el.terrain3dToggle.querySelectorAll("button");
-	terrain3dButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.terrain3d === "on") === state.prefs.terrain3d));
-	const debugTerrain3dButtons = el.debugTerrain3dToggle.querySelectorAll("button");
-	debugTerrain3dButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.terrain3d === "on") === state.prefs.terrain3d));
-
-	const compareButtons = el.compareToggle.querySelectorAll("button");
-	compareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
-	const debugCompareButtons = el.debugCompareToggle.querySelectorAll("button");
-	debugCompareButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.compare === "on") === state.prefs.comparePastRides));
-
-	const dataSaverButtons = el.dataSaverToggle.querySelectorAll("button");
-	dataSaverButtons.forEach((btn) => btn.classList.toggle("active", (btn.dataset.dataSaver === "on") === state.prefs.dataSaver));
+	for (const toggle of el.settingSwitches) {
+		toggle.setAttribute("aria-checked", String(Boolean(state.prefs[toggle.dataset.switch])));
+	}
 
 	const sideButtons = el.statsSideToggle.querySelectorAll("button");
 	sideButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.statsSide === state.prefs.rideStatsSide));
@@ -450,15 +461,8 @@ export function syncToggles() {
 	colorButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.calendarColor === state.prefs.calendarColor));
 	el.calendarColorNote.textContent = CALENDAR_COLOR_NOTES[state.prefs.calendarColor];
 
-	const debugAccuracyButtons = el.debugAccuracyToggle.querySelectorAll("button");
-	debugAccuracyButtons.forEach((btn) =>
-		btn.classList.toggle("active", (btn.dataset.debugAccuracy === "on") === state.prefs.debugGpsAccuracy),
-	);
-
-	const debugClipWarmupButtons = el.debugClipWarmupToggle.querySelectorAll("button");
-	debugClipWarmupButtons.forEach((btn) =>
-		btn.classList.toggle("active", (btn.dataset.debugClipWarmup === "on") === state.prefs.debugClipGpsWarmup),
-	);
+	// Clipping the warm-up only changes the accuracy overlay.
+	el.clipWarmupRow.hidden = !state.prefs.debugGpsAccuracy;
 
 	const viewButtons = el.ridesViewToggle.querySelectorAll("button");
 	viewButtons.forEach((btn) => {
@@ -471,39 +475,32 @@ export function syncToggles() {
 	guideContrastButtons.forEach((btn) =>
 		btn.classList.toggle("active", btn.dataset.guideContrast === state.prefs.guideContrast),
 	);
-	const debugGuideContrastButtons = el.debugGuideContrastToggle.querySelectorAll("button");
-	debugGuideContrastButtons.forEach((btn) =>
-		btn.classList.toggle("active", btn.dataset.guideContrast === state.prefs.guideContrast),
-	);
 
 	const markerSizeButtons = el.markerSizeToggle.querySelectorAll("button");
 	markerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
-	const debugMarkerSizeButtons = el.debugMarkerSizeToggle.querySelectorAll("button");
-	debugMarkerSizeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.markerSize === state.prefs.markerSize));
 
-	for (const toggle of [el.backToStartToggle, el.debugBackToStartToggle]) {
-		toggle.querySelectorAll("button").forEach((btn) =>
-			btn.classList.toggle("active", btn.dataset.backToStart === state.prefs.backToStart),
-		);
-	}
+	el.backToStartToggle.querySelectorAll("button").forEach((btn) =>
+		btn.classList.toggle("active", btn.dataset.backToStart === state.prefs.backToStart),
+	);
 	// Avoid Retracing only means anything for Route, so it only shows then.
-	for (const [row, toggle] of [
-		[el.avoidRetraceRow, el.avoidRetraceToggle],
-		[el.debugAvoidRetraceRow, el.debugAvoidRetraceToggle],
-	]) {
-		row.hidden = state.prefs.backToStart !== "route";
-		toggle.querySelectorAll("button").forEach((btn) =>
-			btn.classList.toggle("active", (btn.dataset.avoidRetrace === "on") === state.prefs.routeAvoidRetrace),
-		);
-	}
+	el.avoidRetraceRow.hidden = state.prefs.backToStart !== "route";
+	// Directions home need Back to Start's Route to follow.
+	for (const row of el.navHomeRows) row.hidden = state.prefs.backToStart !== "route";
+	// The voice picker matters once anything's spoken, and needs speech to pick from.
+	const speaking = state.prefs.navRouteVoice || (state.prefs.backToStart === "route" && state.prefs.navHomeVoice);
+	for (const block of el.voiceSettings) block.hidden = !speechSupported || !speaking;
 
 	// Option values are meters, fixed; only the displayed label follows the unit.
-	for (const select of [el.guideHideDistanceSelect, el.debugGuideHideDistanceSelect]) {
-		select.value = String(state.prefs.guideHideDistance);
-		for (const option of select.options) {
-			const meters = Number(option.value);
-			option.textContent = meters === 0 ? "Off" : formatElevation(meters, state.prefs.unit);
-		}
+	// Each card's subtitle counts the settings it shows, nested ones aside.
+	for (const card of el.settingsCards) {
+		const count = card.querySelectorAll(":scope > .setting-row:not(.nested):not(.info-row):not([hidden]), :scope > div:not([hidden]) > .setting-row").length;
+		card.querySelector(".settings-card-count").textContent = count === 1 ? "1 setting" : `${count} settings`;
+	}
+
+	el.guideHideDistanceSelect.value = String(state.prefs.guideHideDistance);
+	for (const option of el.guideHideDistanceSelect.options) {
+		const meters = Number(option.value);
+		option.textContent = meters === 0 ? "Off" : formatElevation(meters, state.prefs.unit);
 	}
 }
 
@@ -547,10 +544,24 @@ export function applyTheme() {
 	document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#111413" : "#fcfcfa");
 }
 
-/** Populates the settings screen's form fields from `state.prefs`. */
+/**
+ * Populates the settings screen's form fields from `state.prefs`. Mid-ride,
+ * the Data actions (import, delete and the like) are swapped for a note, since
+ * they could overwrite or remove the ride being recorded.
+ */
 export function fillSettingsForm() {
 	el.stadiaKeyInput.value = state.prefs.stadiaKey;
 	el.statsActivitySelect.value = state.prefs.statsActivity;
+	const riding = Boolean(state.currentSession);
+	el.dataActions.hidden = riding;
+	el.dataActionsRideNote.hidden = !riding;
+}
+
+/** Opens the settings screen, from home or from a live ride. */
+function openSettings() {
+	if (state.currentScreen === "settings") return;
+	fillSettingsForm();
+	navigateToScreen("settings");
 }
 
 /**
@@ -568,7 +579,7 @@ export async function leavePostSession() {
 /**
  * Shows one screen and hides the rest, and records which one is current.
  * Does not touch browser history — see `navigateToScreen` for that.
- * @param {"home"|"active"|"post"|"settings"|"debug"|"plan"|"routes"} name
+ * @param {"home"|"active"|"post"|"settings"|"plan"|"routes"|"pathlab"} name
  */
 export function showScreen(name) {
 	Object.entries(el.screens).forEach(([key, screen]) => {
@@ -582,7 +593,7 @@ export function showScreen(name) {
  * Shows a screen and updates browser history to match, so back/forward and
  * the popstate handler in `wireEvents` can navigate between the app's screens.
  *
- * @param {"home"|"active"|"post"|"settings"|"debug"|"plan"|"routes"} name
+ * @param {"home"|"active"|"post"|"settings"|"plan"|"routes"|"pathlab"} name
  * @param {"push"|"replace"|string} [mode] - `"push"` adds a new history
  *   entry (the normal case, e.g. following a link/button); `"replace"` swaps
  *   the current entry (used when restoring state without wanting an extra
@@ -651,8 +662,8 @@ export async function applyHistoryState(targetState, mode = "none", savedSession
 			return;
 		}
 
-		if (targetState.screen === "debug") {
-			navigateToScreen("debug", mode);
+		if (targetState.screen === "pathlab") {
+			await openPathLab(mode);
 			return;
 		}
 

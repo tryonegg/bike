@@ -27,6 +27,7 @@
   --rule: rgba(20, 24, 26, 0.1);
   --header-border: rgba(20, 24, 26, 0.08);
   --btn-border: rgba(20, 24, 26, 0.12);
+  --settings-bg: #f1f2ee;
   --accent: #2f8f63;
   --primary: #0b5d3b;
   --primary-contrast: #ffffff;
@@ -65,6 +66,7 @@
   --rule: rgba(255, 255, 255, 0.14);
   --header-border: rgba(255, 255, 255, 0.11);
   --btn-border: rgba(255, 255, 255, 0.16);
+  --settings-bg: #0c0e0d;
   --accent: #5cc793;
   --danger: #e0736a;
   --danger-fill: #b8473d;
@@ -298,34 +300,6 @@ button {
   mask: url("icons/settings.svg") center / contain no-repeat;
 }
 
-/* The debug menu's entry point, shown only while a ride is live (see
-   syncDebugButton in live-session.js). Pinned above the active ride's fixed
-   map overlay. Uses the same centered-column trick as .bottom-bar so it lines
-   up with the screen's right edge rather than the viewport's on wide displays. */
-.debug-fab-wrap {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  z-index: 1000;
-  width: min(100%, 720px);
-  transform: translateX(-50%);
-  display: flex;
-  justify-content: flex-end;
-  padding: calc(14px + var(--safe-top)) 16px 0 0;
-  pointer-events: none;
-}
-:has(#debugScreen.active){
-  .debug-fab-wrap {
-    z-index: -1;
-  }
-}
-
-.debug-fab-wrap .round-btn {
-  pointer-events: auto;
-  background: var(--raised);
-  box-shadow: var(--chip-shadow);
-}
-
 /* ---- Segmented toggle ---- */
 
 .toggle-pill {
@@ -442,6 +416,13 @@ button {
 
 .app-bar-titles h2 {
   font-size: 17px;
+}
+
+/* A short explanation under a screen's title. */
+.app-bar-note {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 /* ---- Home ---- */
@@ -1058,6 +1039,23 @@ button {
   bottom: calc(100px + var(--safe-bottom));
 }
 
+/* Settings, reachable mid-ride. Mirrors Re-center on the map's other side. */
+.map-chip.ride-settings {
+  right: 14px;
+  bottom: calc(100px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+}
+
+.map-chip.ride-settings .settings-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .ride-controls {
   position: absolute;
   left: 0;
@@ -1167,7 +1165,8 @@ button {
   transform: scale(1);
 }
 
-.active-screen[data-phase] .map-chip.recenter {
+.active-screen[data-phase] .map-chip.recenter,
+.active-screen[data-phase] .map-chip.ride-settings {
   display: none;
 }
 
@@ -1322,6 +1321,11 @@ button {
     bottom: calc(14px + var(--safe-bottom));
   }
 
+  .map-chip.ride-settings {
+    right: calc(14px + env(safe-area-inset-right, 0px));
+    bottom: calc(14px + var(--safe-bottom));
+  }
+
   .live-map .maplibregl-ctrl-bottom-right,
   .live-map .maplibregl-ctrl-bottom-left {
     bottom: 0;
@@ -1376,6 +1380,10 @@ button {
 
   .active-screen.stats-right .map-chip.recenter {
     left: calc(14px + env(safe-area-inset-left, 0px));
+  }
+
+  .active-screen.stats-right .map-chip.ride-settings {
+    right: calc(var(--ride-column) + 14px);
   }
 
   /* Pre-ride -> active transition, landscape: the stats column slides in from
@@ -1451,6 +1459,11 @@ button {
 }
 
 .plan-icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.lab-icon {
   width: 22px;
   height: 22px;
 }
@@ -1591,6 +1604,313 @@ button {
   font-size: 12px;
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- The voice picker for spoken directions ---- */
+
+/* Device voice names run long ("Google UK English Female (en-GB)"). */
+.voice-settings .select-wrap {
+  min-width: 0;
+  max-width: 62%;
+}
+
+.voice-settings .voice-select {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-slider {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.voice-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.voice-slider output {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-test {
+  margin-top: 14px;
+}
+
+/* ---- Turn-by-turn directions: a banner that hangs off the bottom of the
+   ride strip, edge to edge, and the sheet its close button opens ---- */
+
+.nav-banner {
+  margin: 18px -22px -18px;
+  background: var(--primary);
+  color: #fff;
+}
+
+.nav-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 22px 14px;
+}
+
+.nav-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.nav-icon svg {
+  width: 34px;
+  height: 34px;
+}
+
+.nav-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-distance {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-distance:has(#navDistance:empty) {
+  display: none;
+}
+
+.nav-unit {
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.nav-instruction {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.nav-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* How far along the rider is toward the next turn. */
+.nav-progress {
+  height: 4px;
+  margin: 0 22px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.nav-progress span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: #fff;
+  transition: width 0.8s linear;
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.nav-row + .nav-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nav-row-label {
+  flex: none;
+  width: 44px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.nav-row-icon {
+  flex: none;
+  display: grid;
+}
+
+.nav-row-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-row-value {
+  flex: none;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The sheet: slides up over the ride, which carries on underneath. */
+.nav-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(10, 12, 11, 0.45);
+}
+
+.nav-sheet {
+  width: min(100%, 560px);
+  padding: 10px 22px calc(22px + var(--safe-bottom));
+  border-radius: 28px 28px 0 0;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2);
+  animation: nav-sheet-up 0.25s ease-out;
+}
+
+@keyframes nav-sheet-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+}
+
+.nav-sheet-grip {
+  width: 44px;
+  height: 5px;
+  margin: 0 auto 18px;
+  border-radius: 999px;
+  background: var(--rule, rgba(20, 24, 26, 0.15));
+}
+
+.nav-sheet h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.nav-sheet-note {
+  margin: 6px 0 18px;
+  color: var(--muted);
+}
+
+.nav-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--btn-border);
+  border-radius: 18px;
+  background: var(--track);
+  color: var(--text);
+  text-align: left;
+}
+
+.nav-option-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+}
+
+.nav-option-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.nav-option.danger .nav-option-icon {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.nav-option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nav-option-text strong {
+  font-size: 17px;
+}
+
+.nav-option.danger .nav-option-text strong {
+  color: var(--danger);
+}
+
+.nav-option-text span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.nav-option-next {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.nav-option-next strong {
+  color: var(--primary);
+  font-size: 15px;
+}
+
+.nav-keep {
+  width: 100%;
+  margin-top: 6px;
 }
 
 /* ---- Map markers ---- */
@@ -1917,10 +2237,6 @@ button {
 
 /* ---- Settings ---- */
 
-.settings-section-label {
-  padding: 20px 22px 6px;
-}
-
 .settings-group {
   border-bottom: 1px solid var(--hairline);
 }
@@ -2021,30 +2337,192 @@ button {
   color: var(--text);
 }
 
+/* The settings screen: one collapsible card per section. */
+#settingsScreen {
+  background: var(--settings-bg);
+}
+
+.settings-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 16px 32px;
+}
+
+.settings-card {
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 22px;
+  background: var(--raised);
+}
+
+.settings-card[open] {
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.settings-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px 18px 14px 20px;
+  cursor: pointer;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-card-head::-webkit-details-marker {
+  display: none;
+}
+
+.settings-card-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-card-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The count only shows once the card is open, like a subtitle for its list. */
+.settings-card-count {
+  display: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.settings-card[open] .settings-card-count {
+  display: block;
+}
+
+.settings-card-chevron {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--track);
+  color: var(--text);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.settings-card-chevron::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-top: -4px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease, margin 0.2s ease;
+}
+
+.settings-card[open] .settings-card-chevron {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.settings-card[open] .settings-card-chevron::before {
+  margin-top: 4px;
+  transform: rotate(-135deg);
+}
+
+.settings-card-head:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: 22px;
+}
+
+/* Units and Theme: always shown, so no header and no rule above the first row. */
+.settings-card-plain > .setting-row:first-child {
+  border-top: 0;
+}
+
+.settings-card .setting-row {
+  padding: 16px 20px;
+}
+
+/* An option that belongs to the one above it, such as its voice. */
+.settings-card .setting-row.nested {
+  padding-left: 40px;
+}
+
+.nested-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.nest-arrow {
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.settings-card .setting-row.nested .setting-note {
+  margin-left: 26px;
+}
+
+.info-row .setting-note {
+  margin-top: 0;
+}
+
+/* An on/off switch. The knob slides right and the track fills when on. */
+.switch {
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--btn-border);
+  transition: background-color 0.2s ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 24, 26, 0.25);
+  transition: transform 0.2s ease;
+}
+
+.switch[aria-checked="true"] {
+  background: var(--primary);
+  box-shadow: none;
+}
+
+.switch[aria-checked="true"]::after {
+  transform: translateX(22px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .data-buttons {
   display: flex;
   gap: 10px;
-  padding: 6px 22px 0;
 }
 
 .data-buttons .btn {
   flex: 1;
   height: 48px;
   border-radius: 999px;
-  font-size: 14px;
-}
-
-.data-buttons-note {
-  padding: 8px 22px 0;
-}
-
-.danger-zone {
-  padding: 12px 22px 0;
-}
-
-.danger-zone .btn {
-  width: 100%;
-  height: 48px;
   font-size: 14px;
 }
 
@@ -2138,4 +2616,90 @@ button {
   50% {
     transform: scale(1.06);
   }
+}
+
+/* ---- Path Lab ---- */
+
+.path-lab-select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--btn-border);
+  border-radius: 12px;
+  background: var(--raised);
+}
+
+.path-lab-range {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.path-lab-second {
+  margin-top: 16px;
+}
+
+.path-lab-checks {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.path-lab-map {
+  height: 46vh;
+  background: var(--map-bg);
+  border-top: 1px solid var(--header-border);
+  border-bottom: 1px solid var(--header-border);
+}
+
+.path-lab-note {
+  max-width: none;
+  padding: 0 22px;
+}
+
+.path-lab-table-wrap {
+  overflow-x: auto;
+  padding: 8px 0;
+}
+
+.path-lab-table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.path-lab-table th,
+.path-lab-table td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.path-lab-table th:first-child,
+.path-lab-table td:first-child {
+  position: sticky;
+  left: 0;
+  text-align: left;
+  padding-left: 22px;
+  background: var(--bg);
+}
+
+.path-lab-table th {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.path-lab-table tbody tr {
+  cursor: pointer;
+}
+
+.path-lab-table tbody tr.selected td {
+  background: var(--raised);
+  font-weight: 600;
+}
+
+.path-lab-table td.best {
+  color: #2e9d57;
+  font-weight: 700;
 }

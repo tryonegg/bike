@@ -20,13 +20,18 @@
  * - {id, type: "snap", point, profile, radius} — the nearest point, within
  *   `radius` meters, on a way the profile can use, for placing a planned
  *   route's point on the road or path the rider meant.
- * Message out: {id, route: {coords, meters}|null, stats}, {id, fetched},
- * {id, profile}, {id, snapped: [lng, lat]|null, meters}, or {id, error}.
+ * - {id, type: "directions", coords, profile} — turn-by-turn steps along a
+ *   line routed elsewhere (a planned route, followed as is), from the road
+ *   graph rebuilt around it. Routes from this worker come with theirs.
+ * Message out: {id, route: {coords, meters, steps}|null, stats}, {id, fetched},
+ * {id, profile}, {id, snapped: [lng, lat]|null, meters}, {id, steps}, or
+ * {id, error}.
  */
 
 import { decodeLineLayer } from "./mvt.js";
 import { DEM_TILE_URL, DEM_MAX_ZOOM } from "./constants.js";
 import { buildGraph, findRoute, markRetraced, tileFor, toUnits, toLngLat, usableWay, TILE_ZOOM } from "./route-graph.js";
+import { buildWayIndex, routeSteps } from "./route-steps.js";
 
 // The service worker's tile caches, matched by prefix so a version bump there
 // doesn't need a matching change here.
@@ -50,6 +55,9 @@ const LEG_CORRIDOR_SHARE = 0.3;
 const LEG_MAX_TILES = 200;
 // An imported route's tiles are looked up at points this far apart.
 const PREFETCH_STEP_M = 100;
+// A line routed elsewhere (a planned route, an imported track) is taken to
+// turn at a junction when it passes within this many meters of it.
+const DIRECTIONS_JUNCTION_REACH_M = 8;
 // Elevation profiles sample the route every ELEVATION_STEP_M, or further
 // apart on a long route so there are no more than ELEVATION_MAX_SAMPLES.
 // Terrain tiles are 256 pixels, and at DEM_MAX_ZOOM a pixel is about 15 m.
@@ -74,7 +82,9 @@ self.addEventListener("message", async (event) => {
 	// goalKey is only passed back, so a follower can tell which goal it asked about.
 	const { id, type, goalKey } = event.data;
 	try {
-		const handler = { leg: routeLeg, prefetch: prefetchLine, elevation: elevationProfile, snap: snapPoint }[type] ?? routeHome;
+		const handler =
+			{ leg: routeLeg, prefetch: prefetchLine, elevation: elevationProfile, snap: snapPoint, snapTrack, directions: routeDirections }[type] ??
+			routeHome;
 		self.postMessage({ id, goalKey, ...(await handler(event.data)) });
 	} catch (error) {
 		self.postMessage({ id, goalKey, error: String(error?.message ?? error) });
@@ -96,11 +106,17 @@ async function routeHome({ start, rider, track, profile, avoidRetrace }) {
 			const tile = await loadTile(url);
 			if (tile) tiles.push(tile);
 		}
-		built = { key, trackLength: track.length, graph: buildGraph({ tiles, start, track, profile }) };
+		built = { key, trackLength: track.length, tiles, graph: buildGraph({ tiles, start, track, profile }) };
 	}
 
 	if (avoidRetrace) markRetraced(built.graph, track);
 	const route = findRoute(built.graph, rider, { avoidRetrace });
+	if (route) {
+		// A route routed on this graph runs through its nodes, so its junctions
+		// are exact.
+		built.index ??= buildWayIndex(built.tiles);
+		route.steps = routeSteps({ coords: route.coords, graph: built.graph, index: built.index, junctionReach: 1 });
+	}
 	return {
 		route,
 		stats: { tiles: urls.length, ...built.graph.stats, ms: Math.round(performance.now() - began) },
@@ -183,8 +199,100 @@ async function snapPoint({ point, profile, radius }) {
 		: { snapped: null, meters: null };
 }
 
+/**
+ * Snaps a whole recorded track to the road network, for the Path Lab. Each
+ * point goes to the nearest usable way within `maxRoad` meters (for a road) or
+ * `maxPath` meters (for a path or track), whichever way is nearer, but a way
+ * touching the one it was last on wins if it is no more than `sticky` meters
+ * farther (and within its own limit), so a ride on one road doesn't hop to a
+ * parallel one. Downloads any missing tiles, as planning does.
+ *
+ * @param {Object} input
+ * @param {Array<[number, number]>} input.points - [lng, lat] each.
+ * @returns {Promise<{snapped: Array<[number, number]|null>, meters: Array<number|null>, stats: Object}>}
+ *   Per point: where it snapped to and how far that moved it, or null when no
+ *   way was in reach.
+ */
+async function snapTrack({ points, profile, maxRoad, maxPath, sticky }) {
+	const began = performance.now();
+	const lat = points[0][1];
+	const reach = Math.max(maxRoad, maxPath) / metersPerUnitAt(lat);
+	const wanted = new Set();
+	for (const point of points) {
+		const [x, y] = toUnits(point);
+		for (const cx of [x - reach, x + reach]) {
+			for (const cy of [y - reach, y + reach]) wanted.add(`${Math.floor(cx / 4096)}/${Math.floor(cy / 4096)}`);
+		}
+	}
+	const cached = await cachedTiles();
+	const fetched = await fetchMissing([...wanted], cached);
+
+	const tiles = [];
+	for (const key of wanted) {
+		const url = cached.get(key);
+		const tile = url && (await loadTile(url));
+		if (tile) tiles.push(tile);
+	}
+	const graph = buildGraph({ tiles, start: points[0], profile });
+	const stickyUnits = sticky / graph.metersPerUnit;
+	const roadUnits = maxRoad / graph.metersPerUnit;
+	const pathUnits = maxPath / graph.metersPerUnit;
+	const limitOf = (edge) => (graph.edgePath[edge] ? pathUnits : roadUnits);
+
+	const snapped = [];
+	const meters = [];
+	let previous = null;
+	for (const point of points) {
+		const [x, y] = toUnits(point);
+		const road = graph.nearestEdge(x, y, roadUnits, (edge) => !graph.edgePath[edge]);
+		const path = graph.nearestEdge(x, y, pathUnits, (edge) => graph.edgePath[edge]);
+		let best = road && path ? (path.distance < road.distance ? path : road) : (road ?? path);
+		if (best && previous !== null && best.edge !== previous) {
+			const near = new Set([previous]);
+			for (const node of [graph.edgeA[previous], graph.edgeB[previous]]) {
+				for (const code of graph.arcsEdge[node]) near.add(code >> 1);
+			}
+			const stay = graph.nearestEdge(x, y, best.distance + stickyUnits, (edge) => near.has(edge));
+			if (stay && stay.distance <= limitOf(stay.edge)) best = stay;
+		}
+		previous = best ? best.edge : null;
+		snapped.push(best ? toLngLat([best.x, best.y]) : null);
+		meters.push(best ? best.distance * graph.metersPerUnit : null);
+	}
+	return {
+		snapped,
+		meters,
+		stats: { tiles: tiles.length, wanted: wanted.size, fetched, ...graph.stats, ms: Math.round(performance.now() - began) },
+	};
+}
+
 /** Downloads the tiles a line passes through that aren't cached yet. */
 async function prefetchLine({ coords }) {
+	return { fetched: await fetchMissing(lineTileKeys(coords), await cachedTiles()) };
+}
+
+/**
+ * Turn-by-turn steps along a line routed elsewhere: the road graph is
+ * rebuilt from the tiles it passes through (downloading any that are
+ * missing, where that's possible) and the line matched to its junctions.
+ * @returns {Promise<{steps: Array<Object>}>}
+ */
+async function routeDirections({ coords, profile }) {
+	const wanted = lineTileKeys(coords);
+	const cached = await cachedTiles();
+	await fetchMissing(wanted, cached);
+	const tiles = [];
+	for (const key of wanted) {
+		const url = cached.get(key);
+		const tile = url && (await loadTile(url));
+		if (tile) tiles.push(tile);
+	}
+	const graph = buildGraph({ tiles, start: coords[coords.length - 1], profile });
+	return { steps: routeSteps({ coords, graph, index: buildWayIndex(tiles), junctionReach: DIRECTIONS_JUNCTION_REACH_M }) };
+}
+
+/** The tiles a line passes through, as "x/y" keys. */
+function lineTileKeys(coords) {
 	const wanted = new Set();
 	for (let i = 0; i < coords.length; i++) {
 		const tile = tileFor(coords[i]);
@@ -200,7 +308,7 @@ async function prefetchLine({ coords }) {
 			}
 		}
 	}
-	return { fetched: await fetchMissing([...wanted], await cachedTiles()) };
+	return [...wanted];
 }
 
 /**
@@ -487,8 +595,11 @@ async function loadTile(url) {
 	const response = await caches.match(url);
 	if (!response) return null;
 	const match = TILE_PATH.exec(new URL(url).pathname);
-	const layer = decodeLineLayer(await response.arrayBuffer(), "transportation");
-	const tile = layer ? { x: Number(match[1]), y: Number(match[2]), extent: layer.extent, features: layer.features } : null;
+	const data = await response.arrayBuffer();
+	const layer = decodeLineLayer(data, "transportation");
+	// Street names, for directions (route-steps.js).
+	const names = decodeLineLayer(data, "transportation_name")?.features ?? [];
+	const tile = layer ? { x: Number(match[1]), y: Number(match[2]), extent: layer.extent, features: layer.features, names } : null;
 
 	decodedTiles.set(url, tile);
 	if (decodedTiles.size > DECODED_TILE_LIMIT) decodedTiles.delete(decodedTiles.keys().next().value);

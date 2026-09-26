@@ -21,9 +21,20 @@ import { haversineMeters } from "./format.js";
  * @returns {{
  *   onChange: (fn: () => void) => void,
  *   from: (rider: {lat: number, lng: number}, goal: [number, number], session: Object,
- *     options: {profile: "bike"|"foot", avoidRetrace?: boolean}) => ({coords: Array<[number, number]>, meters: number}|null),
+ *     options: {profile: "bike"|"foot", avoidRetrace?: boolean}) => (FollowedRoute|null),
  *   reset: () => void,
  * }}
+ *
+ * @typedef {Object} FollowedRoute
+ * @property {Array<[number, number]>} coords - Rider first, goal last.
+ * @property {number} meters - Its length.
+ * @property {number} along - How far the rider is along the whole route, in
+ *   meters (by `total`'s reckoning).
+ * @property {number} total - The whole route's length as routed.
+ * @property {Array<Object>} steps - Its turn-by-turn steps (route-steps.js),
+ *   each with `along` in the same reckoning as `along` above.
+ * @property {boolean} offRoute - Whether the rider has left it (a new one is
+ *   on its way).
  */
 export function createRouteFollower(name) {
 	let worker = null;
@@ -41,6 +52,7 @@ export function createRouteFollower(name) {
 	let goalKey = null;
 	let route = null;
 	let routeDistances = null;
+	let routeSteps = [];
 	// Which segment of the route the rider was last matched to.
 	let progressIndex = 0;
 
@@ -59,8 +71,7 @@ export function createRouteFollower(name) {
 	 * rider has left is still returned, with a straight hop from the rider
 	 * back onto it, rather than flicking to nothing and back again.
 	 *
-	 * @returns {{coords: Array<[number, number]>, meters: number}|null} Rider
-	 *   first, goal last, with its length; null while none is known.
+	 * @returns {FollowedRoute|null} Null while none is known.
 	 */
 	function from(rider, goal, session, options) {
 		updateTrack(session);
@@ -69,6 +80,7 @@ export function createRouteFollower(name) {
 			goalKey = key;
 			route = null;
 			routeDistances = null;
+			routeSteps = [];
 			progressIndex = 0;
 			// A new goal is worth asking about straight away.
 			lastRequestAt = 0;
@@ -94,6 +106,7 @@ export function createRouteFollower(name) {
 		goalKey = null;
 		route = null;
 		routeDistances = null;
+		routeSteps = [];
 		progressIndex = 0;
 		track = [];
 		trackSource = null;
@@ -183,6 +196,8 @@ export function createRouteFollower(name) {
 			const [lngB, latB] = route[i];
 			routeDistances.push(routeDistances[i - 1] + haversineMeters(latA, lngA, latB, lngB));
 		}
+		// Measured again here, so steps and the rider's progress share one reckoning.
+		routeSteps = (found.steps ?? []).map((step) => ({ ...step, along: routeDistances[step.index] }));
 		progressIndex = 0;
 		listener?.();
 	}
@@ -207,12 +222,19 @@ export function createRouteFollower(name) {
 		return best;
 	}
 
-	/** The rest of the route from a match, rider first, with its length. */
+	/** The rest of the route from a match, rider first, with its length and the rider's progress. */
 	function routeFromMatch(rider, match) {
 		const { index, t, point, meters } = match;
 		const along = routeDistances[index] + t * (routeDistances[index + 1] - routeDistances[index]);
-		const remaining = routeDistances[routeDistances.length - 1] - along;
-		return { coords: [[rider.lng, rider.lat], point, ...route.slice(index + 1)], meters: meters + remaining };
+		const total = routeDistances[routeDistances.length - 1];
+		return {
+			coords: [[rider.lng, rider.lat], point, ...route.slice(index + 1)],
+			meters: meters + total - along,
+			along,
+			total,
+			steps: routeSteps,
+			offRoute: meters > ROUTE_OFF_ROUTE_M,
+		};
 	}
 
 	return {
@@ -221,6 +243,41 @@ export function createRouteFollower(name) {
 		},
 		from,
 		reset,
+	};
+}
+
+/**
+ * Tracks the rider's progress along a fixed line (a planned route followed
+ * as is), the way a follower tracks its route: matched a little ahead of
+ * where they last were, so a line that doubles back can't skip ahead.
+ *
+ * @param {Array<[number, number]>} coords
+ * @returns {{distances: number[], total: number,
+ *   match: (rider: {lat: number, lng: number}) => {along: number, meters: number}}}
+ *   `distances` is each point's distance along the line; `match` gives how
+ *   far along the rider is and how far off it they are, in meters.
+ */
+export function createLineTracker(coords) {
+	const distances = [0];
+	for (let i = 1; i < coords.length; i++) {
+		distances.push(distances[i - 1] + haversineMeters(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]));
+	}
+	let progressIndex = 0;
+	return {
+		distances,
+		total: distances[distances.length - 1],
+		match(rider) {
+			let best = null;
+			for (let i = progressIndex; i + 1 < coords.length; i++) {
+				if (i > progressIndex && distances[i] - distances[progressIndex] > ROUTE_LOOKAHEAD_M) break;
+				const hit = projectOntoSegment(rider, coords[i], coords[i + 1]);
+				if (!best || hit.meters < best.meters) best = { ...hit, index: i };
+			}
+			if (!best) return { along: distances[distances.length - 1], meters: 0 };
+			if (best.meters <= ROUTE_OFF_ROUTE_M) progressIndex = best.index;
+			const along = distances[best.index] + best.t * (distances[best.index + 1] - distances[best.index]);
+			return { along, meters: best.meters };
+		},
 	};
 }
 

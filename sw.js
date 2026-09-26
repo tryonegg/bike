@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.11.5";
+const CACHE_VERSION = "v1.12.7";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -44,9 +44,14 @@ const APP_MODULES = [
   "./js/chart.js",
   "./js/data-io.js",
   "./js/gpx.js",
+  "./js/path-reduction.js",
+  "./js/path-lab.js",
   // Route home: the worker and what it imports load separately from app.js,
   // so they are listed here to work offline too.
   "./js/route-home.js",
+  "./js/route-steps.js",
+  "./js/directions.js",
+  "./js/voice.js",
   "./js/route-follow.js",
   "./js/ride-plan.js",
   "./js/route-plan.js",

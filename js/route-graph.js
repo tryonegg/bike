@@ -520,11 +520,16 @@ function createGraphStore(metersPerUnit, profile) {
 		}
 		if (best >= 0) return best;
 		const id = graph.addNode(x, y);
-		const key = cx * 1e8 + cy;
+		graph.indexNode(id);
+		return id;
+	};
+
+	/** Adds a node to the snapping hash (graph.node does this for the nodes it makes). */
+	graph.indexNode = (id) => {
+		const key = Math.floor(graph.x[id] / NODE_CELL_UNITS) * 1e8 + Math.floor(graph.y[id] / NODE_CELL_UNITS);
 		let list = graph.nodeCells.get(key);
 		if (!list) graph.nodeCells.set(key, (list = []));
 		list.push(id);
-		return id;
 	};
 
 	graph.addArc = (from, to, cost, edgeCode) => {
@@ -693,6 +698,8 @@ function splitEdge(graph, { edge, x, y }) {
 	graph.edgeDead[edge] = true;
 
 	const middle = graph.addNode(x, y);
+	// A junction now (the join lands here), so findable by junctionNear.
+	graph.indexNode(middle);
 	const { edgeForward, edgeBackward, edgePath } = graph;
 	const { edgeLevel } = graph;
 	graph.link(a, middle, edgeForward[edge], edgeBackward[edge], edgePath[edge], edgeLevel[edge]);
@@ -833,6 +840,45 @@ export function markRetraced(graph, track) {
 		}
 	}
 	graph.retraceMarkedTo = Math.max(0, track.length - 2);
+}
+
+/**
+ * The nearest junction to (x, y) within `radius` units: a node where three or
+ * more ways meet (the recorded track doesn't count). Directions only give a
+ * turn at a junction, so a bend in a road never reads as one.
+ *
+ * @returns {{node: number, degree: number, distance: number}|null}
+ */
+export function junctionNear(graph, x, y, radius) {
+	graph.degrees ??= new Map();
+	const degreeOf = (node) => {
+		if (!graph.degrees.has(node)) {
+			const neighbours = new Set();
+			const to = graph.arcsTo[node];
+			const codes = graph.arcsEdge[node];
+			for (let k = 0; k < to.length; k++) {
+				if (codes[k] !== undefined && codes[k] >> 1 < graph.roadEdgeCount) neighbours.add(to[k]);
+			}
+			graph.degrees.set(node, neighbours.size);
+		}
+		return graph.degrees.get(node);
+	};
+
+	const reach = Math.ceil(radius / NODE_CELL_UNITS);
+	const cx = Math.floor(x / NODE_CELL_UNITS);
+	const cy = Math.floor(y / NODE_CELL_UNITS);
+	let best = null;
+	for (let dx = -reach; dx <= reach; dx++) {
+		for (let dy = -reach; dy <= reach; dy++) {
+			for (const node of graph.nodeCells.get((cx + dx) * 1e8 + cy + dy) ?? []) {
+				const distance = Math.hypot(graph.x[node] - x, graph.y[node] - y);
+				if (distance > radius || (best && distance >= best.distance)) continue;
+				const degree = degreeOf(node);
+				if (degree >= 3) best = { node, degree, distance };
+			}
+		}
+	}
+	return best;
 }
 
 /**

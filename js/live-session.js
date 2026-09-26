@@ -21,6 +21,7 @@ import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
 import { resetRouteHome } from "./route-home.js";
 import { canFollowPoints, resetRidePlan } from "./ride-plan.js";
+import { hideDirections } from "./directions.js";
 import { navigateToScreen } from "./navigation.js";
 import { requestWakeLock, releaseWakeLock } from "./pwa.js";
 import { confirmWithModal } from "./modal.js";
@@ -87,7 +88,6 @@ export async function startSession(initialPosition, initialHeading = null) {
 		// Where the heading was last set from; see HEADING_MIN_MOVE_M.
 		headingAnchor: null,
 	};
-	syncDebugButton();
 
 	await requestWakeLock();
 
@@ -630,11 +630,6 @@ export function updateLiveStats() {
 	el.elapsedTime.textContent = formatDuration(elapsed);
 }
 
-/** Shows the debug menu's floating button only while a ride is live (in progress, paused or not). */
-function syncDebugButton() {
-	el.debugFab.classList.toggle("hidden", !state.currentSession);
-}
-
 /**
  * Updates the pause button and ride strip's paused/unpaused visual state.
  * @param {boolean} paused
@@ -762,6 +757,7 @@ export async function finalizeSession() {
 	state.rideRoute = null;
 	resetRouteHome();
 	resetRidePlan();
+	hideDirections();
 
 	const saved = {
 		date: session.date,
@@ -785,7 +781,6 @@ export async function finalizeSession() {
 	await clearActiveSessionCheckpoint();
 	state.currentSession = null;
 	state.rideFlowPhase = null;
-	syncDebugButton();
 	setPauseButton(false);
 	return saved;
 }
@@ -813,6 +808,8 @@ export async function saveActiveSessionCheckpoint() {
 			routeMode: session.routeMode ?? "asis",
 			nextWaypoint: session.nextWaypoint ?? 0,
 			lastReached: session.lastReached ?? null,
+			routeCancelled: Boolean(session.routeCancelled),
+			homeDirectionsOff: Boolean(session.homeDirectionsOff),
 			points: session.points,
 			totalDistance: session.totalDistance,
 			movingTime: getElapsedMs(),
@@ -883,6 +880,9 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		routeMode: checkpoint.routeMode === "points" ? "points" : "asis",
 		nextWaypoint: Number.isInteger(checkpoint.nextWaypoint) ? checkpoint.nextWaypoint : 0,
 		lastReached: Array.isArray(checkpoint.lastReached) ? checkpoint.lastReached : null,
+		// Directions the rider stopped (see directions.js) stay stopped.
+		routeCancelled: checkpoint.routeCancelled === true,
+		homeDirectionsOff: checkpoint.homeDirectionsOff === true,
 		points,
 		totalDistance: checkpoint.totalDistance || 0,
 		movingTime: checkpoint.movingTime || 0,
@@ -968,7 +968,6 @@ export async function maybeRecoverSession() {
  */
 async function resumeCheckpointedSession(restored) {
 	state.currentSession = restored;
-	syncDebugButton();
 	state.gpsOutageDetected = false;
 	state.estimatedPointsDuringGap = [];
 	state.velocityEstimate = 0;

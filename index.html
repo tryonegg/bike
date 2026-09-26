@@ -21,10 +21,6 @@
     </div>
   </div>
 
-  <div id="debugFab" class="debug-fab-wrap hidden">
-    <button id="debugMenuBtn" class="round-btn" aria-label="Open debug menu">π</button>
-  </div>
-
   <main id="appRoot">
     <section id="homeScreen" class="screen has-bottom-bar active">
       <header class="app-header">
@@ -82,6 +78,7 @@
       <div class="bottom-bar">
         <button id="openSettingsBtn" class="round-btn bar-round-btn" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
         <button id="openRoutesBtn" class="round-btn bar-round-btn" aria-label="Routes"><span class="plan-icon" aria-hidden="true"></span></button>
+        <button id="openPathLabBtn" class="round-btn bar-round-btn" aria-label="Path Reduction Lab"><svg class="lab-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18 8 9l5 6 8-10"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="13" cy="15" r="1.5" fill="currentColor"/><circle cx="21" cy="5" r="1.5" fill="currentColor"/></svg></button>
         <button id="startRideBtn" class="btn primary pill grow cta">Start New Ride</button>
       </div>
     </section>
@@ -157,13 +154,54 @@
             <div class="pair-value" id="elapsedTime">00:00</div>
           </div>
         </div>
+        <div id="navBanner" class="nav-banner" hidden>
+          <div class="nav-main">
+            <span id="navIcon" class="nav-icon" aria-hidden="true"></span>
+            <div class="nav-text" aria-live="polite">
+              <div class="nav-distance"><span id="navDistance"></span> <span id="navDistanceUnit" class="nav-unit"></span></div>
+              <div id="navInstruction" class="nav-instruction"></div>
+            </div>
+            <button id="navCloseBtn" class="nav-close" aria-label="Stop directions"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg></button>
+          </div>
+          <div class="nav-progress" aria-hidden="true"><span id="navProgress"></span></div>
+          <div id="navThen" class="nav-row">
+            <span class="nav-row-label">Then</span>
+            <span id="navThenIcon" class="nav-row-icon" aria-hidden="true"></span>
+            <span id="navThenText" class="nav-row-text"></span>
+            <span id="navThenDistance" class="nav-row-value"></span>
+          </div>
+          <div class="nav-row nav-stop">
+            <span class="nav-row-label">To</span>
+            <span id="navStopText" class="nav-row-text"></span>
+            <span id="navStopDistance" class="nav-row-value"></span>
+          </div>
+        </div>
       </header>
 
       <button id="recenterBtn" class="map-chip recenter">Re-center</button>
+      <button id="rideSettingsBtn" class="map-chip ride-settings" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
 
       <div class="ride-controls">
         <button id="pauseBtn" class="pause-btn" aria-label="Pause"><span class="pause-icon" aria-hidden="true"></span></button>
         <button id="stopBtn" class="btn primary pill">Finish ride</button>
+      </div>
+
+      <div id="navSheet" class="nav-sheet-backdrop" hidden>
+        <div class="nav-sheet" role="dialog" aria-modal="true" aria-labelledby="navSheetTitle">
+          <div class="nav-sheet-grip" aria-hidden="true"></div>
+          <h3 id="navSheetTitle">Stop directions?</h3>
+          <p class="nav-sheet-note">Your ride keeps recording either way.</p>
+          <button id="navSkipBtn" class="nav-option">
+            <span id="navSkipIcon" class="nav-option-icon" aria-hidden="true"></span>
+            <span class="nav-option-text"><strong>Skip next stop</strong><span id="navSkipDetail"></span></span>
+            <span class="nav-option-next"><span>Next</span><strong id="navSkipNext"></strong></span>
+          </button>
+          <button id="navCancelBtn" class="nav-option danger">
+            <span id="navCancelIcon" class="nav-option-icon" aria-hidden="true"></span>
+            <span class="nav-option-text"><strong id="navCancelTitle">Cancel entire route</strong><span id="navCancelDetail"></span></span>
+          </button>
+          <button id="navKeepBtn" class="btn primary pill nav-keep">Keep directions</button>
+        </div>
       </div>
     </section>
 
@@ -317,329 +355,349 @@
         <h2>Settings</h2>
       </header>
 
-      <h3 class="label settings-section-label">Display</h3>
-      <div class="settings-group">
-        <div class="setting-row" role="group" aria-label="Units">
-          <span>Units</span>
-          <div class="toggle-pill" id="unitToggle">
-            <button data-unit="imperial" class="toggle-option">Imperial</button>
-            <button data-unit="metric" class="toggle-option">Metric</button>
+      <div class="settings-cards">
+        <div class="settings-card settings-card-plain">
+          <div class="setting-row" role="group" aria-label="Units">
+            <span>Units</span>
+            <div class="toggle-pill" id="unitToggle">
+              <button data-unit="imperial" class="toggle-option">Imperial</button>
+              <button data-unit="metric" class="toggle-option">Metric</button>
+            </div>
+          </div>
+          <div class="setting-row" role="group" aria-label="Theme">
+            <span>Theme</span>
+            <div class="toggle-pill" id="themeToggle">
+              <button data-theme="light" class="toggle-option">Light</button>
+              <button data-theme="dark" class="toggle-option">Dark</button>
+            </div>
           </div>
         </div>
-        <div class="setting-row" role="group" aria-label="Theme">
-          <span>Theme</span>
-          <div class="toggle-pill" id="themeToggle">
-            <button data-theme="light" class="toggle-option">Light</button>
-            <button data-theme="dark" class="toggle-option">Dark</button>
-          </div>
-        </div>
-        <div class="setting-row stacked">
-          <div class="setting-row-main">
-            <label for="mapTypeSelect">Map Style</label>
-            <span class="select-wrap">
-              <select id="mapTypeSelect">
-                <option value="road">Road</option>
-                <option value="topo">Topo</option>
-                <option value="bright">Bright</option>
-                <option value="classic">Classic</option>
-                <option value="satellite">Satellite</option>
-                <option value="toner">Toner</option>
-                <option value="terrain">Terrain</option>
-              </select>
+
+        <details class="settings-card" open>
+          <summary class="settings-card-head">
+            <span class="settings-card-titles">
+              <span class="settings-card-title">Map</span>
+              <span class="settings-card-count"></span>
             </span>
+            <span class="settings-card-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <label for="mapTypeSelect">Map style</label>
+              <span class="select-wrap">
+                <select id="mapTypeSelect">
+                  <option value="road">Road</option>
+                  <option value="topo">Topo</option>
+                  <option value="bright">Bright</option>
+                  <option value="classic">Classic</option>
+                  <option value="satellite">Satellite</option>
+                  <option value="toner">Toner</option>
+                  <option value="terrain">Terrain</option>
+                </select>
+              </span>
+            </div>
+            <p class="setting-note">Topo adds hill shading and contour lines. Classic, Satellite, Toner, and Terrain need the Stadia Maps API key below.</p>
           </div>
-          <p class="setting-note">Topo adds hill shading and contour lines. Classic, Satellite, Toner, and Terrain need the Stadia Maps API key below.</p>
-        </div>
-        <div class="setting-row stacked" role="group" aria-label="3D terrain">
-          <div class="setting-row-main">
-            <span>3D Terrain</span>
-            <div class="toggle-pill" id="terrain3dToggle">
-              <button data-terrain3d="off" class="toggle-option">Off</button>
-              <button data-terrain3d="on" class="toggle-option">On</button>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <span id="terrain3dLabel">3D terrain</span>
+              <button class="switch" role="switch" data-switch="terrain3d" aria-labelledby="terrain3dLabel"></button>
+            </div>
+            <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
+          </div>
+          <div class="setting-row" role="group" aria-label="Guide line contrast">
+            <span>Guide line contrast</span>
+            <div class="toggle-pill" id="guideContrastToggle">
+              <button data-guide-contrast="medium" class="toggle-option">Normal</button>
+              <button data-guide-contrast="high" class="toggle-option">High</button>
             </div>
           </div>
-          <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
-        </div>
-        <div class="setting-row stacked" role="group" aria-label="Back to start">
-          <div class="setting-row-main">
-            <span>Back to Start</span>
-            <div class="toggle-pill" id="backToStartToggle">
-              <button data-back-to-start="none" class="toggle-option">None</button>
-              <button data-back-to-start="direct" class="toggle-option">Direct</button>
-              <button data-back-to-start="route" class="toggle-option">Route</button>
+          <div class="setting-row" role="group" aria-label="Distance marker size">
+            <span>Distance marker size</span>
+            <div class="toggle-pill" id="markerSizeToggle">
+              <button data-marker-size="medium" class="toggle-option">Normal</button>
+              <button data-marker-size="large" class="toggle-option">Large</button>
             </div>
           </div>
-          <p class="setting-note">What the ride map shows to lead you home. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
-        </div>
-        <div class="setting-row stacked" id="avoidRetraceRow" role="group" aria-label="Avoid retracing">
-          <div class="setting-row-main">
-            <span>Avoid Retracing</span>
-            <div class="toggle-pill" id="avoidRetraceToggle">
-              <button data-avoid-retrace="off" class="toggle-option">Off</button>
-              <button data-avoid-retrace="on" class="toggle-option">On</button>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <label for="guideHideDistanceSelect">Hide near start</label>
+              <span class="select-wrap">
+                <select id="guideHideDistanceSelect">
+                  <option value="0">Off</option>
+                  <option value="15">15 m</option>
+                  <option value="30">30 m</option>
+                  <option value="60">60 m</option>
+                </select>
+              </span>
             </div>
+            <p class="setting-note">Hides the distance-to-start chip once you're back within this range of the start.</p>
           </div>
-          <p class="setting-note">Keeps the route home off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way home, like out of a dead end.</p>
-        </div>
-        <div class="setting-row" role="group" aria-label="Guide line contrast">
-          <span>Guide Line Contrast</span>
-          <div class="toggle-pill" id="guideContrastToggle">
-            <button data-guide-contrast="medium" class="toggle-option">Normal</button>
-            <button data-guide-contrast="high" class="toggle-option">High</button>
+          <div class="setting-row stacked">
+            <label for="stadiaKeyInput">Stadia Maps API key <span class="muted">(optional)</span></label>
+            <div class="input-with-button">
+              <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+              <button id="saveStadiaKeyBtn" class="btn">Save</button>
+            </div>
+            <p class="setting-note">Without a key, Map style is limited to Road, Topo, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Satellite, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
           </div>
-        </div>
-        <div class="setting-row" role="group" aria-label="Distance marker size">
-          <span>Distance Marker Size</span>
-          <div class="toggle-pill" id="markerSizeToggle">
-            <button data-marker-size="medium" class="toggle-option">Normal</button>
-            <button data-marker-size="large" class="toggle-option">Large</button>
-          </div>
-        </div>
-        <div class="setting-row stacked">
-          <div class="setting-row-main">
-            <label for="guideHideDistanceSelect">Hide Near Start</label>
-            <span class="select-wrap">
-              <select id="guideHideDistanceSelect">
-                <option value="0">Off</option>
-                <option value="15">15 m</option>
-                <option value="30">30 m</option>
-                <option value="60">60 m</option>
-              </select>
+        </details>
+
+        <details class="settings-card">
+          <summary class="settings-card-head">
+            <span class="settings-card-titles">
+              <span class="settings-card-title">Riding</span>
+              <span class="settings-card-count"></span>
             </span>
+            <span class="settings-card-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <span id="navRouteVisualLabel">Route directions</span>
+              <button class="switch" role="switch" data-switch="navRouteVisual" aria-labelledby="navRouteVisualLabel"></button>
+            </div>
+            <p class="setting-note">Shows the next turn, the one after, and the next stop while you follow a planned route.</p>
           </div>
-          <p class="setting-note">Hides the distance-to-start chip once you're back within this range of the start.</p>
-        </div>
-      </div>
+          <div class="setting-row stacked nested">
+            <div class="setting-row-main">
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navRouteVoiceLabel">Route voice</span></span>
+              <button class="switch" role="switch" data-switch="navRouteVoice" aria-labelledby="navRouteVoiceLabel"></button>
+            </div>
+            <p class="setting-note">Speaks each turn as you near it, and each stop as you reach it.</p>
+          </div>
+          <div class="setting-row stacked" role="group" aria-label="Back to start">
+            <div class="setting-row-main">
+              <span>Back to start</span>
+              <div class="toggle-pill" id="backToStartToggle">
+                <button data-back-to-start="none" class="toggle-option">None</button>
+                <button data-back-to-start="direct" class="toggle-option">Direct</button>
+                <button data-back-to-start="route" class="toggle-option">Route</button>
+              </div>
+            </div>
+            <p class="setting-note">What the ride map shows to lead you home. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
+          </div>
+          <div class="setting-row stacked nested" id="avoidRetraceRow">
+            <div class="setting-row-main">
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="avoidRetraceLabel">Avoid retracing</span></span>
+              <button class="switch" role="switch" data-switch="routeAvoidRetrace" aria-labelledby="avoidRetraceLabel"></button>
+            </div>
+            <p class="setting-note">Keeps the route home off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way home, like out of a dead end.</p>
+          </div>
+          <div class="setting-row stacked nested" data-nav-home>
+            <div class="setting-row-main">
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navHomeVisualLabel">Directions home</span></span>
+              <button class="switch" role="switch" data-switch="navHomeVisual" aria-labelledby="navHomeVisualLabel"></button>
+            </div>
+            <p class="setting-note">Shows turn-by-turn directions home once you're away from the start and not following a planned route.</p>
+          </div>
+          <div class="setting-row stacked nested" data-nav-home>
+            <div class="setting-row-main">
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navHomeVoiceLabel">Voice home</span></span>
+              <button class="switch" role="switch" data-switch="navHomeVoice" aria-labelledby="navHomeVoiceLabel"></button>
+            </div>
+            <p class="setting-note">Speaks the turns home.</p>
+          </div>
+          <div class="setting-row stacked voice-settings" data-voice-settings role="group" aria-label="Voice">
+            <div class="setting-row-main">
+              <label for="voiceSelect">Voice</label>
+              <span class="select-wrap">
+                <select id="voiceSelect" class="voice-select">
+                  <option value="">Device default</option>
+                </select>
+              </span>
+            </div>
+            <div class="voice-slider">
+              <label for="voiceRate">Speed</label>
+              <input id="voiceRate" class="voice-rate" type="range" min="0.5" max="2" step="0.1" value="1">
+              <output class="voice-rate-value" for="voiceRate">1.0×</output>
+            </div>
+            <div class="voice-slider">
+              <label for="voicePitch">Pitch</label>
+              <input id="voicePitch" class="voice-pitch" type="range" min="0" max="2" step="0.1" value="1">
+              <output class="voice-pitch-value" for="voicePitch">1.0</output>
+            </div>
+            <button class="btn voice-test" type="button">Test voice</button>
+            <p class="setting-note">The voice that speaks directions, street names included. Voices come from your device, so the list differs between phones and browsers.</p>
+          </div>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <span id="compareLabel">Compare with past rides</span>
+              <button class="switch" role="switch" data-switch="comparePastRides" aria-labelledby="compareLabel"></button>
+            </div>
+            <p class="setting-note">Shows your best pace on roads you've ridden before, in the direction you're heading.</p>
+          </div>
+          <div class="setting-row stacked" role="group" aria-label="Ride stats side">
+            <div class="setting-row-main">
+              <span>Stats side in landscape</span>
+              <div class="toggle-pill" id="statsSideToggle">
+                <button data-stats-side="left" class="toggle-option">Left</button>
+                <button data-stats-side="right" class="toggle-option">Right</button>
+              </div>
+            </div>
+            <p class="setting-note">Which side of the map your speed and ride stats sit on when the phone is sideways.</p>
+          </div>
+        </details>
 
-      <h3 class="label settings-section-label">Riding</h3>
-      <div class="settings-group">
-        <div class="setting-row stacked" role="group" aria-label="Compare with past rides">
-          <div class="setting-row-main">
-            <span>Compare with past rides</span>
-            <div class="toggle-pill" id="compareToggle">
-              <button data-compare="off" class="toggle-option">Off</button>
-              <button data-compare="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">Shows your best pace on roads you've ridden before, in the direction you're heading.</p>
-        </div>
-        <div class="setting-row stacked" role="group" aria-label="Ride stats side">
-          <div class="setting-row-main">
-            <span>Stats Side</span>
-            <div class="toggle-pill" id="statsSideToggle">
-              <button data-stats-side="left" class="toggle-option">Left</button>
-              <button data-stats-side="right" class="toggle-option">Right</button>
-            </div>
-          </div>
-          <p class="setting-note">Which side of the map your speed and ride stats sit on when the phone is sideways.</p>
-        </div>
-      </div>
-
-      <h3 class="label settings-section-label">Home Screen / Past rides</h3>
-      <div class="settings-group">
-        <div class="setting-row stacked" role="group" aria-label="What the past ride bars show">
-          <div class="setting-row-main">
-            <span>Bars Show</span>
-            <div class="toggle-pill" id="calendarColorToggle">
-              <button data-calendar-color="distance" class="toggle-option">Distance</button>
-              <button data-calendar-color="time" class="toggle-option">Time</button>
-              <button data-calendar-color="pace" class="toggle-option">Pace</button>
-            </div>
-          </div>
-          <p class="setting-note" id="calendarColorNote">Longer bars and green mark your longest rides and days, red your shortest.</p>
-        </div>
-        <div class="setting-row stacked">
-          <div class="setting-row-main">
-            <label for="statsActivitySelect">Activity</label>
-            <span class="select-wrap">
-              <select id="statsActivitySelect">
-                <option value="all">All activities</option>
-                <option value="bike">Bike</option>
-                <option value="walk">Walk</option>
-                <option value="hike">Hike</option>
-                <option value="kayak">Kayak</option>
-              </select>
+        <details class="settings-card">
+          <summary class="settings-card-head">
+            <span class="settings-card-titles">
+              <span class="settings-card-title">Home screen &amp; past rides</span>
+              <span class="settings-card-count"></span>
             </span>
+            <span class="settings-card-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="setting-row stacked" role="group" aria-label="What the past ride bars show">
+            <div class="setting-row-main">
+              <span>Bars show</span>
+              <div class="toggle-pill" id="calendarColorToggle">
+                <button data-calendar-color="distance" class="toggle-option">Distance</button>
+                <button data-calendar-color="time" class="toggle-option">Time</button>
+                <button data-calendar-color="pace" class="toggle-option">Pace</button>
+              </div>
+            </div>
+            <p class="setting-note" id="calendarColorNote">Longer bars and green mark your longest rides and days, red your shortest.</p>
           </div>
-          <p class="setting-note">Which activities the This month and Last 7 days totals on the home screen count.</p>
-        </div>
-      </div>
-
-
-      <h3 class="label settings-section-label">Map tiles</h3>
-      <div class="settings-group">
-        <div class="setting-row stacked">
-          <label for="stadiaKeyInput">Stadia Maps API Key <span class="muted">(optional)</span></label>
-          <div class="input-with-button">
-            <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
-            <button id="saveStadiaKeyBtn" class="btn">Save</button>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <label for="statsActivitySelect">Activity</label>
+              <span class="select-wrap">
+                <select id="statsActivitySelect">
+                  <option value="all">All activities</option>
+                  <option value="bike">Bike</option>
+                  <option value="walk">Walk</option>
+                  <option value="hike">Hike</option>
+                  <option value="kayak">Kayak</option>
+                </select>
+              </span>
+            </div>
+            <p class="setting-note">Which activities the This month and Last 7 days totals on the home screen count.</p>
           </div>
-          <p class="setting-note">Without a key, Map Style is limited to Road, Topo, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Satellite, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
-        </div>
-      </div>
+        </details>
 
-      <h3 class="label settings-section-label">Data</h3>
-      <div class="data-buttons">
-        <button id="exportDataBtn" class="btn pill">Export Data</button>
-        <button id="importDataBtn" class="btn pill">Import Data</button>
-        <input id="importFileInput" type="file" accept=".json" hidden>
-      </div>
-      <div class="data-buttons">
-        <button id="importGpxBtn" class="btn pill">Import GPX Ride</button>
-        <input id="importGpxFileInput" type="file" accept=".gpx" hidden>
-      </div>
-      <div class="data-buttons-note">
-        <p class="setting-note">Add a single ride from a GPX file, such as one exported by another tracking app.</p>
-      </div>
-      <div class="danger-zone">
-        <button id="deleteAllRidesBtn" class="btn pill danger-outline">Delete All Past Rides</button>
-        <p class="setting-note">Removes every saved ride from this device. Settings are kept. Export first if you might want them back.</p>
-      </div>
-      <div class="settings-groupg">
-        <div class="setting-row stacked" role="group" aria-label="Data Saver">
-          <div class="setting-row-main">
-            <span>Data Saver</span>
-            <div class="toggle-pill" id="dataSaverToggle">
-              <button data-data-saver="off" class="toggle-option">Off</button>
-              <button data-data-saver="on" class="toggle-option">On</button>
+        <details class="settings-card">
+          <summary class="settings-card-head">
+            <span class="settings-card-titles">
+              <span class="settings-card-title">Ride summary</span>
+              <span class="settings-card-count"></span>
+            </span>
+            <span class="settings-card-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <span id="gpsAccuracyLabel">GPS accuracy overlay</span>
+              <button class="switch" role="switch" data-switch="debugGpsAccuracy" aria-labelledby="gpsAccuracyLabel"></button>
+            </div>
+            <p class="setting-note">On a ride's summary map, colors the route and dots each recorded point by GPS accuracy instead of speed — green is precise, red is imprecise — and flags the single best and worst points. Gaps between dots show where GPS dropped out.</p>
+            <div class="chart-legend accuracy-legend">
+              <span><i class="swatch fast"></i>Precise</span>
+              <span><i class="swatch slow"></i>Imprecise</span>
+              <span><i class="swatch unknown"></i>No accuracy data, or clipped warm-up</span>
             </div>
           </div>
-          <p class="setting-note">Sacrifices some accuracy, but removes redundant data.</p>
-        </div>
+          <div class="setting-row stacked nested" id="clipWarmupRow">
+            <div class="setting-row-main">
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="clipWarmupLabel">Clip GPS warm-up</span></span>
+              <button class="switch" role="switch" data-switch="debugClipGpsWarmup" aria-labelledby="clipWarmupLabel"></button>
+            </div>
+            <p class="setting-note">Grays out the start of the route until GPS accuracy settles down, so a shaky first fix doesn't skew the overlay's colors.</p>
+          </div>
+        </details>
 
+        <details class="settings-card">
+          <summary class="settings-card-head">
+            <span class="settings-card-titles">
+              <span class="settings-card-title">Data</span>
+              <span class="settings-card-count"></span>
+            </span>
+            <span class="settings-card-chevron" aria-hidden="true"></span>
+          </summary>
+          <div id="dataActions">
+            <div class="setting-row stacked">
+              <div class="data-buttons">
+                <button id="exportDataBtn" class="btn pill">Export data</button>
+                <button id="importDataBtn" class="btn pill">Import data</button>
+                <input id="importFileInput" type="file" accept=".json" hidden>
+              </div>
+              <p class="setting-note">Everything on this device, rides, routes and settings, in one file you can import again later.</p>
+            </div>
+            <div class="setting-row stacked">
+              <div class="data-buttons">
+                <button id="importGpxBtn" class="btn pill">Import GPX ride</button>
+                <input id="importGpxFileInput" type="file" accept=".gpx" hidden>
+              </div>
+              <p class="setting-note">Add a single ride from a GPX file, such as one exported by another tracking app.</p>
+            </div>
+            <div class="setting-row stacked">
+              <div class="data-buttons">
+                <button id="deleteAllRidesBtn" class="btn pill danger-outline">Delete all past rides</button>
+              </div>
+              <p class="setting-note">Removes every saved ride from this device. Settings are kept. Export first if you might want them back.</p>
+            </div>
+          </div>
+          <div class="setting-row info-row" id="dataActionsRideNote" hidden>
+            <p class="setting-note">Export, import and delete are available once this ride is finished.</p>
+          </div>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
+              <span id="dataSaverLabel">Data saver</span>
+              <button class="switch" role="switch" data-switch="dataSaver" aria-labelledby="dataSaverLabel"></button>
+            </div>
+            <p class="setting-note">Sacrifices some accuracy, but removes redundant data.</p>
+          </div>
+        </details>
       </div>
     </section>
 
-    <section id="debugScreen" class="screen hidden">
+    <section id="pathLabScreen" class="screen hidden">
       <header class="app-bar">
-        <button id="debugBackBtn" class="round-btn" aria-label="Back">←</button>
-        <h2>Debug</h2>
+        <button id="pathLabBackBtn" class="round-btn" aria-label="Back">←</button>
+        <div class="app-bar-titles">
+          <h2>Path Lab</h2>
+          <p class="app-bar-note">Runs a saved ride through several ways of thinning its recorded points, side by side, and shows which points each keeps and how much path and speed detail it loses.</p>
+        </div>
       </header>
 
-      <h3 class="label settings-section-label">Quick Settings</h3>
       <div class="settings-group">
-        <div class="setting-row" role="group" aria-label="Theme">
-          <span>Theme</span>
-          <div class="toggle-pill" id="debugThemeToggle">
-            <button data-theme="light" class="toggle-option">Light</button>
-            <button data-theme="dark" class="toggle-option">Dark</button>
-          </div>
+        <div class="setting-row stacked">
+          <label for="pathLabRideSelect">Ride</label>
+          <select id="pathLabRideSelect" class="path-lab-select"></select>
         </div>
         <div class="setting-row stacked">
           <div class="setting-row-main">
-            <label for="debugMapTypeSelect">Map Style</label>
-            <span class="select-wrap">
-              <select id="debugMapTypeSelect">
-                <option value="road">Road</option>
-                <option value="topo">Topo</option>
-                <option value="bright">Bright</option>
-                <option value="classic">Classic</option>
-                <option value="satellite">Satellite</option>
-                <option value="toner">Toner</option>
-                <option value="terrain">Terrain</option>
-              </select>
-            </span>
+            <label for="pathLabBudget">Keep about</label>
+            <output id="pathLabBudgetValue">10%</output>
           </div>
-          <p class="setting-note">Topo adds hill shading and contour lines. Classic, Satellite, Toner, and Terrain need the Stadia Maps API key below.</p>
+          <input type="range" id="pathLabBudget" class="path-lab-range" min="1" max="50" step="1" value="10">
+          <p class="setting-note">Every algorithm is tuned to keep this share of the recorded points, so the table compares what each one loses for the same storage.</p>
         </div>
-        <div class="setting-row stacked" role="group" aria-label="3D terrain">
+        <div class="setting-row stacked" id="pathLabSnapRow">
           <div class="setting-row-main">
-            <span>3D Terrain</span>
-            <div class="toggle-pill" id="debugTerrain3dToggle">
-              <button data-terrain3d="off" class="toggle-option">Off</button>
-              <button data-terrain3d="on" class="toggle-option">On</button>
-            </div>
+            <label for="pathLabSnapDistance">Road snap distance</label>
+            <output id="pathLabSnapDistanceValue"></output>
           </div>
-          <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
+          <input type="range" id="pathLabSnapDistance" class="path-lab-range" min="1" max="50" step="1" value="25" disabled>
+          <div class="setting-row-main path-lab-second">
+            <label for="pathLabPathSnapDistance">Path snap distance</label>
+            <output id="pathLabPathSnapDistanceValue"></output>
+          </div>
+          <input type="range" id="pathLabPathSnapDistance" class="path-lab-range" min="1" max="50" step="1" value="10" disabled>
+          <p class="setting-note">How far a point may move to reach a road, and (separately) a path, trail or cycleway. Paths sit close to roads and each other, so a smaller distance keeps a road ride from being pulled onto a parallel path. Too small leaves noisy points unsnapped. Only used when snapping is ticked below.</p>
         </div>
-        <div class="setting-row stacked" role="group" aria-label="Back to start">
-          <div class="setting-row-main">
-            <span>Back to Start</span>
-            <div class="toggle-pill" id="debugBackToStartToggle">
-              <button data-back-to-start="none" class="toggle-option">None</button>
-              <button data-back-to-start="direct" class="toggle-option">Direct</button>
-              <button data-back-to-start="route" class="toggle-option">Route</button>
-            </div>
-          </div>
-          <p class="setting-note">What the ride map shows to lead you home. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
-        </div>
-        <div class="setting-row stacked" id="debugAvoidRetraceRow" role="group" aria-label="Avoid retracing">
-          <div class="setting-row-main">
-            <span>Avoid Retracing</span>
-            <div class="toggle-pill" id="debugAvoidRetraceToggle">
-              <button data-avoid-retrace="off" class="toggle-option">Off</button>
-              <button data-avoid-retrace="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">Keeps the route home off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way home, like out of a dead end.</p>
-        </div>
-        <div class="setting-row" role="group" aria-label="Guide line contrast">
-          <span>Guide Line Contrast</span>
-          <div class="toggle-pill" id="debugGuideContrastToggle">
-            <button data-guide-contrast="medium" class="toggle-option">Normal</button>
-            <button data-guide-contrast="high" class="toggle-option">High</button>
-          </div>
-        </div>
-        <div class="setting-row" role="group" aria-label="Distance marker size">
-          <span>Distance Marker Size</span>
-          <div class="toggle-pill" id="debugMarkerSizeToggle">
-            <button data-marker-size="medium" class="toggle-option">Normal</button>
-            <button data-marker-size="large" class="toggle-option">Large</button>
-          </div>
-        </div>
-        <div class="setting-row stacked">
-          <div class="setting-row-main">
-            <label for="debugGuideHideDistanceSelect">Hide Near Start</label>
-            <span class="select-wrap">
-              <select id="debugGuideHideDistanceSelect">
-                <option value="0">Off</option>
-                <option value="15">15 m</option>
-                <option value="30">30 m</option>
-                <option value="60">60 m</option>
-              </select>
-            </span>
-          </div>
-          <p class="setting-note">Hides the distance-to-start chip once you're back within this range of the start.</p>
-        </div>
-        <div class="setting-row stacked" role="group" aria-label="Compare with past rides">
-          <div class="setting-row-main">
-            <span>Compare with past rides</span>
-            <div class="toggle-pill" id="debugCompareToggle">
-              <button data-compare="off" class="toggle-option">Off</button>
-              <button data-compare="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">Shows your best pace on roads you've ridden before, in the direction you're heading.</p>
+        <div class="setting-row stacked path-lab-checks">
+          <label><input type="checkbox" id="pathLabPinPauses" checked> Keep the points either side of a pause</label>
+          <label><input type="checkbox" id="pathLabSnap"> Snap points to roads first (uses cached map tiles)</label>
+          <label><input type="checkbox" id="pathLabShowOriginal" checked> Show the original path</label>
+          <label><input type="checkbox" id="pathLabShowPoints" checked> Show kept points</label>
         </div>
       </div>
 
-      <div class="settings-group">
-        <div class="setting-row stacked" role="group" aria-label="GPS accuracy overlay">
-          <div class="setting-row-main">
-            <span>GPS Accuracy Overlay</span>
-            <div class="toggle-pill" id="debugAccuracyToggle">
-              <button data-debug-accuracy="off" class="toggle-option">Off</button>
-              <button data-debug-accuracy="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">On a ride's summary map, colors the route and dots each recorded point by GPS accuracy instead of speed — green is precise, red is imprecise — and flags the single best and worst points. Gaps between dots show where GPS dropped out.</p>
-          <div class="chart-legend accuracy-legend">
-            <span><i class="swatch fast"></i>Precise</span>
-            <span><i class="swatch slow"></i>Imprecise</span>
-            <span><i class="swatch unknown"></i>No accuracy data, or clipped warm-up</span>
-          </div>
-        </div>
-        <div class="setting-row stacked" role="group" aria-label="Clip GPS warm-up">
-          <div class="setting-row-main">
-            <span>Clip GPS Warm-up</span>
-            <div class="toggle-pill" id="debugClipWarmupToggle">
-              <button data-debug-clip-warmup="off" class="toggle-option">Off</button>
-              <button data-debug-clip-warmup="on" class="toggle-option">On</button>
-            </div>
-          </div>
-          <p class="setting-note">Grays out the start of the route until GPS accuracy settles down, so a shaky first fix doesn't skew the accuracy overlay's colors. Only affects the overlay above.</p>
-        </div>
+      <div id="pathLabMap" class="map path-lab-map"></div>
+      <p id="pathLabReadout" class="setting-note path-lab-note"></p>
+      <p id="pathLabStatus" class="setting-note path-lab-note"></p>
+      <div class="path-lab-table-wrap">
+        <table id="pathLabTable" class="path-lab-table"></table>
       </div>
+      <p class="setting-note path-lab-note">Tap a row to draw it. Dots are the kept points and the colored line is the speed each span carries, the same colors as a ride's summary. Green cells are the lowest in their column.</p>
     </section>
   </main>
 

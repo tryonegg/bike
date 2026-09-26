@@ -78,7 +78,7 @@ export const GUIDE_LABEL_MIN_LINE_PX = 70;
 // Width of the whole world in pixels at zoom 0, which MapLibre doubles per zoom.
 export const WORLD_SIZE_AT_ZOOM_0 = 512;
 
-// "Hide Near Start" setting (Settings and Debug screens): once the rider is
+// "Hide Near Start" setting: once the rider is
 // this close to the start, in meters, the distance-to-start chip hides
 // rather than crowding the rider dot. 0 means never (the min-line-length
 // hide above still applies). Kept to this fixed set of presets, shown in
@@ -86,7 +86,7 @@ export const WORLD_SIZE_AT_ZOOM_0 = 512;
 export const GUIDE_HIDE_DISTANCE_OPTIONS_M = [0, 15, 30, 60];
 export const GUIDE_HIDE_DISTANCE_DEFAULT_M = 30;
 
-// "Back to Start" setting (Settings and Debug screens): what the live map
+// "Back to Start" setting: what the live map
 // shows to lead the rider home. "direct" is the straight line to the start;
 // "route" follows roads, routed on the device from cached map tiles (see
 // route-home.js), and shows the straight line until a route is known.
@@ -118,6 +118,60 @@ export const PLAN_SIMPLIFY_M = 30;
 // back at its start, doesn't count as reached at the start.
 export const PLAN_ARRIVE_M = 30;
 export const PLAN_SKIP_AWAY_M = 60;
+
+// Turn-by-turn directions (directions.js). A turn is announced when the
+// rider comes within each of its unit's distances of it (the prompt starting
+// with that clip), and again within NAV_NOW_M, as it's time to turn. A turn
+// within NAV_THEN_M after the one announced is chained on ("…, then turn
+// left"). Riding more than NAV_TURN_AROUND_DEG away from the way the route
+// goes (at speed) means turning around. "Rerouting" is said no more often
+// than every NAV_REROUTE_SPEAK_MS, and only after the rider had been
+// following the route for NAV_FOLLOWING_M. Directions home start once the
+// rider is NAV_HOME_AWAY_M from the start, and count as arrived within
+// PLAN_ARRIVE_M of it.
+export const NAV_ANNOUNCE = {
+	imperial: [
+		{ meters: 402, clip: "in_quarter_mile" },
+		{ meters: 152, clip: "in_500_feet" },
+	],
+	metric: [
+		{ meters: 400, clip: "in_400_meters" },
+		{ meters: 150, clip: "in_150_meters" },
+	],
+};
+export const NAV_NOW_M = 30;
+export const NAV_THEN_M = 80;
+export const NAV_TURN_AROUND_DEG = 120;
+export const NAV_TURN_AROUND_MIN_SPEED_MPS = 1.5;
+export const NAV_REROUTE_SPEAK_MS = 60000;
+export const NAV_FOLLOWING_M = 30;
+export const NAV_HOME_AWAY_M = 200;
+
+// The voice clips directions can play (voice.js), each an audio/<name>.mp3,
+// with the words it says (also what the device's speech synthesis reads when
+// a clip's file is missing). Prompts chain them: "in_500_feet" + "turn_right".
+export const VOICE_CLIPS = {
+	in_quarter_mile: "in a quarter mile,",
+	in_500_feet: "in 500 feet,",
+	in_400_meters: "in 400 meters,",
+	in_150_meters: "in 150 meters,",
+	turn_left: "turn left",
+	turn_right: "turn right",
+	bear_left: "bear left",
+	bear_right: "bear right",
+	sharp_left: "make a sharp left",
+	sharp_right: "make a sharp right",
+	u_turn: "make a U-turn",
+	then: "then",
+	turn_around: "turn around when you can.",
+	arrive_waypoint: "you've reached your next point.",
+	arrive_final: "you've reached the end of your route.",
+	arrive_start: "you're back at the start.",
+	rerouting: "rerouting.",
+	off_route: "you're off the route.",
+	point_skipped: "skipping to the next point.",
+	directions_stopped: "directions stopped.",
+};
 
 // Base-style catalog for the "Map Style" setting, keyed by state.prefs.mapType.
 // `free` is the OpenFreeMap style name (null when that look has no free
