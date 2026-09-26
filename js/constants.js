@@ -167,6 +167,7 @@ export const VOICE_CLIPS = {
 	arrive_waypoint: "you've reached your next point.",
 	arrive_final: "you've reached the end of your route.",
 	arrive_start: "you're back at the start.",
+	arrive_destination: "you've arrived at your destination.",
 	rerouting: "rerouting.",
 	off_route: "you're off the route.",
 	point_skipped: "skipping to the next point.",

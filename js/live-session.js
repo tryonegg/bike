@@ -20,7 +20,7 @@ import { getSegmentLengthMeters, segmentDistanceLabel, addSegmentMarkerToLayer, 
 import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
 import { resetRouteHome } from "./route-home.js";
-import { canFollowPoints, resetRidePlan } from "./ride-plan.js";
+import { canFollowPoints, resetRidePlan, destinationRoute } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
 import { navigateToScreen } from "./navigation.js";
 import { requestWakeLock, releaseWakeLock } from "./pwa.js";
@@ -46,6 +46,8 @@ import { renderPastRides } from "./history-view.js";
  */
 export async function startSession(initialPosition, initialHeading = null) {
 	const now = Date.now();
+	// A destination is routed to on the ways this activity can use.
+	if (state.rideRoute?.destination) state.rideRoute.profile = state.selectedActivityType === "bike" ? "bike" : "foot";
 	state.currentSession = {
 		date: new Date(now).toISOString(),
 		unit: state.prefs.unit,
@@ -54,7 +56,9 @@ export async function startSession(initialPosition, initialHeading = null) {
 		// The saved route picked in ride setup, if any, so a recovered ride can
 		// show it again, and how it's followed (see ride-plan.js).
 		routeId: state.rideRoute?.id ?? null,
-		routeMode: canFollowPoints(state.rideRoute) ? state.prefs.rideRouteMode : "asis",
+		// A destination picked in setup instead: always followed live, to it.
+		destination: state.rideRoute?.destination ? state.rideRoute.waypoints[0] : null,
+		routeMode: state.rideRoute?.destination ? "points" : canFollowPoints(state.rideRoute) ? state.prefs.rideRouteMode : "asis",
 		nextWaypoint: 0,
 		lastReached: null,
 		points: [],
@@ -805,6 +809,7 @@ export async function saveActiveSessionCheckpoint() {
 			activityType: session.activityType,
 			keepScreenOn: Boolean(session.keepScreenOn),
 			routeId: session.routeId ?? null,
+			destination: session.destination ?? null,
 			routeMode: session.routeMode ?? "asis",
 			nextWaypoint: session.nextWaypoint ?? 0,
 			lastReached: session.lastReached ?? null,
@@ -877,6 +882,7 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		activityType: checkpoint.activityType || "bike",
 		keepScreenOn: Boolean(checkpoint.keepScreenOn),
 		routeId: checkpoint.routeId ?? null,
+		destination: Array.isArray(checkpoint.destination) ? checkpoint.destination : null,
 		routeMode: checkpoint.routeMode === "points" ? "points" : "asis",
 		nextWaypoint: Number.isInteger(checkpoint.nextWaypoint) ? checkpoint.nextWaypoint : 0,
 		lastReached: Array.isArray(checkpoint.lastReached) ? checkpoint.lastReached : null,
@@ -978,6 +984,8 @@ async function resumeCheckpointedSession(restored) {
 
 	// The route picked for the ride, unless it has been deleted since.
 	state.rideRoute = restored.routeId != null ? ((await getRoute(restored.routeId).catch(() => null)) ?? null) : null;
+	if (!state.rideRoute && restored.destination) state.rideRoute = destinationRoute(restored.destination);
+	if (state.rideRoute?.destination) state.rideRoute.profile = restored.activityType === "bike" ? "bike" : "foot";
 
 	navigateToScreen("active", "replace");
 	initLiveMap(restored.lastPoint.lat, restored.lastPoint.lng);

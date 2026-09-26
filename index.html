@@ -119,6 +119,16 @@
               <button data-route-mode="points" class="toggle-option">To each point</button>
             </div>
           </div>
+          <div class="setting-row setup-destination-row" role="group" aria-label="Destination">
+            <div class="setup-destination-label">
+              <span>Destination</span>
+              <span id="setupDestinationText" class="setup-destination-text" hidden></span>
+            </div>
+            <div class="setup-destination-actions">
+              <button id="setupDestinationClearBtn" class="setup-destination-clear" aria-label="Clear destination" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg></button>
+              <button id="setupDestinationBtn" class="btn setup-destination-btn">Set on map</button>
+            </div>
+          </div>
           <div class="setting-row" role="group" aria-label="Screen preference">
             <label for="keepScreenOnToggle">Keep Screen On</label>
             <input id="keepScreenOnToggle" type="checkbox">
@@ -127,6 +137,14 @@
             <button id="startActivityBtn" class="btn primary pill" disabled>Start Ride</button>
             <p id="startGpsHint" class="setup-gps-hint">Waiting for GPS lock…</p>
           </div>
+        </div>
+      </div>
+
+      <div id="destinationPickBar" class="destination-pick-bar" hidden>
+        <p id="destinationPickHint" class="destination-pick-hint">Tap the map where you're heading.</p>
+        <div class="destination-pick-actions">
+          <button id="destinationPickCancelBtn" class="btn pill">Cancel</button>
+          <button id="destinationPickDoneBtn" class="btn primary pill" disabled>Set destination</button>
         </div>
       </div>
 

@@ -88,6 +88,8 @@ export const state = {
 	// The saved route picked for the ride being set up or ridden, drawn on the
 	// live map, or null for none.
 	rideRoute: null,
+	// Whether ride setup is placing a destination pin (see destination.js).
+	destinationPicking: false,
 	// A route to preselect the next time ride setup opens (the routes list's
 	// Ride button), or null.
 	nextRideRouteId: null,
@@ -245,6 +247,13 @@ export const el = {
 	// and .voice-test.
 	voiceSettings: document.querySelectorAll("[data-voice-settings]"),
 	setupRouteModeRow: document.getElementById("setupRouteModeRow"),
+	setupDestinationBtn: document.getElementById("setupDestinationBtn"),
+	setupDestinationClearBtn: document.getElementById("setupDestinationClearBtn"),
+	setupDestinationText: document.getElementById("setupDestinationText"),
+	destinationPickBar: document.getElementById("destinationPickBar"),
+	destinationPickHint: document.getElementById("destinationPickHint"),
+	destinationPickCancelBtn: document.getElementById("destinationPickCancelBtn"),
+	destinationPickDoneBtn: document.getElementById("destinationPickDoneBtn"),
 	setupRouteModeToggle: document.getElementById("setupRouteModeToggle"),
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
 	settingsBackBtn: document.getElementById("settingsBackBtn"),

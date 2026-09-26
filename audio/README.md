@@ -34,6 +34,7 @@ listed there, and speaks the rest.
 | `arrive_waypoint.mp3` | You've reached your next point. |
 | `arrive_final.mp3` | You've reached the end of your route. |
 | `arrive_start.mp3` | You're back at the start. |
+| `arrive_destination.mp3` | You've arrived at your destination. |
 | `rerouting.mp3` | Rerouting. |
 | `off_route.mp3` | You're off the route. |
 | `point_skipped.mp3` | Skipping to the next point. |

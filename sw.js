@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.12.7";
+const CACHE_VERSION = "v1.13.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -54,6 +54,7 @@ const APP_MODULES = [
   "./js/voice.js",
   "./js/route-follow.js",
   "./js/ride-plan.js",
+  "./js/destination.js",
   "./js/route-plan.js",
   "./js/route-share.js",
   "./js/route-worker.js",

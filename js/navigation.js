@@ -26,6 +26,7 @@ import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abo
 import { exportAllData, importAllData, deleteAllRides, deleteCurrentRide } from "./data-io.js";
 import { importGpxSession, exportCurrentGpx } from "./gpx.js";
 import { openPathLab, wirePathLab } from "./path-lab.js";
+import { wireDestination } from "./destination.js";
 import { confirmWithModal, closeModal } from "./modal.js";
 import { requestWakeLock, releaseWakeLock, maybeShowInstallBanner } from "./pwa.js";
 
@@ -95,6 +96,7 @@ export function wireEvents() {
 	el.startRideBtn.addEventListener("click", startCountdownFlow);
 	el.openRoutesBtn.addEventListener("click", () => openRoutes());
 	wirePlanner();
+	wireDestination();
 	el.setupBackBtn.addEventListener("click", cancelSetupAndReturnHome);
 
 	document.querySelectorAll(".activity-btn").forEach((btn) => {

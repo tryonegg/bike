@@ -52,7 +52,31 @@ export function onRidePlanChange(fn) {
  * @returns {boolean}
  */
 export function canFollowPoints(route) {
-	return Boolean(route) && route.source !== "gpx" && route.waypoints.length >= 2;
+	return Boolean(route) && (route.destination || (route.source !== "gpx" && route.waypoints.length >= 2));
+}
+
+/**
+ * A ride's destination (picked in ride setup, see destination.js) as a
+ * route: unsaved, with its one point to follow to, and a line to draw
+ * before the ride starts.
+ *
+ * @param {[number, number]} point - [lng, lat].
+ * @param {Array<[number, number]>} [coords] - The line to draw in setup.
+ * @returns {Object}
+ */
+export function destinationRoute(point, coords = [point]) {
+	return { id: null, destination: true, name: "Destination", profile: "bike", waypoints: [point], legs: [], coords, meters: null };
+}
+
+/** The destination's pin: a flag, standing on the spot. */
+export function destinationMarkerElement() {
+	const element = document.createElement("div");
+	element.className = "destination-pin";
+	// MapLibre positions the marker with its own transform, so the drop's
+	// rotation goes on an inner element.
+	element.innerHTML =
+		'<span class="destination-pin-drop"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></svg></span>';
+	return element;
 }
 
 /**
@@ -80,7 +104,7 @@ export function ridePlanLine(point, session) {
 	const next = session.nextWaypoint;
 	drawMarkers(route.waypoints, next);
 	if (next >= route.waypoints.length) {
-		guidance = { finished: true };
+		guidance = { finished: true, destination: Boolean(route.destination) };
 		return [];
 	}
 
@@ -96,10 +120,12 @@ export function ridePlanLine(point, session) {
 		steps: live?.steps ?? [],
 		along: live?.along ?? 0,
 		offRoute: live?.offRoute ?? false,
-		target: { label: `Point ${next + 1}`, meters: live ? live.meters : straight, point: goal },
+		target: { label: route.destination ? "Destination" : `Point ${next + 1}`, meters: live ? live.meters : straight, point: goal },
 		following: next + 1 < route.waypoints.length ? `Point ${next + 2}` : null,
 		stopsLeft: route.waypoints.length - next,
-		canSkip: true,
+		// There's nothing to skip on to from a destination.
+		canSkip: !route.destination,
+		destination: Boolean(route.destination),
 	};
 	return line;
 }
@@ -207,6 +233,10 @@ function drawMarkers(waypoints, next) {
 	markersMap = map;
 	markersFrom = next;
 	if (!map) return;
+	if (state.rideRoute?.destination) {
+		markers.push(new maplibregl.Marker({ element: destinationMarkerElement(), anchor: "bottom" }).setLngLat(waypoints[0]).addTo(map));
+		return;
+	}
 	for (let i = next; i < waypoints.length; i++) {
 		const element = document.createElement("div");
 		element.className = `plan-waypoint live-waypoint${i === next ? " next" : ""}`;

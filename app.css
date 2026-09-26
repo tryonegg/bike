@@ -644,6 +644,7 @@ button {
 .calendar-cell .calendar-day-number {
   padding-top: 0;
   font-weight: 600;
+  flex-grow: 1;
 }
 
 .calendar-table td.is-outside .calendar-cell {
@@ -663,6 +664,7 @@ button {
   font-weight: 600;
   color: var(--muted);
   white-space: nowrap;
+  flex-grow: 1;
 }
 
 /* In calendar view the month stretches to fill whatever height is left between
@@ -847,6 +849,113 @@ button {
   width: 22px;
   height: 22px;
   accent-color: var(--primary);
+}
+
+/* Destination: where it is once set, and the buttons to set or clear it. */
+.setup-destination-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setup-destination-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.setup-destination-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setup-destination-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.setup-destination-clear {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--track);
+  color: var(--muted);
+}
+
+.setup-destination-clear svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Picking a destination: the setup panel steps aside for the map and a bar
+   with the hint and the buttons takes its place. */
+.active-screen[data-picking] .setup-bottom-panel {
+  opacity: 0;
+  transform: translateY(22px);
+  pointer-events: none;
+}
+
+.destination-pick-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 16px 22px calc(24px + var(--safe-bottom));
+  background: var(--strip-bg);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--header-border);
+}
+
+.destination-pick-hint {
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.destination-pick-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.destination-pick-actions .btn {
+  flex: 1;
+}
+
+/* The destination's pin: a flag in a drop, its point on the spot. */
+.destination-pin {
+  width: 36px;
+  height: 42px;
+  cursor: grab;
+}
+
+.destination-pin-drop {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transform: rotate(-45deg);
+}
+
+.destination-pin svg {
+  width: 18px;
+  height: 18px;
+  transform: rotate(45deg);
 }
 
 .setup-start-wrap {

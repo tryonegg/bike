@@ -18,6 +18,7 @@ import { resetRouteHome } from "./route-home.js";
 import { populateSetupRoutes } from "./route-plan.js";
 import { resetRidePlan } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
+import { resetDestination, isPickingDestination } from "./destination.js";
 
 /**
  * The "Start New Ride" button's handler: resets the activity picker to the
@@ -83,6 +84,7 @@ export function beginRideSetup() {
 	setSetupLocating(true);
 	// None unless the Routes screen's Ride button picked one.
 	state.rideRoute = null;
+	resetDestination();
 	populateSetupRoutes();
 
 	navigateToScreen("active");
@@ -145,7 +147,9 @@ function handleSetupPosition(position) {
 	} else {
 		animateMarkerTo(state.riderMarker, [longitude, latitude]);
 		const map = state.liveMap;
-		if (!map.isZooming() && !map.dragPan.isActive() && !map.touchZoomRotate.isActive()) {
+		// Not while a destination is being picked, or once one is framed on the map.
+		const holdView = isPickingDestination() || state.rideRoute?.destination;
+		if (!holdView && !map.isZooming() && !map.dragPan.isActive() && !map.touchZoomRotate.isActive()) {
 			map.easeTo({ center: [longitude, latitude], duration: 450 });
 		}
 	}

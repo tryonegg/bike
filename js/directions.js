@@ -285,7 +285,10 @@ function instructionFor(step, source) {
 
 function targetName(source) {
 	const label = source.guidance.target.label;
-	return label === "Start" ? "the start" : label === "End of route" ? "the end of the route" : label;
+	if (label === "Start") return "the start";
+	if (label === "End of route") return "the end of the route";
+	if (label === "Destination") return "your destination";
+	return label;
 }
 
 /** The time to ride `meters` at the ride's average so far (or a typical pace until that's known). */
@@ -449,7 +452,7 @@ function listenForArrivals(session, source) {
 
 	if (plan?.finished && !memory.routeFinished) {
 		memory.routeFinished = true;
-		if (voiceRoute && !skipped && !session.routeCancelled) say(["arrive_final"]);
+		if (voiceRoute && !skipped && !session.routeCancelled) say([plan.destination ? "arrive_destination" : "arrive_final"]);
 	}
 
 	if (source?.kind === "home") {
@@ -486,9 +489,10 @@ function fillSheet(source) {
 		el.navSkipNext.textContent = guidance.following ?? "Route end";
 	}
 	if (source.kind === "route") {
-		el.navCancelTitle.textContent = "Cancel entire route";
-		el.navCancelDetail.textContent =
-			guidance.stopsLeft != null
+		el.navCancelTitle.textContent = guidance.destination ? "Cancel destination" : "Cancel entire route";
+		el.navCancelDetail.textContent = guidance.destination
+			? "Stops directions to it for this ride"
+			: guidance.stopsLeft != null
 				? `Clears ${guidance.stopsLeft === 1 ? "the last remaining stop" : `all ${guidance.stopsLeft} remaining stops`}`
 				: "Stops following this route";
 	} else {
