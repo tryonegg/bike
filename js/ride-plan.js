@@ -115,12 +115,15 @@ export function ridePlanLine(point, session) {
 
 	// Until the live route arrives, the next point is just straight ahead.
 	const straight = haversineMeters(point.lat, point.lng, goal[1], goal[0]);
+	const toGoal = live ? live.meters : straight;
 	guidance = {
 		finished: false,
 		steps: live?.steps ?? [],
 		along: live?.along ?? 0,
 		offRoute: live?.offRoute ?? false,
-		target: { label: route.destination ? "Destination" : `Point ${next + 1}`, meters: live ? live.meters : straight, point: goal },
+		target: { label: route.destination ? "Destination" : `Point ${next + 1}`, meters: toGoal, point: goal },
+		// The route's last point, by way of the planned legs on from the next one.
+		finish: { meters: route.legs.slice(next).reduce((sum, leg) => sum + leg.meters, toGoal) },
 		following: next + 1 < route.waypoints.length ? `Point ${next + 2}` : null,
 		stopsLeft: route.waypoints.length - next,
 		// There's nothing to skip on to from a destination.
@@ -181,11 +184,13 @@ function requestSteps(route) {
  * none being followed (no route, or it's been cancelled).
  *
  * @returns {{finished: boolean, steps?: Array<Object>, along?: number, offRoute?: boolean,
- *   target?: {label: string, meters: number, point: [number, number]}, following?: string|null,
+ *   target?: {label: string, meters: number, point: [number, number]}, finish?: {meters: number},
+ *   following?: string|null,
  *   stopsLeft?: number|null, canSkip?: boolean}|null}
  *   `finished` once the route's end has been reached; otherwise `steps`
  *   (each with `along`) and `along` in one reckoning, `target` the next
- *   point (or the route's end) and how far it is along the way, `following`
+ *   point (or the route's end) and how far it is along the way, `finish`
+ *   how far the route's end is (only when there are points before it), `following`
  *   the point after it, and `stopsLeft` how many points are still to come.
  */
 export function ridePlanGuidance() {

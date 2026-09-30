@@ -153,23 +153,27 @@
       </div>
 
       <header id="rideStrip" class="ride-strip">
-        <div class="label" id="speedLabel">Speed</div>
-        <div class="hero">
-          <strong id="currentSpeed" class="hero-value">0.0</strong>
-          <div class="hero-side">
-            <span id="currentSpeedUnit" class="hero-unit">mph</span>
-            <span class="hero-avg">avg <span id="avgSpeed">0.0</span></span>
+        <div class="ride-stats">
+          <div class="ride-speed">
+            <div class="label" id="speedLabel">Speed</div>
+            <div class="hero">
+              <strong id="currentSpeed" class="hero-value">0.0</strong>
+              <div class="hero-side">
+                <span id="paceTrend" class="pace-trend" role="img" hidden><svg viewBox="0 0 24 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path class="pace-trend-up" d="M4 12l8-8 8 8"/><path class="pace-trend-down" d="M4 4l8 8 8-8"/><path class="pace-trend-even" d="M5 8h14"/></svg></span>
+                <span id="currentSpeedUnit" class="hero-unit">mph</span>
+                <span class="hero-avg">avg <span id="avgSpeed">0.0</span></span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="stat-pair">
-          <div>
-            <div class="label">Distance</div>
-            <div class="pair-value"><span id="distanceValue">0.00</span> <span class="unit" id="distanceUnit">mi</span></div>
-          </div>
-          <div class="stat-pair-divider" aria-hidden="true"></div>
-          <div>
-            <div class="label">Elapsed</div>
-            <div class="pair-value" id="elapsedTime">00:00</div>
+          <div class="ride-side-stats">
+            <div class="ride-stat">
+              <div class="label">Distance</div>
+              <div class="ride-stat-value"><span id="distanceValue">0.00</span> <span class="unit" id="distanceUnit">mi</span></div>
+            </div>
+            <div class="ride-stat">
+              <div class="label">Elapsed</div>
+              <div class="ride-stat-value" id="elapsedTime">00:00</div>
+            </div>
           </div>
         </div>
         <div id="navBanner" class="nav-banner" hidden>
@@ -179,20 +183,17 @@
               <div class="nav-distance"><span id="navDistance"></span> <span id="navDistanceUnit" class="nav-unit"></span></div>
               <div id="navInstruction" class="nav-instruction"></div>
             </div>
+            <button id="navStopBtn" class="nav-stop">
+              <span class="nav-stop-text">
+                <span id="navStopLabel" class="nav-stop-label">Next stop</span>
+                <span id="navStopDistance" class="nav-stop-value"></span>
+              </span>
+              <svg class="nav-stop-swap" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20V5"/><path d="m4 9 4-4 4 4"/><path d="M16 4v15"/><path d="m12 15 4 4 4-4"/></svg>
+            </button>
+            <span class="nav-divider" aria-hidden="true"></span>
             <button id="navCloseBtn" class="nav-close" aria-label="Stop directions"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg></button>
           </div>
           <div class="nav-progress" aria-hidden="true"><span id="navProgress"></span></div>
-          <div id="navThen" class="nav-row">
-            <span class="nav-row-label">Then</span>
-            <span id="navThenIcon" class="nav-row-icon" aria-hidden="true"></span>
-            <span id="navThenText" class="nav-row-text"></span>
-            <span id="navThenDistance" class="nav-row-value"></span>
-          </div>
-          <div class="nav-row nav-stop">
-            <span class="nav-row-label">To</span>
-            <span id="navStopText" class="nav-row-text"></span>
-            <span id="navStopDistance" class="nav-row-value"></span>
-          </div>
         </div>
       </header>
 

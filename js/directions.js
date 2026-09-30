@@ -1,7 +1,7 @@
 /**
  * Turn-by-turn directions during a ride: the banner under the ride stats
- * (the next turn, how far to it, the turn after, and the next stop with how
- * long till it's reached), spoken prompts (voice.js), and the sheet the
+ * (the next turn, how far to it, and how far the next stop is, or the
+ * route's end, tapped between), spoken prompts (voice.js), and the sheet the
  * banner's close button opens (skip the next stop, cancel the route, or
  * keep going).
  *
@@ -85,6 +85,11 @@ let redraw = null;
 let memory = null;
 // What the sheet is offering, while it's open.
 let sheetFor = null;
+// Whether the banner's stop button shows the route's end rather than the
+// next stop. Kept from ride to ride, as a rider's preference.
+let showFinish = false;
+// The last view drawn, to redraw straight away when that's tapped.
+let lastView = null;
 
 /**
  * Registers how to redraw the ride map and directions straight away (after
@@ -98,6 +103,10 @@ export function setDirectionsRedraw(fn) {
 /** Wires up the banner's close button and the sheet. Called once from `wireEvents`. */
 export function wireDirections() {
 	el.navCloseBtn.addEventListener("click", openSheet);
+	el.navStopBtn.addEventListener("click", () => {
+		showFinish = !showFinish;
+		if (lastView) render(lastView);
+	});
 	el.navKeepBtn.addEventListener("click", closeSheet);
 	el.navSheet.addEventListener("click", (event) => {
 		if (event.target === el.navSheet) closeSheet();
@@ -157,6 +166,7 @@ export function hideDirections() {
 	el.navBanner.hidden = true;
 	closeSheet();
 	memory = null;
+	lastView = null;
 }
 
 function freshMemory(session) {
@@ -235,6 +245,8 @@ function describe(source, session, point) {
 		turnAround: false,
 		offRoute: guidance.offRoute,
 		target: guidance.target,
+		finish: guidance.finish && guidance.stopsLeft > 1 ? guidance.finish : null,
+		kind: source.kind,
 		eta: etaFor(guidance.target.meters, session),
 	};
 
@@ -313,17 +325,28 @@ function render(view) {
 	el.navInstruction.textContent = view.instruction;
 	el.navProgress.style.width = `${Math.round(view.progress * 100)}%`;
 
-	el.navThen.hidden = !view.after;
-	if (view.after) {
-		el.navThenIcon.innerHTML = iconSvg(view.after.turn === "arrive" ? "arrive" : view.after.turn);
-		const kind = view.after.kind && view.after.kind.charAt(0).toUpperCase() + view.after.kind.slice(1);
-		el.navThenText.textContent = view.after.turn === "arrive" ? "Arrive" : view.after.name ?? kind ?? TURN_WORDS[view.after.turn];
-		el.navThenDistance.textContent = formatNavDistance(view.after.along - view.step.along).join(" ");
-	}
+	// The next stop, or (tapped) the route's end, when there are stops before it.
+	const finish = showFinish && view.finish;
+	const meters = finish ? view.finish.meters : view.target.meters;
+	const [stopValue, stopUnit] = formatNavDistance(meters);
+	el.navStopLabel.textContent = finish ? "Route end" : stopLabel(view);
+	el.navStopDistance.innerHTML = `${stopValue} <span class="nav-unit">${stopUnit}</span>`;
+	el.navStopBtn.disabled = !view.finish;
+	el.navStopBtn.classList.toggle("can-swap", Boolean(view.finish));
+	const eta = formatEta(finish ? etaFor(meters, state.currentSession) : view.eta);
+	el.navStopBtn.setAttribute(
+		"aria-label",
+		`${el.navStopLabel.textContent}: ${stopValue} ${stopUnit}, about ${eta}${view.finish ? `. Tap to show ${finish ? "the next stop" : "the route end"}` : ""}`,
+	);
+	lastView = view;
+}
 
-	const [stopValue, stopUnit] = formatNavDistance(view.target.meters);
-	el.navStopText.textContent = view.target.label === "Start" ? "Start" : view.target.label;
-	el.navStopDistance.textContent = `${stopValue} ${stopUnit} · ${formatEta(view.eta)}`;
+/** What the stop button calls the target when it's the only one left. */
+function stopLabel(view) {
+	if (view.finish) return "Next stop";
+	if (view.kind === "home") return "To start";
+	if (view.target.label === "Destination") return "Destination";
+	return "Route end";
 }
 
 function iconSvg(name) {

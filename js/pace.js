@@ -24,22 +24,49 @@ import { paceColor } from "./colors.js";
  * runs async and this ride may have ended (or another begun) before it
  * finishes, so the result is only installed if `session` is still the
  * current one. A no-op if the "compare with past rides" preference is off.
+ * Also works out the average speed over past rides of the ride's saved
+ * route, if it has one, for the pace chevron (`state.routePastAvg`).
  *
  * @param {Object} session - The ride that's starting.
  * @returns {Promise<void>}
  */
 export async function loadPaceIndex(session) {
 	state.paceIndex = null;
-	if (!state.prefs.comparePastRides) return;
+	state.routePastAvg = null;
+	if (!state.prefs.comparePastRides && session.routeId == null) return;
 	const activity = session.activityType || "bike";
 	try {
 		const sessions = (await getAllSessions()).filter((saved) => (saved.activityType || "bike") === activity);
+		if (state.currentSession !== session) return;
+		state.routePastAvg = routeAverage(sessions, session.routeId);
+		if (!state.prefs.comparePastRides) return;
 		const index = await buildPaceIndex(sessions);
 		// The ride may have ended, or another begun, while the index was building.
 		if (state.currentSession === session) state.paceIndex = index;
 	} catch (error) {
 		console.warn("Indexing past rides failed", error);
 	}
+}
+
+/**
+ * The average speed over every past ride of a saved route: all their
+ * distance over all their moving time, so a long ride counts for more than
+ * a short one.
+ *
+ * @param {Array<Object>} sessions - Saved rides.
+ * @param {number|null} routeId
+ * @returns {number|null} m/s, or null with no route or no past rides of it.
+ */
+function routeAverage(sessions, routeId) {
+	if (routeId == null) return null;
+	let meters = 0;
+	let ms = 0;
+	for (const saved of sessions) {
+		if (saved.routeId !== routeId || !(saved.movingTime > 0)) continue;
+		meters += saved.totalDistance || 0;
+		ms += saved.movingTime;
+	}
+	return meters > 0 ? meters / (ms / 1000) : null;
 }
 
 /**

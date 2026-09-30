@@ -212,6 +212,11 @@ export const BEST_PACE_SLOTS = 12;
 export const BEST_PACE_BAND_M = 500;
 export const BEST_PACE_BAND_OPACITY = 0.6;
 export const BEST_PACE_CLIMB_GRADE = 0.03;
+// The pace chevron beside the live speed: level within this much of the average
+// it's compared with (0.5 mph), and against the ride's own average only once
+// the ride has run this long, before which that average means little.
+export const PACE_TREND_EVEN_MPS = 0.5 * 0.44704;
+export const PACE_TREND_MIN_MS = 60000;
 export const CLEAR_LINE_GRADIENT = ["interpolate", ["linear"], ["line-progress"], 0, "rgba(0, 0, 0, 0)", 1, "rgba(0, 0, 0, 0)"];
 
 // noun names one outing in a title ("Morning walk"); plural heads the home count.

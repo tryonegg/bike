@@ -13,12 +13,15 @@ import {
 	CHECKPOINT_INTERVAL_MS,
 	POINT_REJECTION_THRESHOLD,
 	LIVE_ROUTE_SOURCE,
+	PACE_TREND_EVEN_MPS,
+	PACE_TREND_MIN_MS,
 } from "./constants.js";
 import { state, el } from "./state.js";
 import { haversineMeters, bearingDegrees, formatDistance, formatSpeed, formatDuration } from "./format.js";
 import { getSegmentLengthMeters, segmentDistanceLabel, addSegmentMarkerToLayer, renderSegmentMarkers, distanceUnitLabel, speedUnitLabel } from "./map-visuals.js";
 import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
+import { trailingPace } from "./pace-index.js";
 import { resetRouteHome } from "./route-home.js";
 import { canFollowPoints, resetRidePlan, destinationRoute } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
@@ -632,6 +635,32 @@ export function updateLiveStats() {
 	el.distanceUnit.textContent = distanceUnitLabel(unit);
 	el.avgSpeed.textContent = formatSpeed(session.avgSpeed, unit);
 	el.elapsedTime.textContent = formatDuration(elapsed);
+	updatePaceTrend(session, elapsed);
+}
+
+/**
+ * The chevron beside the speed: up when the rider's pace is ahead of the
+ * average it's compared with, down when behind, a level bar when within
+ * PACE_TREND_EVEN_MPS. It's compared with past rides of the ride's saved
+ * route where there are any, otherwise this ride's own average. The pace is
+ * taken over the last stretch ridden (as the best-pace chip does), so a GPS
+ * speed flickering from fix to fix doesn't flip it back and forth.
+ */
+function updatePaceTrend(session, elapsed) {
+	const pastAvg = state.routePastAvg;
+	const average = pastAvg ?? (elapsed >= PACE_TREND_MIN_MS ? session.avgSpeed : null);
+	if (session.paused || !session.lastPoint || !(average > 0)) {
+		el.paceTrend.hidden = true;
+		return;
+	}
+	const trailing = trailingPace(session.points);
+	const pace = Number.isFinite(trailing) ? trailing : session.lastPoint.speed || 0;
+	const diff = pace - average;
+	const trend = Math.abs(diff) <= PACE_TREND_EVEN_MPS ? "even" : diff > 0 ? "ahead" : "behind";
+	el.paceTrend.hidden = false;
+	el.paceTrend.dataset.trend = trend;
+	const against = pastAvg != null ? "your average on this route" : "this ride's average";
+	el.paceTrend.setAttribute("aria-label", trend === "even" ? `On pace with ${against}` : `${trend === "ahead" ? "Ahead of" : "Behind"} ${against}`);
 }
 
 /**
@@ -758,6 +787,7 @@ export async function finalizeSession() {
 	clearInterval(session.elapsedIntervalId);
 	await releaseWakeLock();
 	state.paceIndex = null;
+	state.routePastAvg = null;
 	state.rideRoute = null;
 	resetRouteHome();
 	resetRidePlan();
@@ -778,6 +808,8 @@ export async function finalizeSession() {
 		segments: session.segments,
 		segmentMarkers: session.segmentMarkers,
 		pauses: Array.isArray(session.pauses) ? session.pauses : [],
+		// The saved route ridden, so later rides of it can be paced against this one.
+		routeId: session.routeId ?? null,
 	};
 
 	const id = await addSession(saved);

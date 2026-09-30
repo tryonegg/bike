@@ -133,6 +133,8 @@ button {
 .chart-x-labels,
 .elevation-values,
 .hero-avg,
+.ride-stat-value,
+.nav-stop-value,
 .countdown-number {
   font-variant-numeric: tabular-nums;
 }
@@ -766,7 +768,7 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: calc(20px + var(--safe-top)) 22px 18px;
+  padding: calc(18px + var(--safe-top)) 22px 18px;
   background: var(--strip-bg);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
@@ -1055,15 +1057,27 @@ button {
   color: #d08a2a;
 }
 
+/* Speed on the left; distance over elapsed time on the right. */
+.ride-stats {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ride-speed {
+  min-width: 0;
+}
+
 .hero {
   display: flex;
   align-items: flex-end;
-  gap: 10px;
-  margin-top: 2px;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .hero-value {
-  font-size: 88px;
+  font-size: clamp(64px, 22vw, 88px);
   font-weight: 700;
   line-height: 0.84;
   letter-spacing: -0.05em;
@@ -1073,7 +1087,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-bottom: 6px;
+  padding-bottom: 2px;
 }
 
 .hero-unit {
@@ -1085,7 +1099,67 @@ button {
 .hero-avg {
   font-size: 15px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Pace against the average: a chevron up (ahead), down (behind), or a level
+   bar (on pace). */
+.pace-trend {
+  display: block;
+  width: 26px;
+  height: 18px;
+  margin-bottom: 4px;
+}
+
+.pace-trend svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pace-trend path {
+  display: none;
+}
+
+.pace-trend[data-trend="ahead"] {
+  color: var(--pace-fast);
+}
+
+.pace-trend[data-trend="behind"] {
+  color: var(--pace-slow);
+}
+
+.pace-trend[data-trend="even"] {
+  color: var(--muted);
+}
+
+.pace-trend[data-trend="ahead"] .pace-trend-up,
+.pace-trend[data-trend="behind"] .pace-trend-down,
+.pace-trend[data-trend="even"] .pace-trend-even {
+  display: block;
+}
+
+.ride-side-stats {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  text-align: right;
+}
+
+.ride-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.ride-stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -1400,15 +1474,25 @@ button {
     border-right: 1px solid var(--header-border);
   }
 
-  /* The narrow column stacks distance over elapsed time, split by a rule. */
-  .ride-strip .stat-pair {
+  /* The narrow column stacks the speed over distance and elapsed time,
+     split by a rule. */
+  .ride-stats {
     flex-direction: column;
+    align-items: stretch;
+    gap: 0;
   }
 
-  .ride-strip .stat-pair-divider {
-    width: auto;
-    height: 1px;
-    margin: 14px 0;
+  .ride-side-stats {
+    align-items: stretch;
+    gap: 14px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    text-align: left;
+  }
+
+  .ride-stat {
+    align-items: flex-start;
   }
 
   /* The edges set the size here: .map's full width would push the map past the
@@ -1444,6 +1528,12 @@ button {
     font-size: 72px;
   }
 
+  .ride-strip .pace-trend {
+    order: 1;
+    align-self: flex-end;
+    margin-bottom: 6px;
+  }
+
   /* The unit stays beside the speed and the average drops to its own line
      under it. display: contents lets both join the hero row so the average
      can wrap onto the next line. */
@@ -1461,7 +1551,30 @@ button {
   }
 
   .ride-strip .hero-avg {
+    order: 2;
     flex-basis: 100%;
+  }
+
+  /* Too narrow for one row of directions: the stop button drops under the
+     turn, full width. */
+  .nav-main {
+    flex-wrap: wrap;
+  }
+
+  .nav-divider {
+    display: none;
+  }
+
+  .nav-stop {
+    order: 1;
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .nav-stop-text {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
   }
 
   /* The Stats Side setting: the same layout mirrored, with the stats on the
@@ -1767,23 +1880,23 @@ button {
 .nav-main {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px 22px 14px;
+  gap: 12px;
+  padding: 14px 16px 14px 18px;
 }
 
 .nav-icon {
   flex: none;
   display: grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.14);
 }
 
 .nav-icon svg {
-  width: 34px;
-  height: 34px;
+  width: 26px;
+  height: 26px;
 }
 
 .nav-text {
@@ -1792,10 +1905,11 @@ button {
 }
 
 .nav-distance {
-  font-size: 34px;
+  font-size: 26px;
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .nav-distance:has(#navDistance:empty) {
@@ -1803,25 +1917,102 @@ button {
 }
 
 .nav-unit {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   opacity: 0.75;
 }
 
+/* The turn in words: the arrow says it beside a distance, so there it's for
+   screen readers only; it shows on its own when there's no distance
+   (turning around, rerouting). */
 .nav-instruction {
-  margin-top: 4px;
   font-size: 17px;
   font-weight: 600;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
+.nav-distance:not(:has(#navDistance:empty)) + .nav-instruction {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The next stop (or, tapped, the route's end). */
+.nav-stop {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font: inherit;
+  text-align: right;
+}
+
+.nav-stop:disabled {
+  cursor: default;
+}
+
+.nav-stop-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.nav-stop-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.nav-stop-value {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.nav-stop-value .nav-unit {
+  font-size: 12px;
+}
+
+.nav-stop-swap {
+  display: none;
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+}
+
+.nav-stop.can-swap .nav-stop-swap {
+  display: block;
+}
+
+.nav-divider {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.2);
+}
+
 .nav-close {
   flex: none;
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 46px;
+  height: 46px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 50%;
@@ -1830,16 +2021,15 @@ button {
 }
 
 .nav-close svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 
-/* How far along the rider is toward the next turn. */
+/* How far along the rider is toward the next turn: a hairline along the
+   banner's foot. */
 .nav-progress {
-  height: 4px;
-  margin: 0 22px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
+  height: 3px;
+  background: rgba(255, 255, 255, 0.16);
   overflow: hidden;
 }
 
@@ -1847,57 +2037,8 @@ button {
   display: block;
   height: 100%;
   width: 0;
-  border-radius: inherit;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.85);
   transition: width 0.8s linear;
-}
-
-.nav-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 22px;
-  background: rgba(0, 0, 0, 0.2);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.nav-row + .nav-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.nav-row-label {
-  flex: none;
-  width: 44px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-
-.nav-row-icon {
-  flex: none;
-  display: grid;
-}
-
-.nav-row-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.nav-row-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nav-row-value {
-  flex: none;
-  opacity: 0.85;
-  font-variant-numeric: tabular-nums;
 }
 
 /* The sheet: slides up over the ride, which carries on underneath. */

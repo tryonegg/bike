@@ -77,6 +77,8 @@ export const state = {
 	riderMarker: null,
 	// Built from the saved rides when a ride starts; null until it is ready.
 	paceIndex: null,
+	// Average speed (m/s) over past rides of the ride's saved route, or null.
+	routePastAvg: null,
 	bestPaceChip: null,
 	// What the band shows, kept so a style swap can redraw it.
 	bestPaceBand: null,
@@ -223,11 +225,8 @@ export const el = {
 	navInstruction: document.getElementById("navInstruction"),
 	navCloseBtn: document.getElementById("navCloseBtn"),
 	navProgress: document.getElementById("navProgress"),
-	navThen: document.getElementById("navThen"),
-	navThenIcon: document.getElementById("navThenIcon"),
-	navThenText: document.getElementById("navThenText"),
-	navThenDistance: document.getElementById("navThenDistance"),
-	navStopText: document.getElementById("navStopText"),
+	navStopBtn: document.getElementById("navStopBtn"),
+	navStopLabel: document.getElementById("navStopLabel"),
 	navStopDistance: document.getElementById("navStopDistance"),
 	navSheet: document.getElementById("navSheet"),
 	navSkipBtn: document.getElementById("navSkipBtn"),
@@ -307,6 +306,7 @@ export const el = {
 	distanceValue: document.getElementById("distanceValue"),
 	distanceUnit: document.getElementById("distanceUnit"),
 	avgSpeed: document.getElementById("avgSpeed"),
+	paceTrend: document.getElementById("paceTrend"),
 	elapsedTime: document.getElementById("elapsedTime"),
 	pauseBtn: document.getElementById("pauseBtn"),
 	stopBtn: document.getElementById("stopBtn"),
