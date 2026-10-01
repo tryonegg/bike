@@ -100,8 +100,6 @@
           <div class="label">Activity</div>
           <div class="activity-buttons">
             <button class="activity-btn" data-activity="bike">🚴 Bike</button>
-            <button class="activity-btn" data-activity="walk">🚶 Walk</button>
-            <button class="activity-btn" data-activity="hike">🥾 Hike</button>
             <button class="activity-btn" data-activity="kayak">🛶 Kayak</button>
           </div>
           <div class="setting-row setup-route-row">
@@ -128,10 +126,6 @@
               <button id="setupDestinationClearBtn" class="setup-destination-clear" aria-label="Clear destination" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg></button>
               <button id="setupDestinationBtn" class="btn setup-destination-btn">Set on map</button>
             </div>
-          </div>
-          <div class="setting-row" role="group" aria-label="Screen preference">
-            <label for="keepScreenOnToggle">Keep Screen On</label>
-            <input id="keepScreenOnToggle" type="checkbox">
           </div>
           <div class="setup-start-wrap">
             <button id="startActivityBtn" class="btn primary pill" disabled>Start Ride</button>
@@ -195,9 +189,15 @@
           </div>
           <div class="nav-progress" aria-hidden="true"><span id="navProgress"></span></div>
         </div>
+        <!-- The turn, big, over the stats and banner as it's time to make it. The banner says it to screen readers. -->
+        <div id="navTurnFlash" class="nav-turn-flash" aria-hidden="true" hidden>
+          <span id="navTurnFlashIcon" class="nav-turn-flash-icon"></span>
+          <span id="navTurnFlashText" class="nav-turn-flash-text"></span>
+        </div>
       </header>
 
       <button id="recenterBtn" class="map-chip recenter">Re-center</button>
+      <button id="rideDestinationBtn" class="map-chip ride-destination" hidden>Set destination</button>
       <button id="rideSettingsBtn" class="map-chip ride-settings" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
 
       <div class="ride-controls">
@@ -401,21 +401,17 @@
             <span class="settings-card-chevron" aria-hidden="true"></span>
           </summary>
           <div class="setting-row stacked">
+            <span class="setting-row-main" id="mapStyleLabel">Map style</span>
+            <div class="map-style-grid" id="mapStyleGrid" role="radiogroup" aria-labelledby="mapStyleLabel"></div>
+            <p class="setting-note setting-warning" id="mapStyleFallbackNote" hidden></p>
+            <p class="setting-note">Topo adds hill shading and contour lines. Classic, Toner, and Terrain need the Stadia Maps API key below.</p>
+          </div>
+          <div class="setting-row stacked">
             <div class="setting-row-main">
-              <label for="mapTypeSelect">Map style</label>
-              <span class="select-wrap">
-                <select id="mapTypeSelect">
-                  <option value="road">Road</option>
-                  <option value="topo">Topo</option>
-                  <option value="bright">Bright</option>
-                  <option value="classic">Classic</option>
-                  <option value="satellite">Satellite</option>
-                  <option value="toner">Toner</option>
-                  <option value="terrain">Terrain</option>
-                </select>
-              </span>
+              <span id="buildings3dLabel">3D buildings</span>
+              <button class="switch" role="switch" data-switch="buildings3d" aria-labelledby="buildings3dLabel"></button>
             </div>
-            <p class="setting-note">Topo adds hill shading and contour lines. Classic, Satellite, Toner, and Terrain need the Stadia Maps API key below.</p>
+            <p class="setting-note">Raises buildings off the map on the live ride screen. Topo already shows them. Uses a little more battery.</p>
           </div>
           <div class="setting-row stacked">
             <div class="setting-row-main">
@@ -458,7 +454,7 @@
               <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
               <button id="saveStadiaKeyBtn" class="btn">Save</button>
             </div>
-            <p class="setting-note">Without a key, Map style is limited to Road, Topo, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Satellite, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
+            <p class="setting-note">Without a key, Map style is limited to Road, Topo, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
           </div>
         </details>
 
@@ -526,14 +522,9 @@
               </span>
             </div>
             <div class="voice-slider">
-              <label for="voiceRate">Speed</label>
-              <input id="voiceRate" class="voice-rate" type="range" min="0.5" max="2" step="0.1" value="1">
-              <output class="voice-rate-value" for="voiceRate">1.0×</output>
-            </div>
-            <div class="voice-slider">
-              <label for="voicePitch">Pitch</label>
-              <input id="voicePitch" class="voice-pitch" type="range" min="0" max="2" step="0.1" value="1">
-              <output class="voice-pitch-value" for="voicePitch">1.0</output>
+              <label for="voiceVolume">Volume</label>
+              <input id="voiceVolume" class="voice-volume" type="range" min="0" max="1" step="0.05" value="1">
+              <output class="voice-volume-value" for="voiceVolume">100%</output>
             </div>
             <button class="btn voice-test" type="button">Test voice</button>
             <p class="setting-note">The voice that speaks directions, street names included. Voices come from your device, so the list differs between phones and browsers.</p>

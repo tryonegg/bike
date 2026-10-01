@@ -13,14 +13,18 @@
 import { state, el } from "./state.js";
 import { formatDistance, haversineMeters } from "./format.js";
 import { distanceUnitLabel } from "./map-visuals.js";
-import { setLivePlanData } from "./live-map.js";
-import { destinationRoute, destinationMarkerElement } from "./ride-plan.js";
+import { setLivePlanData, updatePlanLine } from "./live-map.js";
+import { updateDirections } from "./directions.js";
+import { saveActiveSessionCheckpoint } from "./live-session.js";
+import { destinationRoute, destinationMarkerElement, resetRidePlan } from "./ride-plan.js";
 
 // The pin on the setup map, and where it was before picking started (so
 // Cancel can put it back).
 let marker = null;
 let beforePicking = null;
 let worker = null;
+// Whether the pin is being placed mid-ride (paused) rather than in setup.
+let duringRide = false;
 let requestId = 0;
 
 /** Wires the setup panel's Destination row and the pick bar's buttons. */
@@ -29,6 +33,7 @@ export function wireDestination() {
 	el.setupDestinationClearBtn.addEventListener("click", clearDestination);
 	el.destinationPickCancelBtn.addEventListener("click", cancelPicking);
 	el.destinationPickDoneBtn.addEventListener("click", finishPicking);
+	el.rideDestinationBtn.addEventListener("click", startRidePicking);
 	// Picking a saved route replaces the destination.
 	el.setupRouteSelect.addEventListener("change", () => {
 		if (el.setupRouteSelect.value) forgetDestination();
@@ -44,6 +49,15 @@ export function resetDestination() {
 /** Whether the rider is placing a destination pin, when setup shouldn't move the map. */
 export function isPickingDestination() {
 	return state.destinationPicking;
+}
+
+/** Mid-ride, while paused: pick a new destination to route to. */
+function startRidePicking() {
+	if (!state.currentSession?.paused) return;
+	duringRide = true;
+	marker?.remove();
+	marker = null;
+	startPicking();
 }
 
 function startPicking() {
@@ -85,6 +99,12 @@ function updatePickBar() {
 
 function cancelPicking() {
 	stopPicking();
+	if (duringRide) {
+		duringRide = false;
+		marker?.remove();
+		marker = null;
+		return;
+	}
 	if (beforePicking) {
 		marker.setLngLat(beforePicking);
 	} else {
@@ -97,7 +117,34 @@ function cancelPicking() {
 function finishPicking() {
 	if (!marker) return;
 	stopPicking();
+	if (duringRide) {
+		duringRide = false;
+		const point = marker.getLngLat().toArray();
+		marker.remove();
+		marker = null;
+		setRideDestination(point);
+		return;
+	}
 	setDestination(marker.getLngLat().toArray());
+}
+
+/** Replaces whatever the ride was following with a route to `point`, from the paused ride. */
+function setRideDestination(point) {
+	const session = state.currentSession;
+	if (!session) return;
+	const route = destinationRoute(point);
+	route.profile = session.activityType === "bike" ? "bike" : "foot";
+	resetRidePlan();
+	state.rideRoute = route;
+	session.destination = point;
+	session.routeId = null;
+	session.routeMode = "points";
+	session.routeCancelled = false;
+	session.nextWaypoint = 0;
+	session.lastReached = null;
+	updatePlanLine();
+	updateDirections();
+	saveActiveSessionCheckpoint();
 }
 
 /**
@@ -181,6 +228,10 @@ function recenterOnRider() {
 }
 
 function riderLngLat() {
+	if (duringRide) {
+		const last = state.currentSession?.lastPoint;
+		return last ? [last.lng, last.lat] : null;
+	}
 	const coords = state.setupPosition?.coords;
 	return coords ? [coords.longitude, coords.latitude] : null;
 }

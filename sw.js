@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.14.0";
+const CACHE_VERSION = "v1.14.2";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -26,6 +26,7 @@ const MAP_DATA_HOSTS = ["tiles.openfreemap.org", "elevation-tiles-prod.s3.amazon
 // The app's logic, split across js/*.js ES modules and imported from app.js.
 const APP_MODULES = [
   "./js/constants.js",
+  "./js/map-previews.js",
   "./js/state.js",
   "./js/format.js",
   "./js/colors.js",

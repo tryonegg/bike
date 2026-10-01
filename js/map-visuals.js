@@ -109,13 +109,28 @@ export function getMarkerSizeConfig(size) {
  *
  * @param {"low"|"medium"|"high"} contrast - Anything other than "low"/"medium"
  *   is treated as "high".
+ * @param {string} [mapType] - Defaults to the saved map style. Toner's black
+ *   roads swallow every contrast's dark halo and pale yellow line, so it gets
+ *   a magenta line on a white halo whatever the contrast.
  * @returns {{lineColor: string, lineWeight: number, lineOpacity: number,
  *   haloColor: string, haloWeight: number, haloOpacity: number,
  *   dashArray: string}} `dashArray` is space-separated pixel lengths — see
  *   `linePaint` in live-map.js for how that's converted to MapLibre's
  *   line-width-relative units.
  */
-export function getGuideLineStyle(contrast) {
+export function getGuideLineStyle(contrast, mapType = state.prefs.mapType) {
+	if (mapType === "toner") {
+		return {
+			lineColor: "#ff1f8f",
+			lineWeight: 3.5,
+			lineOpacity: 1,
+			haloColor: "#ffffff",
+			haloWeight: 8,
+			haloOpacity: 0.95,
+			dashArray: "10 12",
+		};
+	}
+
 	if (contrast === "low") {
 		return {
 			lineColor: "#ffffff",

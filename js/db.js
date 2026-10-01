@@ -12,6 +12,7 @@ import {
 	PREF_STORE,
 	ROUTE_STORE,
 	LIVE_MAP_ZOOM,
+	MAP_STYLE_NAMES,
 	ACTIVITIES,
 	CALENDAR_COLOR_NOTES,
 	GUIDE_HIDE_DISTANCE_OPTIONS_M,
@@ -139,8 +140,12 @@ export async function loadPrefs() {
 	state.prefs.unit = await getPref("unit", "imperial");
 	state.prefs.theme = await getPref("theme", "light");
 	state.prefs.stadiaKey = await getPref("stadiaKey", "");
-	state.prefs.mapType = await getPref("mapType", "road");
+	const mapType = await getPref("mapType", "road");
+	// Satellite was dropped (Stadia only serves it on a paid plan), and an
+	// imported backup could carry any value.
+	state.prefs.mapType = mapType === "road" || mapType in MAP_STYLE_NAMES ? mapType : "road";
 	state.prefs.terrain3d = (await getPref("terrain3d", false)) === true;
+	state.prefs.buildings3d = (await getPref("buildings3d", false)) === true;
 	// Checked because an imported backup could carry anything, and a bad zoom
 	// would leave the live map unable to draw.
 	const liveMapZoom = await getPref("liveMapZoom", LIVE_MAP_ZOOM);
@@ -163,9 +168,8 @@ export async function loadPrefs() {
 	state.prefs.navHomeVoice = (await getPref("navHomeVoice", false)) === true;
 	const voiceURI = await getPref("voiceURI", "");
 	state.prefs.voiceURI = typeof voiceURI === "string" ? voiceURI : "";
-	const inRange = (value, min, max, fallback) => (Number.isFinite(value) && value >= min && value <= max ? value : fallback);
-	state.prefs.voiceRate = inRange(await getPref("voiceRate", 1), 0.5, 2, 1);
-	state.prefs.voicePitch = inRange(await getPref("voicePitch", 1), 0, 2, 1);
+	const voiceVolume = await getPref("voiceVolume", 1);
+	state.prefs.voiceVolume = Number.isFinite(voiceVolume) && voiceVolume >= 0 && voiceVolume <= 1 ? voiceVolume : 1;
 	await migratePlannedRoute();
 	state.prefs.ridesView = await getPref("ridesView", "list");
 	const statsActivity = await getPref("statsActivity", "all");

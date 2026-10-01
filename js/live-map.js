@@ -383,7 +383,10 @@ export function createVectorMap(options, addOverlays, { terrainCapable = false }
 	map.on("style.load", () => {
 		state.mapStatus.get(map).styleReady = true;
 		addTopoLayers(map);
-		if (terrainCapable) updateTerrain(map, state.prefs.terrain3d);
+		if (terrainCapable) {
+			updateTerrain(map, state.prefs.terrain3d);
+			if (state.prefs.buildings3d) addBuildings3d(map);
+		}
 		addOverlays(map);
 	});
 	map.on("error", (event) => handleMapError(map, event));
@@ -410,11 +413,13 @@ export function isMapStyleReady(map) {
  *
  * @param {boolean} useStadia - `true` for Stadia Maps (requires
  *   `state.prefs.stadiaKey`), `false` for the OpenFreeMap fallback.
+ * @param {string} [mapType] - Defaults to the saved map-style preference; the
+ *   settings screen passes each option to preview it.
  * @returns {string} Style URL.
  */
-function mapStyleUrl(useStadia) {
+export function mapStyleUrl(useStadia, mapType = state.prefs.mapType) {
 	const dark = state.prefs.theme === "dark";
-	const names = MAP_STYLE_NAMES[state.prefs.mapType];
+	const names = MAP_STYLE_NAMES[mapType];
 
 	if (useStadia) {
 		const styleName = names?.stadia ?? (dark ? "alidade_smooth_dark" : "alidade_smooth");
@@ -483,6 +488,11 @@ function handleMapError(map, event) {
 	// the whole ride. Offline tile misses are not a key problem, so they stay put.
 	const httpStatus = event.error?.status;
 	if (!status.styleReady || httpStatus === 401 || httpStatus === 403) {
+		// Say why the map went back to plain Road, so a refusal of just one
+		// style (a key whose plan doesn't cover it) isn't a silent mystery.
+		window.dispatchEvent(
+			new CustomEvent("map-style-fallback", { detail: { mapType: state.prefs.mapType, sourceId: event.sourceId ?? null, status: httpStatus ?? null } }),
+		);
 		setMapStyle(map, false);
 	}
 }
@@ -533,6 +543,8 @@ export function setLivePlanData() {
 function addLiveOverlayLayers(map) {
 	const guideStyle = getGuideLineStyle(state.prefs.guideContrast);
 	const round = { "line-cap": "round", "line-join": "round" };
+	const plan = planLineStyle(state.prefs.mapType);
+	const ride = rideLineStyle(state.prefs.mapType);
 
 	map.addSource(LIVE_ROUTE_SOURCE, { type: "geojson", data: lineData(state.liveRouteCoords) });
 	map.addSource(LIVE_PLAN_SOURCE, { type: "geojson", data: lineData(state.livePlanCoords) });
@@ -568,21 +580,28 @@ function addLiveOverlayLayers(map) {
 		type: "line",
 		source: LIVE_PLAN_SOURCE,
 		layout: round,
-		paint: { "line-color": "#ffffff", "line-width": 10, "line-opacity": 0.85 },
+		paint: { "line-color": "#ffffff", "line-width": plan.casingWidth, "line-opacity": plan.opacity },
 	});
 	map.addLayer({
 		id: "live-plan",
 		type: "line",
 		source: LIVE_PLAN_SOURCE,
 		layout: round,
-		paint: { "line-color": "#6d4ad8", "line-width": 6, "line-opacity": 0.85 },
+		paint: { "line-color": plan.color, "line-width": plan.width, "line-opacity": plan.opacity },
+	});
+	map.addLayer({
+		id: "live-route-casing",
+		type: "line",
+		source: LIVE_ROUTE_SOURCE,
+		layout: round,
+		paint: { "line-color": "#ffffff", "line-width": ride.casingWidth },
 	});
 	map.addLayer({
 		id: "live-route",
 		type: "line",
 		source: LIVE_ROUTE_SOURCE,
 		layout: round,
-		paint: { "line-color": "#0b5d3b", "line-width": 5 },
+		paint: { "line-color": ride.color, "line-width": ride.width },
 	});
 	map.addLayer({
 		id: "live-guide-halo",
@@ -598,6 +617,31 @@ function addLiveOverlayLayers(map) {
 		layout: round,
 		paint: guideLinePaint(guideStyle),
 	});
+}
+
+/**
+ * How the planned (turn-by-turn) route is drawn. Toner's black roads swallow
+ * the usual purple, so there it is a bright orange on a wider white casing.
+ *
+ * @param {string} mapType
+ * @returns {{color: string, width: number, casingWidth: number, opacity: number}}
+ */
+export function planLineStyle(mapType) {
+	if (mapType === "toner") return { color: "#ff6a00", width: 7, casingWidth: 13, opacity: 1 };
+	return { color: "#6d4ad8", width: 6, casingWidth: 10, opacity: 0.85 };
+}
+
+/**
+ * How the line of where the rider has been is drawn. On Toner it is a bright
+ * blue on a white casing, since dark green vanishes into the black roads.
+ *
+ * @param {string} mapType
+ * @returns {{color: string, width: number, casingWidth: number}}
+ */
+export function rideLineStyle(mapType) {
+	if (mapType === "toner") return { color: "#0a6cff", width: 5, casingWidth: 9 };
+	// No casing: a zero-width one draws nothing.
+	return { color: "#0b5d3b", width: 5, casingWidth: 0 };
 }
 
 /** @param {ReturnType<typeof import("./map-visuals.js").getGuideLineStyle>} guideStyle @returns {Object} MapLibre line-paint properties for the guide line's halo. */
@@ -754,6 +798,40 @@ function styleLayerAnchors(map) {
 }
 
 /**
+ * Raises the style's buildings into 3D, using the same building tiles it
+ * already draws flat. Styles that extrude buildings themselves (Topo's
+ * Liberty) are left alone.
+ *
+ * @param {maplibregl.Map} map
+ * @param {string} [mapType] - Defaults to the saved map style.
+ */
+export function addBuildings3d(map, mapType = state.prefs.mapType) {
+	const layers = map.getStyle().layers;
+	if (layers.some((layer) => layer.type === "fill-extrusion")) return;
+	const flat = layers.find((layer) => layer["source-layer"] === "building");
+	if (!flat) return;
+
+	const dark = mapType === "fiord" || (mapType === "road" && state.prefs.theme === "dark");
+	const color = dark ? "#4a5068" : mapType === "toner" ? "#9a9a9a" : "#d8d4cc";
+	map.addLayer(
+		{
+			id: "buildings-3d",
+			type: "fill-extrusion",
+			source: flat.source,
+			"source-layer": "building",
+			minzoom: 14,
+			paint: {
+				"fill-extrusion-color": color,
+				"fill-extrusion-height": ["coalesce", ["get", "render_height"], 6],
+				"fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+				"fill-extrusion-opacity": 0.85,
+			},
+		},
+		styleLayerAnchors(map).labelBeforeId,
+	);
+}
+
+/**
  * Adds the topo-mode hillshade and contour-line/label layers to a map, if
  * "Topo" is the current map-type preference. A no-op (and safe to call
  * unconditionally) when map type is "road", or when the DEM source isn't
@@ -761,8 +839,8 @@ function styleLayerAnchors(map) {
  *
  * @param {maplibregl.Map} map
  */
-function addTopoLayers(map) {
-	if (state.prefs.mapType !== "topo") return;
+export function addTopoLayers(map, mapType = state.prefs.mapType) {
+	if (mapType !== "topo") return;
 	// The map-level raster-dem source is shared with 3D terrain (ensureDemSource
 	// skips re-adding it if terrain already did); the contour lines below still
 	// need the demSource object itself, for its contourProtocolUrl.
@@ -1022,8 +1100,8 @@ function createGuideLabelMarker(map) {
  * @param {"low"|"medium"|"high"} guideContrast
  * @param {"small"|"medium"|"large"} markerSize
  */
-export function styleGuideLabel(element, guideContrast, markerSize) {
-	const guideStyle = getGuideLineStyle(guideContrast);
+export function styleGuideLabel(element, guideContrast, markerSize, mapType = state.prefs.mapType) {
+	const guideStyle = getGuideLineStyle(guideContrast, mapType);
 	element.style.setProperty("--guide-label-bg", guideStyle.haloColor);
 	element.style.setProperty("--guide-label-fg", guideStyle.lineColor);
 	// classList, not className: MapLibre keeps its own marker classes on it.

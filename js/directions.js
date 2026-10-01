@@ -17,7 +17,9 @@
  */
 
 import {
-	NAV_ANNOUNCE,
+	NAV_EARLY_S,
+	NAV_EARLY_MIN_M,
+	NAV_EARLY_MAX_M,
 	NAV_NOW_M,
 	NAV_THEN_M,
 	NAV_TURN_AROUND_DEG,
@@ -26,7 +28,6 @@ import {
 	NAV_FOLLOWING_M,
 	NAV_HOME_AWAY_M,
 	PLAN_ARRIVE_M,
-	VOICE_CLIPS,
 	METERS_PER_MILE,
 	FEET_PER_METER,
 } from "./constants.js";
@@ -63,14 +64,15 @@ const TURN_WORDS = {
 	uturn: "Make a U-turn",
 };
 
-const TURN_CLIPS = {
-	left: "turn_left",
-	right: "turn_right",
-	"slight-left": "bear_left",
-	"slight-right": "bear_right",
-	"sharp-left": "sharp_left",
-	"sharp-right": "sharp_right",
-	uturn: "u_turn",
+// Each turn as it's spoken, mid-sentence.
+const SPOKEN_TURNS = {
+	left: "turn left",
+	right: "turn right",
+	"slight-left": "bear left",
+	"slight-right": "bear right",
+	"sharp-left": "make a sharp left",
+	"sharp-right": "make a sharp right",
+	uturn: "make a U-turn",
 };
 
 // Riding speeds to estimate time to the next stop with, in m/s, until the
@@ -116,7 +118,7 @@ export function wireDirections() {
 		if (session) {
 			skipNextPoint(session);
 			if (memory) memory.skipped = true;
-			if (sheetFor?.voice) say(["point_skipped"]);
+			if (sheetFor?.voice) say("Skipping to the next point.");
 		}
 		closeSheet();
 		redraw?.();
@@ -125,7 +127,7 @@ export function wireDirections() {
 		const session = state.currentSession;
 		if (session && sheetFor?.kind === "route") cancelRideRoute(session);
 		if (session && sheetFor?.kind === "home") session.homeDirectionsOff = true;
-		if (sheetFor?.voice) say(["directions_stopped"]);
+		if (sheetFor?.voice) say("Directions stopped.");
 		closeSheet();
 		redraw?.();
 	});
@@ -151,6 +153,7 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 	listenForArrivals(session, source);
 	if (!source) {
 		el.navBanner.hidden = true;
+		el.navTurnFlash.hidden = true;
 		return;
 	}
 
@@ -158,12 +161,14 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 	if (source.voice) speakFor(source, view);
 	el.navBanner.hidden = !source.visual;
 	if (source.visual) render(view);
+	renderTurnFlash(source.visual ? view : null);
 	if (sheetFor) fillSheet(source);
 }
 
 /** Hides the banner and sheet: no ride, or a new one starting. */
 export function hideDirections() {
 	el.navBanner.hidden = true;
+	el.navTurnFlash.hidden = true;
 	closeSheet();
 	memory = null;
 	lastView = null;
@@ -305,10 +310,15 @@ function targetName(source) {
 
 /** The time to ride `meters` at the ride's average so far (or a typical pace until that's known). */
 function etaFor(meters, session) {
+	return meters / paceFor(session);
+}
+
+/** The ride's average speed so far, in m/s, or a typical pace until that's known. */
+function paceFor(session) {
 	const movingSeconds = getElapsedMs() / 1000;
 	const average = movingSeconds > 60 ? session.totalDistance / movingSeconds : 0;
 	const fallback = DEFAULT_SPEED_MPS[session.activityType] ?? DEFAULT_FOOT_SPEED_MPS;
-	return meters / (average > 1 ? average : fallback);
+	return average > 1 ? average : fallback;
 }
 
 function clamp(value) {
@@ -339,6 +349,21 @@ function render(view) {
 		`${el.navStopLabel.textContent}: ${stopValue} ${stopUnit}, about ${eta}${view.finish ? `. Tap to show ${finish ? "the next stop" : "the route end"}` : ""}`,
 	);
 	lastView = view;
+}
+
+/**
+ * The big turn arrow over the ride stats and banner, shown while the rider
+ * is within NAV_NOW_M of a turn (when the last prompt for it is spoken), and
+ * gone once it's made.
+ * @param {Object|null} view - From `describe`, or null to hide it.
+ */
+function renderTurnFlash(view) {
+	const step = view?.step;
+	const show = Boolean(step) && step.turn !== "arrive" && !view.offRoute && !view.turnAround && view.distance <= NAV_NOW_M;
+	el.navTurnFlash.hidden = !show;
+	if (!show) return;
+	el.navTurnFlashIcon.innerHTML = iconSvg(step.turn);
+	el.navTurnFlashText.textContent = TURN_WORDS[step.turn];
 }
 
 /** What the stop button calls the target when it's the only one left. */
@@ -383,8 +408,8 @@ function formatEta(seconds) {
 // ---- Voice ----
 
 /**
- * Says what's due: each turn as the rider comes within each announcement
- * distance of it and again as it's time to turn (a turn close behind it
+ * Says what's due: each turn about NAV_EARLY_S ahead, with its distance
+ * and street, and again as it's time to turn (a turn close behind each
  * chained on), "rerouting" when the rider leaves a route they'd been
  * following, "off route" for a route followed as is, and "turn around" when
  * heading away from a planned route.
@@ -396,7 +421,7 @@ function speakFor(source, view) {
 
 	if (view.offRoute) {
 		if (!memory.offRoute && memory.followedAlong >= NAV_FOLLOWING_M && now - memory.lastRerouteSpokenAt > NAV_REROUTE_SPEAK_MS) {
-			say([source.live ? "rerouting" : "off_route"]);
+			say(source.live ? "Rerouting." : "You're off the route.");
 			memory.lastRerouteSpokenAt = now;
 		}
 		memory.offRoute = true;
@@ -411,7 +436,7 @@ function speakFor(source, view) {
 	if (view.turnAround) {
 		// Riding out, the way home is always behind; only a planned route asks.
 		if (source.kind === "route" && now - memory.lastTurnAroundSpokenAt > TURN_AROUND_SPEAK_MS) {
-			say(["turn_around"]);
+			say("Turn around when you can.");
 			memory.lastTurnAroundSpokenAt = now;
 		}
 		return;
@@ -419,34 +444,48 @@ function speakFor(source, view) {
 
 	const step = view.step;
 	if (!step || step.turn === "arrive") return;
-	const stages = NAV_ANNOUNCE[state.prefs.unit] ?? NAV_ANNOUNCE.metric;
-	let stage = -1;
-	stages.forEach((announce, i) => {
-		if (view.distance <= announce.meters) stage = i;
-	});
-	if (view.distance <= NAV_NOW_M) stage = stages.length;
-	if (stage < 0) return;
-
+	// Two prompts a turn at most: about NAV_EARLY_S ahead, and as it's time to turn.
+	const atTurn = view.distance <= NAV_NOW_M;
+	if (!atTurn && view.distance > earlyMeters(state.currentSession)) return;
+	const stage = atTurn ? 1 : 0;
 	const key = `${step.turn}@${step.point[0].toFixed(4)},${step.point[1].toFixed(4)}`;
 	if ((memory.spoken.get(key) ?? -1) >= stage) return;
 	memory.spoken.set(key, stage);
 
-	// Recordings can't say street names; the device's voice speaks the lot.
-	const distanceClip = stage < stages.length ? stages[stage].clip : null;
-	const clips = distanceClip ? [distanceClip, TURN_CLIPS[step.turn]] : [TURN_CLIPS[step.turn]];
-	let text = `${distanceClip ? `${VOICE_CLIPS[distanceClip]} ` : ""}${spokenTurn(step)}`;
+	// At the turn itself it's just the turn: "Turn right."
+	let text = atTurn ? spokenTurn(step, false) : `in ${spokenDistance(view.distance)}, ${spokenTurn(step, true)}`;
 	const after = view.after;
 	if (after && after.turn !== "arrive" && after.along - step.along <= NAV_THEN_M) {
-		clips.push("then", TURN_CLIPS[after.turn]);
-		text += `, then ${spokenTurn(after)}`;
+		text += `, then ${spokenTurn(after, !atTurn)}`;
 	}
-	say(clips, sentence(text));
+	say(sentence(text));
 }
 
-/** A turn in words, with the street it's onto when that's known: "turn right onto Main Street". */
-function spokenTurn(step) {
-	const turn = VOICE_CLIPS[TURN_CLIPS[step.turn]];
-	const way = step.name ?? (step.kind ? `the ${step.kind}` : null);
+/**
+ * How far ahead a turn is first announced: NAV_EARLY_S at the rider's
+ * current speed (or the ride's average, or a typical pace, when stopped or
+ * unknown).
+ */
+function earlyMeters(session) {
+	const speed = session.lastPoint?.speed ?? 0;
+	const pace = speed >= 1 ? speed : paceFor(session);
+	return Math.min(NAV_EARLY_MAX_M, Math.max(NAV_EARLY_MIN_M, pace * NAV_EARLY_S));
+}
+
+/** A distance as spoken: "200 feet", "0.2 miles". */
+function spokenDistance(meters) {
+	const [value, unit] = formatNavDistance(meters);
+	const words = { ft: "feet", mi: "miles", m: "meters", km: "kilometers" };
+	return `${value} ${words[unit] ?? unit}`;
+}
+
+/**
+ * A turn in words, with the street it's onto when that's known and wanted:
+ * "turn right onto Main Street".
+ */
+function spokenTurn(step, withStreet) {
+	const turn = SPOKEN_TURNS[step.turn];
+	const way = withStreet ? (step.name ?? (step.kind ? `the ${step.kind}` : null)) : null;
 	return way ? `${turn} ${step.stay ? "to stay on" : "onto"} ${way}` : turn;
 }
 
@@ -469,20 +508,20 @@ function listenForArrivals(session, source) {
 	const skipped = memory.skipped && next > memory.nextWaypoint;
 	if (next > memory.nextWaypoint) {
 		memory.skipped = false;
-		if (!skipped && voiceRoute && !plan?.finished) say(["arrive_waypoint"], `You've reached point ${next}.`);
+		if (!skipped && voiceRoute && !plan?.finished) say(`You've reached point ${next}.`);
 	}
 	memory.nextWaypoint = next;
 
 	if (plan?.finished && !memory.routeFinished) {
 		memory.routeFinished = true;
-		if (voiceRoute && !skipped && !session.routeCancelled) say([plan.destination ? "arrive_destination" : "arrive_final"]);
+		if (voiceRoute && !skipped && !session.routeCancelled) say(plan.destination ? "You've arrived at your destination." : "You've reached the end of your route.");
 	}
 
 	if (source?.kind === "home") {
 		const meters = source.guidance.target.meters;
 		if (meters <= PLAN_ARRIVE_M && !memory.homeArrived) {
 			memory.homeArrived = true;
-			if (source.voice) say(["arrive_start"]);
+			if (source.voice) say("You're back at the start.");
 		} else if (meters > NAV_HOME_AWAY_M) {
 			memory.homeArrived = false;
 		}

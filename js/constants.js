@@ -119,9 +119,11 @@ export const PLAN_SIMPLIFY_M = 30;
 export const PLAN_ARRIVE_M = 30;
 export const PLAN_SKIP_AWAY_M = 60;
 
-// Turn-by-turn directions (directions.js). A turn is announced when the
-// rider comes within each of its unit's distances of it (the prompt starting
-// with that clip), and again within NAV_NOW_M, as it's time to turn. A turn
+// Turn-by-turn directions (directions.js). A turn is announced at most
+// twice: once about NAV_EARLY_S seconds ahead at the rider's speed (but no
+// nearer than NAV_EARLY_MIN_M or further than NAV_EARLY_MAX_M), with its
+// distance and the street, and again within NAV_NOW_M, as it's time to turn,
+// with just the turn (and the big turn arrow over the ride stats). A turn
 // within NAV_THEN_M after the one announced is chained on ("…, then turn
 // left"). Riding more than NAV_TURN_AROUND_DEG away from the way the route
 // goes (at speed) means turning around. "Rerouting" is said no more often
@@ -129,16 +131,9 @@ export const PLAN_SKIP_AWAY_M = 60;
 // following the route for NAV_FOLLOWING_M. Directions home start once the
 // rider is NAV_HOME_AWAY_M from the start, and count as arrived within
 // PLAN_ARRIVE_M of it.
-export const NAV_ANNOUNCE = {
-	imperial: [
-		{ meters: 402, clip: "in_quarter_mile" },
-		{ meters: 152, clip: "in_500_feet" },
-	],
-	metric: [
-		{ meters: 400, clip: "in_400_meters" },
-		{ meters: 150, clip: "in_150_meters" },
-	],
-};
+export const NAV_EARLY_S = 10;
+export const NAV_EARLY_MIN_M = 60;
+export const NAV_EARLY_MAX_M = 300;
 export const NAV_NOW_M = 30;
 export const NAV_THEN_M = 80;
 export const NAV_TURN_AROUND_DEG = 120;
@@ -147,44 +142,17 @@ export const NAV_REROUTE_SPEAK_MS = 60000;
 export const NAV_FOLLOWING_M = 30;
 export const NAV_HOME_AWAY_M = 200;
 
-// The voice clips directions can play (voice.js), each an audio/<name>.mp3,
-// with the words it says (also what the device's speech synthesis reads when
-// a clip's file is missing). Prompts chain them: "in_500_feet" + "turn_right".
-export const VOICE_CLIPS = {
-	in_quarter_mile: "in a quarter mile,",
-	in_500_feet: "in 500 feet,",
-	in_400_meters: "in 400 meters,",
-	in_150_meters: "in 150 meters,",
-	turn_left: "turn left",
-	turn_right: "turn right",
-	bear_left: "bear left",
-	bear_right: "bear right",
-	sharp_left: "make a sharp left",
-	sharp_right: "make a sharp right",
-	u_turn: "make a U-turn",
-	then: "then",
-	turn_around: "turn around when you can.",
-	arrive_waypoint: "you've reached your next point.",
-	arrive_final: "you've reached the end of your route.",
-	arrive_start: "you're back at the start.",
-	arrive_destination: "you've arrived at your destination.",
-	rerouting: "rerouting.",
-	off_route: "you're off the route.",
-	point_skipped: "skipping to the next point.",
-	directions_stopped: "directions stopped.",
-};
-
 // Base-style catalog for the "Map Style" setting, keyed by state.prefs.mapType.
 // `free` is the OpenFreeMap style name (null when that look has no free
-// equivalent, e.g. satellite imagery); `stadia` is the Stadia Maps style name,
+// equivalent, e.g. Toner); `stadia` is the Stadia Maps style name,
 // used once state.prefs.stadiaKey is set. "road" isn't listed here: it's the
 // default, and the only style that also switches with the light/dark theme
 // (see mapStyleUrl in live-map.js).
 export const MAP_STYLE_NAMES = {
 	topo: { free: "liberty", stadia: "outdoors" },
 	bright: { free: "bright", stadia: "alidade_bright" },
+	fiord: { free: "fiord", stadia: "alidade_smooth_dark" },
 	classic: { free: null, stadia: "osm_bright" },
-	satellite: { free: null, stadia: "alidade_satellite" },
 	toner: { free: null, stadia: "stamen_toner" },
 	terrain: { free: null, stadia: "stamen_terrain" },
 };

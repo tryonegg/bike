@@ -35,7 +35,6 @@ export async function startCountdownFlow() {
 
 	state.selectedActivityType = "bike";
 	state.selectedKeepScreenOn = true;
-	el.keepScreenOnToggle.checked = true;
 	document.querySelectorAll(".activity-btn").forEach((b) => b.classList.remove("active"));
 	document.querySelector('[data-activity="bike"]').classList.add("active");
 	beginRideSetup();

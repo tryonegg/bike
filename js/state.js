@@ -19,6 +19,7 @@ export const state = {
 		stadiaKey: "",
 		mapType: "road",
 		terrain3d: false,
+		buildings3d: false,
 		liveMapZoom: LIVE_MAP_ZOOM,
 		comparePastRides: true,
 		// Which side of the map the ride stats sit on in landscape: "left" or "right".
@@ -44,8 +45,7 @@ export const state = {
 		// The device voice spoken directions use (a SpeechSynthesisVoice's URI,
 		// or "" for the device's default), and its speed and pitch.
 		voiceURI: "",
-		voiceRate: 1,
-		voicePitch: 1,
+		voiceVolume: 1,
 		ridesView: "list",
 		// Which activity the home screen's month and week totals count, or "all".
 		statsActivity: "all",
@@ -119,7 +119,7 @@ export const state = {
 	setupHeadingAnchor: null,
 	countdownIntervalId: null,
 	selectedActivityType: "bike",
-	selectedKeepScreenOn: false,
+	selectedKeepScreenOn: true,
 	modalResolver: null,
 	modalTimer: null,
 	modalCountdownTimer: null,
@@ -166,7 +166,8 @@ export const el = {
 	},
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
-	mapTypeSelect: document.getElementById("mapTypeSelect"),
+	mapStyleGrid: document.getElementById("mapStyleGrid"),
+	mapStyleFallbackNote: document.getElementById("mapStyleFallbackNote"),
 	statsSideToggle: document.getElementById("statsSideToggle"),
 	calendarColorToggle: document.getElementById("calendarColorToggle"),
 	calendarColorNote: document.getElementById("calendarColorNote"),
@@ -218,6 +219,9 @@ export const el = {
 	setupRouteSelect: document.getElementById("setupRouteSelect"),
 	// Turn-by-turn directions: the banner under the ride stats, its sheet, and
 	// the settings (both screens' toggles share the "nav-pref-toggle" class).
+	navTurnFlash: document.getElementById("navTurnFlash"),
+	navTurnFlashIcon: document.getElementById("navTurnFlashIcon"),
+	navTurnFlashText: document.getElementById("navTurnFlashText"),
 	navBanner: document.getElementById("navBanner"),
 	navIcon: document.getElementById("navIcon"),
 	navDistance: document.getElementById("navDistance"),
@@ -242,8 +246,8 @@ export const el = {
 	settingSwitches: document.querySelectorAll(".switch[data-switch]"),
 	settingsCards: document.querySelectorAll("details.settings-card"),
 	navHomeRows: document.querySelectorAll("[data-nav-home]"),
-	// The voice picker: a block with a .voice-select, .voice-rate, .voice-pitch
-	// and .voice-test.
+	// The voice picker: a block with a .voice-select, .voice-volume and
+	// .voice-test.
 	voiceSettings: document.querySelectorAll("[data-voice-settings]"),
 	setupRouteModeRow: document.getElementById("setupRouteModeRow"),
 	setupDestinationBtn: document.getElementById("setupDestinationBtn"),
@@ -256,6 +260,7 @@ export const el = {
 	setupRouteModeToggle: document.getElementById("setupRouteModeToggle"),
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
 	settingsBackBtn: document.getElementById("settingsBackBtn"),
+	rideDestinationBtn: document.getElementById("rideDestinationBtn"),
 	rideSettingsBtn: document.getElementById("rideSettingsBtn"),
 	stadiaKeyInput: document.getElementById("stadiaKeyInput"),
 	saveStadiaKeyBtn: document.getElementById("saveStadiaKeyBtn"),
@@ -289,7 +294,6 @@ export const el = {
 	pathLabReadout: document.getElementById("pathLabReadout"),
 	pathLabStatus: document.getElementById("pathLabStatus"),
 	pathLabTable: document.getElementById("pathLabTable"),
-	keepScreenOnToggle: document.getElementById("keepScreenOnToggle"),
 	setupTopBar: document.getElementById("setupTopBar"),
 	setupBottomPanel: document.getElementById("setupBottomPanel"),
 	setupBackBtn: document.getElementById("setupBackBtn"),

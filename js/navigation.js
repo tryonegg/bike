@@ -15,7 +15,8 @@ import { formatElevation } from "./format.js";
 import { renderPastRides, shiftCalendarMonth } from "./history-view.js";
 import { updateLiveStats, togglePauseSession, endSessionWithConfirm, saveActiveSessionCheckpoint, finalizeSession } from "./live-session.js";
 import { applyMapVisualPrefs } from "./map-visuals.js";
-import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, mapTypeNeedsStadiaKey, rebuildTerrain, updateGuideLine } from "./live-map.js";
+import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, rebuildTerrain, updateGuideLine } from "./live-map.js";
+import { wireMapPreviews, syncMapPreviewSelection, startMapPreviews, stopMapPreviews, restartMapPreviews } from "./map-previews.js";
 import { resetRouteHome } from "./route-home.js";
 import { updateDirections, wireDirections } from "./directions.js";
 import { unlockVoice, voiceChoices, onVoicesChanged, testVoice, speechSupported } from "./voice.js";
@@ -59,7 +60,8 @@ export function wireEvents() {
 
 	el.themeToggle.addEventListener("click", (event) => handleThemeClick(event));
 
-	el.mapTypeSelect.addEventListener("change", () => handleMapTypeChange(el.mapTypeSelect));
+	wireMapPreviews(handleMapTypeChange);
+	window.addEventListener("map-style-fallback", (event) => showMapStyleFallback(event.detail));
 
 	for (const toggle of el.settingSwitches) toggle.addEventListener("click", handleSwitchClick);
 
@@ -105,19 +107,7 @@ export function wireEvents() {
 			state.selectedActivityType = activity;
 			document.querySelectorAll(".activity-btn").forEach((b) => b.classList.remove("active"));
 			event.target.classList.add("active");
-			// Auto-enable screen on for bike activity
-			if (activity === "bike") {
-				el.keepScreenOnToggle.checked = true;
-				state.selectedKeepScreenOn = true;
-			} else {
-				el.keepScreenOnToggle.checked = false;
-				state.selectedKeepScreenOn = false;
-			}
 		});
-	});
-
-	el.keepScreenOnToggle.addEventListener("change", (event) => {
-		state.selectedKeepScreenOn = event.target.checked;
 	});
 
 	// Starting a ride is a tap, which is what lets spoken directions play later.
@@ -275,16 +265,33 @@ async function handleThemeClick(event) {
 	applyTheme();
 	syncToggles();
 	rebuildMapStyles();
+	restartMapPreviews();
 	// The chart reads its colours from the theme when it draws.
 	if (state.currentPostSession) renderElevationChart(state.currentPostSession);
 }
 
-/** Handles the map-style select. */
-async function handleMapTypeChange(select) {
-	state.prefs.mapType = select.value;
+/**
+ * Explains, under the map style picker, why a Stadia style fell back to plain
+ * Road: usually the key (or its plan) not covering that style.
+ *
+ * @param {{mapType: string, sourceId: string|null, status: number|null}} detail
+ */
+function showMapStyleFallback({ mapType, sourceId, status }) {
+	const what = sourceId ? `its "${sourceId}" tiles` : "the style";
+	const code = status ? ` (HTTP ${status})` : "";
+	el.mapStyleFallbackNote.textContent = `Stadia refused ${what} for ${mapType}${code}, so the map showed Road instead. Check that your key's plan includes this style at client.stadiamaps.com.`;
+	el.mapStyleFallbackNote.hidden = false;
+}
+
+/** Handles a tap on one of the map-style previews. */
+async function handleMapTypeChange(mapType) {
+	state.prefs.mapType = mapType;
+	el.mapStyleFallbackNote.hidden = true;
 	await setPref("mapType", state.prefs.mapType);
 	syncToggles();
 	rebuildMapStyles();
+	// The guide chip's colors follow the map style.
+	applyMapVisualPrefs();
 }
 
 /**
@@ -295,6 +302,11 @@ async function handleMapTypeChange(select) {
  */
 const SWITCH_EFFECTS = {
 	terrain3d: rebuildTerrain,
+	// Buildings are part of the base style, so it is rebuilt, previews included.
+	buildings3d: () => {
+		rebuildMapStyles();
+		restartMapPreviews();
+	},
 	// Drops the current route so, mid-ride, the next one follows the new
 	// setting straight away.
 	routeAvoidRetrace: () => {
@@ -366,7 +378,7 @@ async function handleBackToStartClick(event) {
 }
 
 /**
- * Wires the voice picker: the voice, its speed and pitch (each saved as it's changed), and the test button. The browser
+ * Wires the voice picker: the voice and its volume (each saved as it's changed), and the test button. The browser
  * loads its voices late, so the list is filled in again whenever they change.
  */
 function wireVoicePickers() {
@@ -377,24 +389,19 @@ function wireVoicePickers() {
 			await setPref("voiceURI", state.prefs.voiceURI);
 			syncVoicePickers();
 		});
-		for (const [selector, key] of [
-			[".voice-rate", "voiceRate"],
-			[".voice-pitch", "voicePitch"],
-		]) {
-			const slider = block.querySelector(selector);
-			// The label follows the slider as it moves; the value's saved once let go.
-			slider.addEventListener("input", () => {
-				state.prefs[key] = Number(slider.value);
-				syncVoicePickers();
-			});
-			slider.addEventListener("change", () => setPref(key, state.prefs[key]));
-		}
+		const slider = block.querySelector(".voice-volume");
+		// The label follows the slider as it moves; the value's saved once let go.
+		slider.addEventListener("input", () => {
+			state.prefs.voiceVolume = Number(slider.value);
+			syncVoicePickers();
+		});
+		slider.addEventListener("change", () => setPref("voiceVolume", state.prefs.voiceVolume));
 		block.querySelector(".voice-test").addEventListener("click", testVoice);
 	}
 	syncVoicePickers();
 }
 
-/** Brings the voice picker up to date: the device's voices, and the picked voice, speed and pitch. */
+/** Brings the voice picker up to date: the device's voices, and the picked voice and volume. */
 function syncVoicePickers() {
 	const choices = voiceChoices();
 	for (const block of el.voiceSettings) {
@@ -416,10 +423,8 @@ function syncVoicePickers() {
 		}
 		// A voice picked on another device (or since removed) falls back to the default.
 		select.value = choices.some((choice) => choice.value === state.prefs.voiceURI) ? state.prefs.voiceURI : "";
-		block.querySelector(".voice-rate").value = String(state.prefs.voiceRate);
-		block.querySelector(".voice-pitch").value = String(state.prefs.voicePitch);
-		block.querySelector(".voice-rate-value").textContent = `${state.prefs.voiceRate.toFixed(1)}×`;
-		block.querySelector(".voice-pitch-value").textContent = state.prefs.voicePitch.toFixed(1);
+		block.querySelector(".voice-volume").value = String(state.prefs.voiceVolume);
+		block.querySelector(".voice-volume-value").textContent = `${Math.round(state.prefs.voiceVolume * 100)}%`;
 	}
 }
 
@@ -443,14 +448,10 @@ export function syncToggles() {
 	const themeButtons = el.themeToggle.querySelectorAll("button");
 	themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === state.prefs.theme));
 
-	// Styles with no free rendition (Classic, Satellite, Toner, Terrain) stay
-	// selectable — a saved choice shouldn't vanish — but are greyed out until a
-	// Stadia key makes them show anything but plain Road.
-	const noStadiaKey = !state.prefs.stadiaKey;
-	el.mapTypeSelect.value = state.prefs.mapType;
-	for (const option of el.mapTypeSelect.options) {
-		option.disabled = noStadiaKey && mapTypeNeedsStadiaKey(option.value);
-	}
+	// Styles with no free rendition (Classic, Toner, Terrain) stay
+	// selectable-looking — a saved choice shouldn't vanish — but are greyed out
+	// until a Stadia key makes them show anything but plain Road.
+	syncMapPreviewSelection();
 
 	for (const toggle of el.settingSwitches) {
 		toggle.setAttribute("aria-checked", String(Boolean(state.prefs[toggle.dataset.switch])));
@@ -589,6 +590,8 @@ export function showScreen(name) {
 		screen.classList.toggle("active", key === name);
 	});
 	state.currentScreen = name;
+	if (name === "settings") startMapPreviews();
+	else stopMapPreviews();
 }
 
 /**
