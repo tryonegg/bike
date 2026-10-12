@@ -128,9 +128,9 @@ export const PLAN_SKIP_AWAY_M = 60;
 // left"). Riding more than NAV_TURN_AROUND_DEG away from the way the route
 // goes (at speed) means turning around. "Rerouting" is said no more often
 // than every NAV_REROUTE_SPEAK_MS, and only after the rider had been
-// following the route for NAV_FOLLOWING_M. Directions home start once the
-// rider is NAV_HOME_AWAY_M from the start, and count as arrived within
-// PLAN_ARRIVE_M of it.
+// following the route for NAV_FOLLOWING_M. The Route to Start button is
+// offered once the rider is NAV_HOME_AWAY_M from the start, and directions
+// there end on arriving within PLAN_ARRIVE_M of it.
 export const NAV_EARLY_S = 10;
 export const NAV_EARLY_MIN_M = 60;
 export const NAV_EARLY_MAX_M = 300;

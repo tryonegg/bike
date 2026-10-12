@@ -5,11 +5,14 @@
  * banner's close button opens (skip the next stop, cancel the route, or
  * keep going).
  *
- * Directions follow the ride's planned route (ride-plan.js) while one is
- * being followed, and otherwise the route home (route-home.js) once the
- * rider is well away from the start, each only when its settings allow:
- * `navRouteVisual`/`navRouteVoice` and `navHomeVisual`/`navHomeVoice` (the
- * latter only with Back to Start set to Route).
+ * Directions follow the route to the start (route-home.js) once the rider
+ * asks for them with the map's Route to Start button, which is offered when
+ * they're well away from the start, and otherwise the ride's planned route
+ * (ride-plan.js) while one is being followed. Each needs its settings:
+ * `navHomeVisual`/`navHomeVoice` (only with Back to Start set to Route)
+ * for the route to the start, `navRouteVisual`/`navRouteVoice` for a
+ * planned route. Directions to the start stop on arriving there, or when
+ * the rider stops them, and the button comes back.
  *
  * The guidance both give is {steps, along, offRoute, target, following,
  * stopsLeft, canSkip}: steps (route-steps.js) each with `along`, the meters
@@ -36,6 +39,8 @@ import { haversineMeters, bearingDegrees } from "./format.js";
 import { ridePlanGuidance, skipNextPoint, cancelRideRoute } from "./ride-plan.js";
 import { latestRouteHome } from "./route-home.js";
 import { say } from "./voice.js";
+import { TURN_WORDS, turnInstruction } from "./route-steps.js";
+import { markAt, pointName } from "./point-marks.js";
 import { getElapsedMs } from "./live-session.js";
 
 // Line icons for each turn, drawn in a 24-unit box.
@@ -52,16 +57,6 @@ const ICONS = {
 	reroute: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
 	skip: '<path d="m5 6 6 6-6 6"/><path d="m13 6 6 6-6 6"/>',
 	cancel: '<path d="M6 6l12 12"/><path d="M18 6 6 18"/>',
-};
-
-const TURN_WORDS = {
-	left: "Turn left",
-	right: "Turn right",
-	"slight-left": "Bear left",
-	"slight-right": "Bear right",
-	"sharp-left": "Sharp left",
-	"sharp-right": "Sharp right",
-	uturn: "Make a U-turn",
 };
 
 // Each turn as it's spoken, mid-sentence.
@@ -102,8 +97,15 @@ export function setDirectionsRedraw(fn) {
 	redraw = fn;
 }
 
-/** Wires up the banner's close button and the sheet. Called once from `wireEvents`. */
+/** Wires up the Route to Start button, the banner's close button, and the sheet. Called once from `wireEvents`. */
 export function wireDirections() {
+	el.startRouteBtn.addEventListener("click", () => {
+		const session = state.currentSession;
+		if (!session) return;
+		session.startDirections = true;
+		updateDirections();
+		redraw?.();
+	});
 	el.navCloseBtn.addEventListener("click", openSheet);
 	el.navStopBtn.addEventListener("click", () => {
 		showFinish = !showFinish;
@@ -126,7 +128,7 @@ export function wireDirections() {
 	el.navCancelBtn.addEventListener("click", () => {
 		const session = state.currentSession;
 		if (session && sheetFor?.kind === "route") cancelRideRoute(session);
-		if (session && sheetFor?.kind === "home") session.homeDirectionsOff = true;
+		if (session && sheetFor?.kind === "home") session.startDirections = false;
 		if (sheetFor?.voice) say("Directions stopped.");
 		closeSheet();
 		redraw?.();
@@ -148,9 +150,12 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 		return;
 	}
 	if (memory?.session !== session) memory = freshMemory(session);
+	el.startRouteBtn.hidden = !canStartDirections(session, point);
 
-	const source = activeGuidance(session, point);
+	let source = activeGuidance(session);
 	listenForArrivals(session, source);
+	// Arriving at the start ends directions there.
+	if (source?.kind === "home" && !session.startDirections) source = activeGuidance(session);
 	if (!source) {
 		el.navBanner.hidden = true;
 		el.navTurnFlash.hidden = true;
@@ -167,6 +172,7 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 
 /** Hides the banner and sheet: no ride, or a new one starting. */
 export function hideDirections() {
+	el.startRouteBtn.hidden = true;
 	el.navBanner.hidden = true;
 	el.navTurnFlash.hidden = true;
 	closeSheet();
@@ -184,46 +190,58 @@ function freshMemory(session) {
 		offRoute: false,
 		lastRerouteSpokenAt: 0,
 		lastTurnAroundSpokenAt: 0,
-		homeArrived: false,
-		homeAway: false,
 		followedAlong: 0,
 	};
 }
 
-/**
- * Which guidance applies: the planned route while it's being followed and
- * its directions are on, else the route home once the rider is well away
- * from the start and those directions are on, else none.
- */
-function activeGuidance(session, point) {
+/** Whether directions to the start are turned on in settings (and make sense for this activity). */
+function startDirectionsAllowed(session) {
 	const prefs = state.prefs;
+	return prefs.backToStart === "route" && (prefs.navHomeVisual || prefs.navHomeVoice) && session.activityType !== "kayak";
+}
+
+/**
+ * Whether to offer the Route to Start button: directions to the start
+ * allowed but not on, a route there found, and the rider well away from it.
+ */
+function canStartDirections(session, point) {
+	if (session.startDirections || !startDirectionsAllowed(session) || !latestRouteHome()) return false;
+	const start = session.points[0];
+	return Boolean(start) && haversineMeters(point.lat, point.lng, start.lat, start.lng) >= NAV_HOME_AWAY_M;
+}
+
+/**
+ * Which guidance applies: the route to the start once the rider's asked for
+ * it, else the planned route while it's being followed and its directions
+ * are on, else none.
+ */
+function activeGuidance(session) {
+	const prefs = state.prefs;
+	const home = session.startDirections && startDirectionsAllowed(session) ? latestRouteHome() : null;
+	const start = session.points[0];
+	if (home && start) {
+		return {
+			kind: "home",
+			guidance: {
+				steps: home.steps,
+				along: home.along,
+				offRoute: home.offRoute,
+				target: { label: "Start", meters: home.meters, point: [start.lng, start.lat] },
+				following: null,
+				stopsLeft: null,
+				canSkip: false,
+			},
+			visual: prefs.navHomeVisual,
+			voice: prefs.navHomeVoice,
+			live: true,
+		};
+	}
+
 	const plan = ridePlanGuidance();
 	if (plan && !plan.finished && (prefs.navRouteVisual || prefs.navRouteVoice)) {
 		return { kind: "route", guidance: plan, visual: prefs.navRouteVisual, voice: prefs.navRouteVoice, live: plan.canSkip };
 	}
-
-	const homeOn = prefs.backToStart === "route" && (prefs.navHomeVisual || prefs.navHomeVoice);
-	if (!homeOn || session.homeDirectionsOff || session.activityType === "kayak") return null;
-	const start = session.points[0];
-	const fromStart = start ? haversineMeters(point.lat, point.lng, start.lat, start.lng) : 0;
-	if (fromStart >= NAV_HOME_AWAY_M) memory.homeAway = true;
-	const home = latestRouteHome();
-	if (!memory.homeAway || !home) return null;
-	return {
-		kind: "home",
-		guidance: {
-			steps: home.steps,
-			along: home.along,
-			offRoute: home.offRoute,
-			target: { label: "Start", meters: home.meters, point: [start.lng, start.lat] },
-			following: null,
-			stopsLeft: null,
-			canSkip: false,
-		},
-		visual: prefs.navHomeVisual,
-		voice: prefs.navHomeVoice,
-		live: true,
-	};
+	return null;
 }
 
 /**
@@ -294,10 +312,7 @@ function routeDirectionFrom(source) {
 }
 
 function instructionFor(step, source) {
-	if (step.turn === "arrive") return `Arrive at ${targetName(source)}`;
-	const way = step.name ?? (step.kind ? `the ${step.kind}` : null);
-	if (!way) return TURN_WORDS[step.turn];
-	return `${TURN_WORDS[step.turn]} ${step.stay ? "to stay on" : "onto"} ${way}`;
+	return step.turn === "arrive" ? `Arrive at ${targetName(source)}` : turnInstruction(step);
 }
 
 function targetName(source) {
@@ -434,8 +449,7 @@ function speakFor(source, view) {
 	}
 
 	if (view.turnAround) {
-		// Riding out, the way home is always behind; only a planned route asks.
-		if (source.kind === "route" && now - memory.lastTurnAroundSpokenAt > TURN_AROUND_SPEAK_MS) {
+		if (now - memory.lastTurnAroundSpokenAt > TURN_AROUND_SPEAK_MS) {
 			say("Turn around when you can.");
 			memory.lastTurnAroundSpokenAt = now;
 		}
@@ -497,7 +511,8 @@ function sentence(text) {
 
 /**
  * Notices arrivals, to say them: a planned route's next point reached (not
- * skipped) or its end, and getting back to the start.
+ * skipped) or its end, and getting back to the start, which also ends
+ * directions there.
  */
 function listenForArrivals(session, source) {
 	const voiceRoute = state.prefs.navRouteVoice;
@@ -508,7 +523,7 @@ function listenForArrivals(session, source) {
 	const skipped = memory.skipped && next > memory.nextWaypoint;
 	if (next > memory.nextWaypoint) {
 		memory.skipped = false;
-		if (!skipped && voiceRoute && !plan?.finished) say(`You've reached point ${next}.`);
+		if (!skipped && voiceRoute && !plan?.finished) say(`You've reached ${reachedName(next - 1)}.`);
 	}
 	memory.nextWaypoint = next;
 
@@ -517,15 +532,17 @@ function listenForArrivals(session, source) {
 		if (voiceRoute && !skipped && !session.routeCancelled) say(plan.destination ? "You've arrived at your destination." : "You've reached the end of your route.");
 	}
 
-	if (source?.kind === "home") {
-		const meters = source.guidance.target.meters;
-		if (meters <= PLAN_ARRIVE_M && !memory.homeArrived) {
-			memory.homeArrived = true;
-			if (source.voice) say("You're back at the start.");
-		} else if (meters > NAV_HOME_AWAY_M) {
-			memory.homeArrived = false;
-		}
+	if (source?.kind === "home" && source.guidance.target.meters <= PLAN_ARRIVE_M) {
+		session.startDirections = false;
+		if (source.voice) say("You're back at the start.");
 	}
+}
+
+/** What to call the planned point the rider just reached: its title or icon's name, or "point N". */
+function reachedName(index) {
+	const route = state.rideRoute;
+	const mark = markAt(route, index);
+	return mark ? pointName(route, index) : `point ${index + 1}`;
 }
 
 // ---- Sheet ----
@@ -533,13 +550,13 @@ function listenForArrivals(session, source) {
 function openSheet() {
 	const session = state.currentSession;
 	if (!session) return;
-	const source = activeGuidance(session, session.lastPoint ?? {});
+	const source = activeGuidance(session);
 	if (!source) return;
 	fillSheet(source);
 	el.navSheet.hidden = false;
 }
 
-/** Fills the sheet in for what's being followed: skipping and cancelling a route, or stopping directions home. */
+/** Fills the sheet in for what's being followed: skipping and cancelling a route, or stopping directions to the start. */
 function fillSheet(source) {
 	sheetFor = { kind: source.kind, voice: source.voice };
 	const guidance = source.guidance;
@@ -558,8 +575,8 @@ function fillSheet(source) {
 				? `Clears ${guidance.stopsLeft === 1 ? "the last remaining stop" : `all ${guidance.stopsLeft} remaining stops`}`
 				: "Stops following this route";
 	} else {
-		el.navCancelTitle.textContent = "Stop directions home";
-		el.navCancelDetail.textContent = "For the rest of this ride";
+		el.navCancelTitle.textContent = "Stop directions to start";
+		el.navCancelDetail.textContent = "Route to Start on the map starts them again";
 	}
 	for (const [target, name] of [
 		[el.navSkipIcon, "skip"],

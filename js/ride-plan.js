@@ -20,6 +20,7 @@ import { PLAN_ARRIVE_M, PLAN_SKIP_AWAY_M, ROUTE_OFF_ROUTE_M } from "./constants.
 import { state } from "./state.js";
 import { haversineMeters } from "./format.js";
 import { createRouteFollower, createLineTracker } from "./route-follow.js";
+import { pointName, pointMarkerContent } from "./point-marks.js";
 
 const follower = createRouteFollower("Route to next point");
 let listener = null;
@@ -102,7 +103,7 @@ export function ridePlanLine(point, session) {
 
 	advance(point, session, route.waypoints);
 	const next = session.nextWaypoint;
-	drawMarkers(route.waypoints, next);
+	drawMarkers(route, next);
 	if (next >= route.waypoints.length) {
 		guidance = { finished: true, destination: Boolean(route.destination) };
 		return [];
@@ -121,10 +122,10 @@ export function ridePlanLine(point, session) {
 		steps: live?.steps ?? [],
 		along: live?.along ?? 0,
 		offRoute: live?.offRoute ?? false,
-		target: { label: route.destination ? "Destination" : `Point ${next + 1}`, meters: toGoal, point: goal },
+		target: { label: route.destination ? "Destination" : pointName(route, next), meters: toGoal, point: goal },
 		// The route's last point, by way of the planned legs on from the next one.
 		finish: { meters: route.legs.slice(next).reduce((sum, leg) => sum + leg.meters, toGoal) },
-		following: next + 1 < route.waypoints.length ? `Point ${next + 2}` : null,
+		following: next + 1 < route.waypoints.length ? pointName(route, next + 1) : null,
 		stopsLeft: route.waypoints.length - next,
 		// There's nothing to skip on to from a destination.
 		canSkip: !route.destination,
@@ -230,8 +231,9 @@ function advance(point, session, waypoints) {
 	}
 }
 
-/** Marks the points still to come, numbered as they were planned. */
-function drawMarkers(waypoints, next) {
+/** Marks the points still to come, numbered as they were planned (or with their icons). */
+function drawMarkers(route, next) {
+	const { waypoints } = route;
 	const map = state.liveMap;
 	if (map === markersMap && next === markersFrom) return;
 	clearMarkers();
@@ -244,8 +246,9 @@ function drawMarkers(waypoints, next) {
 	}
 	for (let i = next; i < waypoints.length; i++) {
 		const element = document.createElement("div");
-		element.className = `plan-waypoint live-waypoint${i === next ? " next" : ""}`;
-		element.innerHTML = `<span>${i + 1}</span>`;
+		const content = pointMarkerContent(route, i);
+		element.className = `plan-waypoint live-waypoint ${content.className}${i === next ? " next" : ""}`;
+		element.innerHTML = `<span>${content.html}</span>`;
 		markers.push(new maplibregl.Marker({ element }).setLngLat(waypoints[i]).addTo(map));
 	}
 }

@@ -847,7 +847,7 @@ export async function saveActiveSessionCheckpoint() {
 			nextWaypoint: session.nextWaypoint ?? 0,
 			lastReached: session.lastReached ?? null,
 			routeCancelled: Boolean(session.routeCancelled),
-			homeDirectionsOff: Boolean(session.homeDirectionsOff),
+			startDirections: Boolean(session.startDirections),
 			points: session.points,
 			totalDistance: session.totalDistance,
 			movingTime: getElapsedMs(),
@@ -919,9 +919,10 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		routeMode: checkpoint.routeMode === "points" ? "points" : "asis",
 		nextWaypoint: Number.isInteger(checkpoint.nextWaypoint) ? checkpoint.nextWaypoint : 0,
 		lastReached: Array.isArray(checkpoint.lastReached) ? checkpoint.lastReached : null,
-		// Directions the rider stopped (see directions.js) stay stopped.
+		// A route the rider cancelled stays cancelled, and directions to the
+		// start they'd asked for stay on (see directions.js).
 		routeCancelled: checkpoint.routeCancelled === true,
-		homeDirectionsOff: checkpoint.homeDirectionsOff === true,
+		startDirections: checkpoint.startDirections === true,
 		points,
 		totalDistance: checkpoint.totalDistance || 0,
 		movingTime: checkpoint.movingTime || 0,

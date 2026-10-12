@@ -8,7 +8,33 @@
 import { ACTIVITIES } from "./constants.js";
 import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
-import { haversineMeters, escapeHtml } from "./format.js";
+import { haversineMeters, escapeHtml, formatDistance } from "./format.js";
+import { turnInstruction } from "./route-steps.js";
+import { POINT_ICONS, markAt } from "./point-marks.js";
+
+// Each turn as a GPX waypoint's symbol and type, in the words Garmin and
+// Ride with GPS cue sheets use, which other apps tend to follow.
+const TURN_SYMBOLS = {
+	left: "Left",
+	right: "Right",
+	"slight-left": "Slight Left",
+	"slight-right": "Slight Right",
+	"sharp-left": "Sharp Left",
+	"sharp-right": "Sharp Right",
+	uturn: "U Turn",
+};
+const TURN_TYPES = new Set(Object.values(TURN_SYMBOLS).map((symbol) => symbol.toLowerCase()));
+
+/**
+ * Whether a GPX `<wpt>` is a turn cue (as `exportRouteGpx` writes them, or
+ * another app's cue sheet), rather than a point to ride to.
+ * @param {Element} node
+ * @returns {boolean}
+ */
+export function isTurnCue(node) {
+	const type = node.getElementsByTagName("type")[0]?.textContent.trim().toLowerCase();
+	return Boolean(type) && TURN_TYPES.has(type);
+}
 import { addSession } from "./db.js";
 import { renderPastRides } from "./history-view.js";
 
@@ -26,20 +52,59 @@ export function exportCurrentGpx() {
 /**
  * Downloads a planned route (see route-plan.js) as a `.gpx` file: one track
  * following the whole route, which bike computers and other apps take as a
- * course to follow. It has no times or elevations, since it hasn't been
- * ridden yet.
+ * course to follow; a waypoint for each point given an icon or title in the
+ * planner (point-marks.js; the title, or else the icon's name, as its name,
+ * and the icon as its symbol and type); and a waypoint at each turn (its
+ * instruction as the name, its symbol and type the turn, and how far along
+ * the route it is in the description), which they take as cues or course
+ * points. It has no times or elevations, since it hasn't been ridden yet.
  *
  * @param {Object} route
+ * @param {Array<Object>} [steps] - Its turn-by-turn steps (route-steps.js).
  */
-export function exportRouteGpx(route) {
+export function exportRouteGpx(route, steps = []) {
 	if (!route || route.coords.length < 2) return;
 	const name = route.name || "Planned route";
+	const unit = state.prefs.unit;
+	const unitLabel = unit === "imperial" ? "mi" : "km";
+	const places = route.waypoints.flatMap(([lng, lat], i) => {
+		const mark = markAt(route, i);
+		if (!mark) return [];
+		const icon = mark.icon ? POINT_ICONS[mark.icon] : null;
+		const name = escapeHtml(mark.title || icon.label);
+		return [
+			[
+				`<wpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}">`,
+				`<name>${name}</name>`,
+				`<desc>${icon && mark.title ? `${escapeHtml(icon.label)}: ` : ""}${name} (point ${i + 1})</desc>`,
+				`<sym>${escapeHtml(icon?.gpx ?? "Flag, Blue")}</sym>`,
+				icon ? `<type>${escapeHtml(icon.label)}</type>` : "",
+				`</wpt>`,
+			].join(""),
+		];
+	});
+	const turns = steps
+		.filter((step) => step.turn !== "arrive")
+		.map((step, i) => {
+			const [lng, lat] = step.point;
+			const text = escapeHtml(turnInstruction(step));
+			const symbol = TURN_SYMBOLS[step.turn];
+			return [
+				`<wpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}">`,
+				`<name>${text}</name>`,
+				`<cmt>${text}</cmt>`,
+				`<desc>${i + 1}. ${text} at ${formatDistance(step.along, unit)} ${unitLabel}</desc>`,
+				`<sym>${symbol}</sym>`,
+				`<type>${symbol}</type>`,
+				`</wpt>`,
+			].join("");
+		});
 	const trkpts = route.coords.map(([lng, lat]) => `<trkpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}"></trkpt>`).join("\n\t\t\t");
 	const gpx = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="Bike Tracker" xmlns="http://www.topografix.com/GPX/1/1">
 	<metadata>
 		<name>${escapeHtml(name)}</name>
-	</metadata>
+	</metadata>${[...places, ...turns].map((wpt) => `\n\t${wpt}`).join("")}
 	<trk>
 		<name>${escapeHtml(name)}</name>
 		<trkseg>

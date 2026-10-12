@@ -1,13 +1,15 @@
 /**
  * Elevation charts. Mostly the post-ride one: drawing it onto a `<canvas>`
  * (elevation line colored by speed band, gridlines, min/max labels) and the
- * mouse/touch interaction that highlights a point on the post-ride map as
- * the finger or cursor moves along the chart. Also the route planner's
+ * mouse/touch interaction that, as the cursor hovers or a finger slides
+ * along the chart, marks that point on the chart and the post-ride map and
+ * reads out its elevation, speed and distance. Also the route planner's
  * simpler profile (`renderProfileChart`), which shares the grid and labels.
  */
 
 import { state, el } from "./state.js";
-import { minOf, maxOf, haversineMeters, formatElevation } from "./format.js";
+import { minOf, maxOf, haversineMeters, formatElevation, formatSpeed, formatDistance } from "./format.js";
+import { speedUnitLabel, distanceUnitLabel } from "./map-visuals.js";
 import { speedBand, speedBandColor } from "./colors.js";
 
 /**
@@ -208,10 +210,10 @@ export function renderProfileChart(canvas, points, color, message) {
  * @param {number} minElevation
  * @param {number} maxElevation
  * @param {number} totalDistance
- * @param {(distance: number) => number} xFor - Unused by the handlers
- *   (recomputed from the stashed context instead) but accepted to mirror the
- *   render call site.
- * @param {(elevation: number) => number} yFor - Same as `xFor`.
+ * @param {(distance: number) => number} xFor - CSS pixels across the
+ *   chart for a distance, to place the readout.
+ * @param {(elevation: number) => number} yFor - CSS pixels down the chart
+ *   for an elevation, to place the dot on the line.
  */
 function setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor) {
 	// Remove old listeners if any
@@ -224,7 +226,7 @@ function setupChartInteraction(canvas, session, points, padding, cssWidth, cssHe
 	canvas.removeEventListener("touchend", handleChartTouchEnd);
 
 	// Store context for event handlers
-	canvas.chartContext = { session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance };
+	canvas.chartContext = { session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor };
 
 	canvas.addEventListener("mousemove", handleChartMouseMove);
 	canvas.addEventListener("mouseleave", handleChartMouseLeave);
@@ -241,13 +243,8 @@ function handleChartMouseDown(event) {
 	updateChartHighlight(event, this);
 }
 
-/**
- * Updates the highlight while dragging, or while merely hovering with the
- * button held (`event.buttons` catches a drag that started outside the canvas).
- * @param {MouseEvent} event
- */
+/** Follows the cursor, hovering or dragging. @param {MouseEvent} event */
 function handleChartMouseMove(event) {
-	if (!state.isChartDragging && event.buttons === 0) return;
 	updateChartHighlight(event, this);
 }
 
@@ -283,8 +280,8 @@ function handleChartTouchEnd() {
 
 /**
  * Maps a pointer's X position to the nearest chart point by distance, and if
- * that point differs from the currently-highlighted one, moves the map
- * highlight marker to it.
+ * that point differs from the currently-highlighted one, marks it on the
+ * chart and the map and reads it out.
  *
  * @param {{clientX: number}} event - A `MouseEvent`, or a `Touch` (both carry `clientX`).
  * @param {HTMLCanvasElement} canvas - The canvas whose `chartContext` (set by
@@ -292,7 +289,7 @@ function handleChartTouchEnd() {
  */
 function updateChartHighlight(event, canvas) {
 	const context = canvas?.chartContext;
-	if (!context || !state.postMap) return;
+	if (!context) return;
 
 	const rect = canvas.getBoundingClientRect();
 	const x = event.clientX - rect.left;
@@ -328,7 +325,38 @@ function updateChartHighlight(event, canvas) {
 	if (closestIndex !== state.highlightedPointIndex) {
 		state.highlightedPointIndex = closestIndex;
 		highlightPointOnMap(context.session, closestIndex);
+		showChartReadout(context, points[closestIndex]);
 	}
+}
+
+/**
+ * Marks a chart point: a guide line down the chart and a dot on the line
+ * there, and its elevation, speed and distance in a readout along the
+ * chart's top, kept inside the chart's edges.
+ *
+ * @param {Object} context - The render's `chartContext`.
+ * @param {{distance: number, elevation: number, speed: number}} point
+ */
+function showChartReadout(context, point) {
+	const unit = state.prefs.unit;
+	const x = context.xFor(point.distance);
+	el.chartCursor.style.left = `${x}px`;
+	el.chartCursor.style.setProperty("--dot-y", `${context.yFor(point.elevation)}px`);
+	el.chartCursor.hidden = false;
+
+	// Distance as the ride's summary (and the chart's end label) counts it,
+	// which leaves out GPS jitter and pause gaps that the chart's own,
+	// point-to-point distance includes.
+	const recorded = context.session.totalDistance;
+	const distance = recorded > 0 ? (point.distance / context.totalDistance) * recorded : point.distance;
+	const readout = el.chartReadout;
+	readout.innerHTML =
+		`<strong>${formatElevation(point.elevation, unit)}</strong>` +
+		`<strong>${formatSpeed(point.speed, unit)} ${speedUnitLabel(unit)}</strong>` +
+		`<span>${formatDistance(distance, unit)} ${distanceUnitLabel(unit)}</span>`;
+	readout.hidden = false;
+	const half = readout.offsetWidth / 2;
+	readout.style.left = `${Math.min(Math.max(x, half), context.cssWidth - half)}px`;
 }
 
 /**
@@ -359,6 +387,8 @@ function highlightPointOnMap(session, pointIndex) {
  * the pointer leaves the chart or a touch ends.
  */
 export function clearChartHighlight() {
+	if (el.chartCursor) el.chartCursor.hidden = true;
+	if (el.chartReadout) el.chartReadout.hidden = true;
 	if (state.chartHighlightMarker) {
 		state.chartHighlightMarker.remove();
 		state.chartHighlightMarker = null;

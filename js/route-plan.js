@@ -10,6 +10,7 @@
  *   {id, name, created, updated, profile: "bike"|"foot",
  *    source: "planned"|"gpx",                  // "gpx": an imported line, used as drawn
  *    waypoints: [[lng, lat]...],               // empty for a line used as drawn
+ *    marks: [{icon, title}|null...],           // what each waypoint is (point-marks.js)
  *    legs: [{coords, meters, routed}...],      // one per pair of waypoints
  *    coords: [[lng, lat]...], meters,          // the whole route, joined
  *    elevation: {key, distances, heights, climb, descent}}  // its profile, see below
@@ -31,10 +32,11 @@ import { createVectorMap, lineData, setLivePlanData } from "./live-map.js";
 import { navigateToScreen } from "./navigation.js";
 import { startCountdownFlow } from "./ride-setup.js";
 import { confirmWithModal, showMessage, showModal } from "./modal.js";
-import { exportRouteGpx } from "./gpx.js";
+import { exportRouteGpx, isTurnCue } from "./gpx.js";
 import { renderProfileChart } from "./chart.js";
 import { canFollowPoints } from "./ride-plan.js";
 import { buildShareUrl, isShareHash, parseShareHash, MAX_SHARED_WAYPOINTS } from "./route-share.js";
+import { POINT_ICONS, MAX_POINT_TITLE_LENGTH, markAt, normalizeMark, pointIconSvg, pointMarkerContent } from "./point-marks.js";
 
 // Where the planner opens with no route and no GPS fix yet.
 const FALLBACK_VIEW = { center: [-98.5, 39.8], zoom: 3 };
@@ -71,6 +73,8 @@ let redoStack = [];
 // and a quick second tap mustn't overtake it.
 let editQueue = Promise.resolve();
 let nameSaveTimer = null;
+// Whether a GPX export is waiting on its directions, so a second tap doesn't start another.
+let exporting = false;
 // The routes offered by ride setup's picker.
 let setupRoutes = [];
 // The last shared-route hash acted on, so a link that reaches the app twice
@@ -239,8 +243,9 @@ function showPlanner(route, mode) {
  * @param {Array<[number, number]>} waypoints
  * @param {string} [name] - The sender's name for the route, offered as a
  *   starting point; the recipient can still rename it before or after saving.
+ * @param {Array} [marks] - What each waypoint is.
  */
-async function openSharedRoute(waypoints, name) {
+async function openSharedRoute(waypoints, name, marks = []) {
 	const route = await newRoute();
 	route.preview = true;
 	if (name) {
@@ -248,6 +253,7 @@ async function openSharedRoute(waypoints, name) {
 		route.autoNamed = false;
 	}
 	route.waypoints = waypoints;
+	route.marks = marks;
 	route.legs = [];
 	for (let i = 0; i + 1 < waypoints.length; i++) route.legs.push(routeLeg(route, i));
 	routeChanged(route);
@@ -287,7 +293,7 @@ export async function openSharedRouteFromUrl(url) {
 		await showMessage("Shared Route", `This link couldn't be read as a route, or has more than ${MAX_SHARED_WAYPOINTS} points.`);
 		return;
 	}
-	await openSharedRoute(shared.waypoints, shared.name);
+	await openSharedRoute(shared.waypoints, shared.name, shared.marks);
 }
 
 /** A new, unsaved route, named after how many there are already. */
@@ -304,6 +310,7 @@ async function newRoute() {
 		profile: "bike",
 		source: "planned",
 		waypoints: [],
+		marks: [],
 		legs: [],
 		coords: [],
 		meters: 0,
@@ -312,6 +319,7 @@ async function newRoute() {
 
 /** Wires up the Routes screen, the planner, and ride setup's route picker. Called once from `wireEvents`. */
 export function wirePlanner() {
+	wirePointSheet();
 	el.routesBackBtn.addEventListener("click", () => history.back());
 	el.newRouteBtn.addEventListener("click", () => openPlanner());
 	el.setupRouteSelect.addEventListener("change", handleSetupRouteChange);
@@ -326,7 +334,7 @@ export function wirePlanner() {
 	el.planRedoBtn.addEventListener("click", () => queueEdit(redo));
 	el.planImportBtn.addEventListener("click", () => el.planGpxInput.click());
 	el.planGpxInput.addEventListener("change", importPlanGpx);
-	el.planExportBtn.addEventListener("click", () => exportRouteGpx(state.editingRoute));
+	el.planExportBtn.addEventListener("click", exportPlan);
 	el.planNameInput.addEventListener("input", () => {
 		const route = state.editingRoute;
 		if (!route) return;
@@ -360,7 +368,7 @@ function saveSharedRoute() {
 async function shareRoute() {
 	const route = state.editingRoute;
 	if (!route || route.waypoints.length < 2) return;
-	const url = buildShareUrl(route.waypoints.slice(0, MAX_SHARED_WAYPOINTS), route.name);
+	const url = buildShareUrl(route.waypoints.slice(0, MAX_SHARED_WAYPOINTS), route.name, route.marks ?? []);
 	if (route.waypoints.length > MAX_SHARED_WAYPOINTS) {
 		await showMessage("Share Route", `Only routes of up to ${MAX_SHARED_WAYPOINTS} points can be shared.`);
 		return;
@@ -404,9 +412,17 @@ function isEmpty(route) {
 	return !route.waypoints.length && !route.legs.length;
 }
 
-/** The route's waypoints and legs as they are now. */
+/** The route's waypoints, their marks, and its legs as they are now. */
 function snapshot(route) {
-	return { waypoints: [...route.waypoints], legs: [...route.legs], source: route.source };
+	return { waypoints: [...route.waypoints], marks: [...(route.marks ?? [])], legs: [...route.legs], source: route.source };
+}
+
+/**
+ * Gives a route one mark per waypoint (null for a plain one), so an edit
+ * can add or remove them together. Routes from before marks have none.
+ */
+function ensureMarks(route) {
+	route.marks = route.waypoints.map((_, i) => markAt(route, i));
 }
 
 /** Saves the route as it is now, for Undo, before an edit. A new edit ends what Redo can bring back. */
@@ -467,7 +483,9 @@ function addWaypoint(lngLat) {
 		const snapped = await snapToWay(lngLat, route);
 		if (route !== state.editingRoute) return;
 		remember();
+		ensureMarks(route);
 		route.waypoints.push(snapped);
+		route.marks.push(null);
 		if (route.waypoints.length > 1) route.legs.push(routeLeg(route, route.waypoints.length - 2));
 		routeChanged(route);
 	});
@@ -499,7 +517,9 @@ function insertWaypoint(leg, lngLat) {
 		const snapped = await snapToWay(lngLat, route);
 		if (route !== state.editingRoute || leg >= route.legs.length) return;
 		remember();
+		ensureMarks(route);
 		route.waypoints.splice(leg + 1, 0, snapped);
+		route.marks.splice(leg + 1, 0, null);
 		route.legs.splice(leg, 1, routeLeg(route, leg), routeLeg(route, leg + 1));
 		routeChanged(route);
 	});
@@ -514,7 +534,9 @@ function removeWaypointNow(index) {
 	const route = state.editingRoute;
 	if (!route || index >= route.waypoints.length) return;
 	remember();
+	ensureMarks(route);
 	route.waypoints.splice(index, 1);
+	route.marks.splice(index, 1);
 	if (index === 0) {
 		route.legs.shift();
 	} else if (index === route.waypoints.length) {
@@ -655,6 +677,7 @@ function saveRoute(route) {
 		profile: route.profile,
 		source: route.source,
 		waypoints: route.waypoints,
+		marks: route.waypoints.map((_, i) => markAt(route, i)),
 		legs: route.legs.map(({ coords, meters, routed }) => ({ coords, meters, routed })),
 		coords: route.coords,
 		meters: route.meters,
@@ -706,6 +729,29 @@ function request(message) {
 	});
 }
 
+// ---- GPX export ----
+
+/**
+ * Downloads the route being planned as GPX, with its turn-by-turn
+ * directions when they can be worked out (from map tiles cached, or
+ * downloadable, along it); without them otherwise.
+ */
+async function exportPlan() {
+	const route = state.editingRoute;
+	if (exporting || !route || route.coords.length < 2) return;
+	exporting = true;
+	const snapshot = { ...route, coords: route.coords.slice() };
+	let steps = [];
+	try {
+		steps = (await request({ type: "directions", coords: snapshot.coords, profile: snapshot.profile ?? "bike" })).steps ?? [];
+	} catch (error) {
+		console.warn("Directions for the GPX export failed", error);
+	} finally {
+		exporting = false;
+	}
+	exportRouteGpx(snapshot, steps);
+}
+
 // ---- GPX import ----
 
 /**
@@ -754,11 +800,13 @@ async function importPlanGpx(event) {
 	if (choice === "0") {
 		route.source = "gpx";
 		route.waypoints = [];
+		route.marks = [];
 		route.legs = [{ coords: line, meters: lineMeters(line), routed: true }];
 		request({ type: "prefetch", coords: line }).catch((error) => console.warn("Saving the route's map failed", error));
 	} else {
 		route.source = "planned";
 		route.waypoints = points;
+		route.marks = [];
 		route.legs = [];
 		for (let i = 0; i + 1 < points.length; i++) route.legs.push(routeLeg(route, i));
 	}
@@ -775,8 +823,11 @@ function choiceButton(title, detail) {
 }
 
 /**
- * Reads a GPX file's track and its route points (or, lacking those, its
- * waypoints, in file order). At least one of them has two or more points.
+ * Reads a GPX file's track and its route points (or, lacking both those
+ * and a track, its waypoints, in file order, leaving out turn cues). A file
+ * with a track has its waypoints left alone: those are places along it (like
+ * the turns and marked points exported here), not points to route between.
+ * At least one of them has two or more points.
  *
  * @param {string} text
  * @returns {{name: string, track: Array<[number, number]>|null, points: Array<[number, number]>|null}}
@@ -788,13 +839,14 @@ function parsePlanGpx(text) {
 
 	const read = (tag) => {
 		const found = Array.from(doc.getElementsByTagName(tag))
+			.filter((node) => tag !== "wpt" || !isTurnCue(node))
 			.map((node) => [parseFloat(node.getAttribute("lon")), parseFloat(node.getAttribute("lat"))])
 			.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat));
 		return found.length >= 2 ? found : null;
 	};
 	const name = (doc.querySelector("trk > name, rte > name, metadata > name")?.textContent ?? "").trim();
 	const track = read("trkpt");
-	const points = read("rtept") ?? read("wpt");
+	const points = read("rtept") ?? (track ? null : read("wpt"));
 	if (!track && !points) throw new Error("it has no track, route or waypoints to follow.");
 	return { name, track, points };
 }
@@ -1042,9 +1094,9 @@ function renderPlan() {
 	if (map && route) {
 		if (route.source === "gpx") {
 			const coords = route.coords;
-			markers.push(createWaypointMarker(map, coords[0], "S", -1), createWaypointMarker(map, coords[coords.length - 1], "F", -1));
+			markers.push(createWaypointMarker(map, coords[0], -1, "S"), createWaypointMarker(map, coords[coords.length - 1], -1, "F"));
 		} else {
-			route.waypoints.forEach((lngLat, index) => markers.push(createWaypointMarker(map, lngLat, String(index + 1), index)));
+			route.waypoints.forEach((lngLat, index) => markers.push(createWaypointMarker(map, lngLat, index)));
 		}
 	}
 
@@ -1062,7 +1114,7 @@ function renderPlan() {
 				: route?.source === "gpx"
 					? "Imported as drawn, so it can't be edited here."
 					: hasRoute
-						? "Tap to add a point, drag one to move it, tap one to remove it."
+						? "Tap to add a point, drag one to move it, tap one to name or remove it."
 						: "Tap the map to add your first point.";
 	renderProfile(route);
 	el.planUndoBtn.disabled = !undoStack.length;
@@ -1151,13 +1203,17 @@ function pointAlong(coords, meters) {
 }
 
 /**
- * A numbered waypoint marker. Planned waypoints can be dragged to move them
- * or tapped to remove them; `index` -1 marks an imported line's fixed ends.
+ * A waypoint marker: its icon or number, and its title. Planned waypoints
+ * can be dragged to move them or tapped to name or remove them; `index` -1
+ * marks an imported line's fixed ends, labelled `label`.
  */
-function createWaypointMarker(map, lngLat, label, index) {
+function createWaypointMarker(map, lngLat, index, label = "") {
+	const route = state.editingRoute;
 	const element = document.createElement("div");
-	element.className = "plan-waypoint";
-	element.innerHTML = `<span>${escapeHtml(label)}</span>`;
+	const content = index >= 0 ? pointMarkerContent(route, index) : { html: escapeHtml(label), className: "" };
+	const title = index >= 0 ? markAt(route, index)?.title : "";
+	element.className = `plan-waypoint ${content.className}`.trim();
+	element.innerHTML = `<span>${content.html}</span>${title ? `<em class="plan-waypoint-title">${escapeHtml(title)}</em>` : ""}`;
 	const editable = index >= 0 && !state.editingRoute?.preview;
 	const marker = new maplibregl.Marker({ element, draggable: editable }).setLngLat(lngLat).addTo(map);
 	if (!editable) return marker;
@@ -1176,7 +1232,85 @@ function createWaypointMarker(map, lngLat, label, index) {
 			dragged = false;
 			return;
 		}
-		removeWaypoint(index);
+		openPointSheet(index);
 	});
 	return marker;
+}
+
+// ---- Point sheet ----
+
+// The point the sheet is open for, and the icon picked in it so far.
+let sheetPoint = null;
+let sheetIcon = null;
+
+/** Builds the sheet's icon picker: none (the point's number), then each icon. Called once from `wirePlanner`. */
+function wirePointSheet() {
+	const choices = [["", "Number", null], ...Object.entries(POINT_ICONS).map(([key, icon]) => [key, icon.label, key])];
+	for (const [key, label, icon] of choices) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "point-icon-choice";
+		button.dataset.icon = key;
+		button.setAttribute("role", "radio");
+		button.innerHTML = `<span class="point-icon-swatch${icon ? ` point-${icon}` : ""}">${icon ? pointIconSvg(icon) : "#"}</span><span>${escapeHtml(label)}</span>`;
+		button.addEventListener("click", () => {
+			sheetIcon = key || null;
+			syncIconChoices();
+		});
+		el.pointIconGrid.append(button);
+	}
+	el.pointTitleInput.maxLength = MAX_POINT_TITLE_LENGTH;
+	el.pointTitleInput.addEventListener("keydown", (event) => {
+		if (event.key === "Enter") closePointSheet(true);
+	});
+	el.pointDoneBtn.addEventListener("click", () => closePointSheet(true));
+	el.pointSheet.addEventListener("click", (event) => {
+		if (event.target === el.pointSheet) closePointSheet(true);
+	});
+	el.pointSheet.addEventListener("keydown", (event) => {
+		if (event.key === "Escape") closePointSheet(false);
+	});
+	el.pointRemoveBtn.addEventListener("click", () => {
+		const index = sheetPoint;
+		closePointSheet(false);
+		if (index !== null) removeWaypoint(index);
+	});
+}
+
+/** Opens the sheet for waypoint `index`: its title and icon, and removing it. */
+function openPointSheet(index) {
+	const mark = markAt(state.editingRoute, index);
+	sheetPoint = index;
+	sheetIcon = mark?.icon ?? null;
+	el.pointSheetTitle.textContent = `Point ${index + 1}`;
+	el.pointTitleInput.value = mark?.title ?? "";
+	syncIconChoices();
+	el.pointSheet.hidden = false;
+}
+
+function syncIconChoices() {
+	for (const button of el.pointIconGrid.children) {
+		const picked = (button.dataset.icon || null) === sheetIcon;
+		button.classList.toggle("active", picked);
+		button.setAttribute("aria-checked", String(picked));
+	}
+}
+
+/** Closes the sheet, saving what was picked in it (as one step Undo can take back) when `apply`. */
+function closePointSheet(apply) {
+	const index = sheetPoint;
+	const mark = normalizeMark({ icon: sheetIcon, title: el.pointTitleInput.value });
+	el.pointSheet.hidden = true;
+	sheetPoint = null;
+	if (!apply || index === null) return;
+	queueEdit(() => {
+		const route = state.editingRoute;
+		if (!route || index >= route.waypoints.length) return;
+		const before = markAt(route, index);
+		if (before?.icon === mark?.icon && (before?.title ?? "") === (mark?.title ?? "")) return;
+		remember();
+		ensureMarks(route);
+		route.marks[index] = mark;
+		routeChanged(route);
+	});
 }

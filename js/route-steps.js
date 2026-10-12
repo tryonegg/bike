@@ -51,6 +51,29 @@ const CELL_UNITS = 64;
 
 export const TURNS = ["slight-left", "left", "sharp-left", "uturn", "sharp-right", "right", "slight-right"];
 
+/** Each turn in words, as an instruction on its own. */
+export const TURN_WORDS = {
+	left: "Turn left",
+	right: "Turn right",
+	"slight-left": "Bear left",
+	"slight-right": "Bear right",
+	"sharp-left": "Sharp left",
+	"sharp-right": "Sharp right",
+	uturn: "Make a U-turn",
+};
+
+/**
+ * A turn step as an instruction, with the way it's onto when that's known:
+ * "Turn right onto Main Street", "Bear left to stay on Route 9".
+ * @param {Object} step - Not the "arrive" step.
+ * @returns {string}
+ */
+export function turnInstruction(step) {
+	const way = step.name ?? (step.kind ? `the ${step.kind}` : null);
+	if (!way) return TURN_WORDS[step.turn];
+	return `${TURN_WORDS[step.turn]} ${step.stay ? "to stay on" : "onto"} ${way}`;
+}
+
 /**
  * Indexes the street names (the tiles' "transportation_name" lines) and the
  * kinds of way (their "transportation" lines) near a route, for lookups at

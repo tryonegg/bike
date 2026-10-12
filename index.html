@@ -198,6 +198,7 @@
 
       <button id="recenterBtn" class="map-chip recenter">Re-center</button>
       <button id="rideDestinationBtn" class="map-chip ride-destination" hidden>Set destination</button>
+      <button id="startRouteBtn" class="map-chip ride-start-route" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h11l-2 4 2 4H6"/></svg>Route to Start</button>
       <button id="rideSettingsBtn" class="map-chip ride-settings" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
 
       <div class="ride-controls">
@@ -281,6 +282,22 @@
           </div>
         </div>
       </div>
+
+      <!-- A tapped point: what it is (an icon and a title), or removing it. -->
+      <div id="pointSheet" class="nav-sheet-backdrop" hidden>
+        <div class="nav-sheet point-sheet" role="dialog" aria-modal="true" aria-labelledby="pointSheetTitle">
+          <div class="nav-sheet-grip" aria-hidden="true"></div>
+          <h3 id="pointSheetTitle">Point</h3>
+          <label class="point-field-label" for="pointTitleInput">Title</label>
+          <input id="pointTitleInput" class="point-title-input" type="text" autocomplete="off" placeholder="Optional, e.g. Water at the park">
+          <div id="pointIconLabel" class="point-field-label">Icon</div>
+          <div id="pointIconGrid" class="point-icon-grid" role="radiogroup" aria-labelledby="pointIconLabel"></div>
+          <div class="point-sheet-actions">
+            <button id="pointRemoveBtn" class="btn pill point-remove-btn">Remove point</button>
+            <button id="pointDoneBtn" class="btn primary pill">Done</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="postScreen" class="screen has-bottom-bar hidden">
@@ -337,6 +354,9 @@
         </div>
         <div class="chart-wrap">
           <canvas id="elevationChart" aria-label="Elevation over ride, colored by speed" role="img"></canvas>
+          <!-- The point under the cursor or finger: a guide down the chart, a dot on the line, and its numbers. -->
+          <span id="chartCursor" class="chart-cursor" aria-hidden="true" hidden><i></i></span>
+          <div id="chartReadout" class="chart-readout" aria-live="polite" hidden></div>
         </div>
         <div class="chart-x-labels">
           <span id="chartStartLabel">0 mi</span>
@@ -489,28 +509,28 @@
                 <button data-back-to-start="route" class="toggle-option">Route</button>
               </div>
             </div>
-            <p class="setting-note">What the ride map shows to lead you home. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
+            <p class="setting-note">What the ride map shows to lead you back to the start. Direct is a straight line to where you started. Route follows roads and paths, worked out on your phone from map areas it has already shown, so it works offline but only knows roads you've had on screen. It shows the straight line until a route is found, and always for kayaking.</p>
           </div>
           <div class="setting-row stacked nested" id="avoidRetraceRow">
             <div class="setting-row-main">
               <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="avoidRetraceLabel">Avoid retracing</span></span>
               <button class="switch" role="switch" data-switch="routeAvoidRetrace" aria-labelledby="avoidRetraceLabel"></button>
             </div>
-            <p class="setting-note">Keeps the route home off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way home, like out of a dead end.</p>
+            <p class="setting-note">Keeps the route to start off the roads you rode out on, so it doesn't just send you back the way you came. It only goes back that way when there's no other way, like out of a dead end.</p>
           </div>
           <div class="setting-row stacked nested" data-nav-home>
             <div class="setting-row-main">
-              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navHomeVisualLabel">Directions home</span></span>
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navHomeVisualLabel">Directions to start</span></span>
               <button class="switch" role="switch" data-switch="navHomeVisual" aria-labelledby="navHomeVisualLabel"></button>
             </div>
-            <p class="setting-note">Shows turn-by-turn directions home once you're away from the start and not following a planned route.</p>
+            <p class="setting-note">Puts a Route to Start button on the ride map once you're away from the start. Tap it for turn-by-turn directions back, which take over from a planned route's until you stop them or get there.</p>
           </div>
           <div class="setting-row stacked nested" data-nav-home>
             <div class="setting-row-main">
-              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navHomeVoiceLabel">Voice home</span></span>
+              <span class="nested-label"><span class="nest-arrow" aria-hidden="true">↳</span><span id="navHomeVoiceLabel">Voice to start</span></span>
               <button class="switch" role="switch" data-switch="navHomeVoice" aria-labelledby="navHomeVoiceLabel"></button>
             </div>
-            <p class="setting-note">Speaks the turns home.</p>
+            <p class="setting-note">Speaks the turns back to the start, once you've tapped Route to Start.</p>
           </div>
           <div class="setting-row stacked voice-settings" data-voice-settings role="group" aria-label="Voice">
             <div class="setting-row-main">

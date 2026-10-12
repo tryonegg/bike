@@ -487,7 +487,7 @@ export function syncToggles() {
 	);
 	// Avoid Retracing only means anything for Route, so it only shows then.
 	el.avoidRetraceRow.hidden = state.prefs.backToStart !== "route";
-	// Directions home need Back to Start's Route to follow.
+	// Directions to the start need Back to Start's Route to follow.
 	for (const row of el.navHomeRows) row.hidden = state.prefs.backToStart !== "route";
 	// The voice picker matters once anything's spoken, and needs speech to pick from.
 	const speaking = state.prefs.navRouteVoice || (state.prefs.backToStart === "route" && state.prefs.navHomeVoice);

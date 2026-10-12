@@ -1241,6 +1241,29 @@ button {
   display: none;
 }
 
+/* Turns on directions back to the start: offered in the same spot, or
+   above Set Destination while that's showing. */
+.map-chip.ride-start-route {
+  left: 50%;
+  bottom: calc(100px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  background: var(--primary);
+  color: #fff;
+  white-space: nowrap;
+}
+
+.map-chip.ride-start-route svg {
+  width: 16px;
+  height: 16px;
+}
+
+.map-chip.ride-destination:not([hidden]) ~ .map-chip.ride-start-route {
+  bottom: calc(152px + var(--safe-bottom));
+}
+
 /* Settings, reachable mid-ride. Mirrors Re-center on the map's other side. */
 .map-chip.ride-settings {
   right: 14px;
@@ -1368,7 +1391,8 @@ button {
 }
 
 .active-screen[data-phase] .map-chip.recenter,
-.active-screen[data-phase] .map-chip.ride-settings {
+.active-screen[data-phase] .map-chip.ride-settings,
+.active-screen[data-phase] .map-chip.ride-start-route {
   display: none;
 }
 
@@ -1819,6 +1843,16 @@ button {
   opacity: 1;
 }
 
+.live-waypoint span svg {
+  width: 13px;
+  height: 13px;
+}
+
+.live-waypoint.next span svg {
+  width: 16px;
+  height: 16px;
+}
+
 .plan-chart-dot {
   width: 14px;
   height: 14px;
@@ -1864,6 +1898,138 @@ button {
   font-size: 12px;
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* A point with an icon (point-marks.js) is a little bigger, to show it. The
+   start and end take a ride's start and end colours. */
+.plan-waypoint.has-icon:not(.live-waypoint) span {
+  width: 30px;
+  height: 30px;
+}
+
+.plan-waypoint span svg {
+  width: 17px;
+  height: 17px;
+}
+
+.plan-waypoint.point-start span,
+.point-icon-swatch.point-start {
+  background: #2f8f4e;
+}
+
+.plan-waypoint.point-end span,
+.point-icon-swatch.point-end {
+  background: #c4473a;
+}
+
+/* Its title, hung under the marker without moving its anchor (MapLibre
+   positions markers absolutely, so the title is placed against it). */
+.plan-waypoint-title {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 50%;
+  max-width: 140px;
+  padding: 2px 7px;
+  overflow: hidden;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---- The planner's point sheet: a title and an icon for a point ---- */
+
+.point-field-label {
+  display: block;
+  margin: 18px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.point-title-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--btn-border);
+  border-radius: 14px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.point-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.point-icon-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 4px 8px;
+  border: 1px solid var(--btn-border);
+  border-radius: 14px;
+  background: var(--track);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.point-icon-choice > span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.point-icon-choice.active {
+  border-color: #6d4ad8;
+  box-shadow: inset 0 0 0 1px #6d4ad8;
+}
+
+.point-icon-swatch {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #6d4ad8;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.point-icon-swatch svg {
+  width: 19px;
+  height: 19px;
+}
+
+.point-sheet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.point-sheet-actions .btn {
+  flex: 1;
+}
+
+.point-remove-btn {
+  color: var(--danger);
 }
 
 /* ---- The voice picker for spoken directions ---- */
@@ -2458,8 +2624,61 @@ button {
 }
 
 .chart-wrap {
+  position: relative;
   height: 170px;
   margin-top: 16px;
+}
+
+/* The point under the cursor or finger: a guide line down the chart, with a
+   dot where it meets the line (at --dot-y). */
+.chart-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--muted);
+  pointer-events: none;
+}
+
+.chart-cursor i {
+  position: absolute;
+  top: var(--dot-y, 50%);
+  left: -6px;
+  width: 11px;
+  height: 11px;
+  margin-top: -6px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Its elevation, speed and distance, over the chart's top edge. */
+.chart-readout {
+  position: absolute;
+  top: -14px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+
+.chart-readout strong {
+  font-weight: 700;
+}
+
+.chart-readout span {
+  opacity: 0.7;
+  font-weight: 600;
 }
 
 .chart-wrap canvas {
