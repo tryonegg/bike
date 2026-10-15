@@ -29,7 +29,8 @@
  */
 
 import { decodeLineLayer } from "./mvt.js";
-import { DEM_TILE_URL, DEM_MAX_ZOOM } from "./constants.js";
+import { MAP_DATA_CACHE_PREFIX, MAP_DATA_CACHE_FALLBACK } from "./constants.js";
+import { heightAt } from "./terrain.js";
 import { buildGraph, findRoute, markRetraced, tileFor, toUnits, toLngLat, usableWay, TILE_ZOOM } from "./route-graph.js";
 import { buildWayIndex, routeSteps } from "./route-steps.js";
 
@@ -44,8 +45,6 @@ const TILE_HOSTS = ["tiles.openfreemap.org", "tiles.stadiamaps.com"];
 // names the current versioned tile URL. Stored under the service worker's
 // map-data cache so the map itself finds them too.
 const TILEJSON_URL = "https://tiles.openfreemap.org/planet";
-const MAP_DATA_CACHE_PREFIX = "bike-tracker-mapdata-";
-const MAP_DATA_CACHE_FALLBACK = "bike-tracker-mapdata-v1";
 const FETCH_CONCURRENCY = 6;
 
 // A planned leg searches a corridor around the straight line between its
@@ -60,10 +59,8 @@ const PREFETCH_STEP_M = 100;
 const DIRECTIONS_JUNCTION_REACH_M = 8;
 // Elevation profiles sample the route every ELEVATION_STEP_M, or further
 // apart on a long route so there are no more than ELEVATION_MAX_SAMPLES.
-// Terrain tiles are 256 pixels, and at DEM_MAX_ZOOM a pixel is about 15 m.
 const ELEVATION_STEP_M = 25;
 const ELEVATION_MAX_SAMPLES = 500;
-const DEM_TILE_SIZE = 256;
 
 // Beyond the tiles spanning the rider and the start, the search area reaches
 // this far out (a share of that span, but at least one tile) so a route can
@@ -346,90 +343,6 @@ function haversine([lngA, latA], [lngB, latB]) {
 	const dLng = (lngB - lngA) * toRad;
 	const h = Math.sin(dLat / 2) ** 2 + Math.cos(latA * toRad) * Math.cos(latB * toRad) * Math.sin(dLng / 2) ** 2;
 	return 2 * 6371000 * Math.asin(Math.sqrt(h));
-}
-
-const demTiles = new Map();
-
-/**
- * The terrain height at a point, interpolated between the four nearest
- * pixels of its terrain tile, or null when the tile can't be had.
- * @returns {Promise<number|null>}
- */
-async function heightAt(lngLat) {
-	const scale = 2 ** DEM_MAX_ZOOM * DEM_TILE_SIZE;
-	const [ux, uy] = toUnits(lngLat);
-	// toUnits is at zoom 14 × 4096; rescale to terrain-tile pixels.
-	const px = (ux / (2 ** TILE_ZOOM * 4096)) * scale - 0.5;
-	const py = (uy / (2 ** TILE_ZOOM * 4096)) * scale - 0.5;
-	const x0 = Math.floor(px);
-	const y0 = Math.floor(py);
-	const fx = px - x0;
-	const fy = py - y0;
-	const corners = [];
-	for (const [dx, dy] of [
-		[0, 0],
-		[1, 0],
-		[0, 1],
-		[1, 1],
-	]) {
-		const height = await pixelHeight(x0 + dx, y0 + dy);
-		if (height === null) return null;
-		corners.push(height);
-	}
-	const top = corners[0] + (corners[1] - corners[0]) * fx;
-	const bottom = corners[2] + (corners[3] - corners[2]) * fx;
-	return top + (bottom - top) * fy;
-}
-
-/** One terrain pixel's height (global pixel coordinates at DEM_MAX_ZOOM). */
-async function pixelHeight(gx, gy) {
-	const tile = await demTile(Math.floor(gx / DEM_TILE_SIZE), Math.floor(gy / DEM_TILE_SIZE));
-	if (!tile) return null;
-	const i = ((gy % DEM_TILE_SIZE) * DEM_TILE_SIZE + (gx % DEM_TILE_SIZE)) * 4;
-	// Terrarium encoding: (red × 256 + green + blue / 256) − 32768 meters.
-	return tile[i] * 256 + tile[i + 1] + tile[i + 2] / 256 - 32768;
-}
-
-/**
- * A terrain tile's RGBA pixels: from the cache, else downloaded (and cached
- * for the map's topo mode too). Remembered, including a failure, for the
- * rest of this worker's life. Null when it can't be had or decoded (an old
- * browser without OffscreenCanvas in workers).
- * @returns {Promise<Uint8ClampedArray|null>}
- */
-function demTile(x, y) {
-	const key = `${x}/${y}`;
-	if (!demTiles.has(key)) {
-		demTiles.set(
-			key,
-			(async () => {
-				const url = DEM_TILE_URL.replace("{z}", DEM_MAX_ZOOM).replace("{x}", x).replace("{y}", y);
-				try {
-					let response = await caches.match(url);
-					if (!response) {
-						response = await fetch(url);
-						if (!response.ok) return null;
-						const names = await caches.keys();
-						const cache = await caches.open(names.find((name) => name.startsWith(MAP_DATA_CACHE_PREFIX)) ?? MAP_DATA_CACHE_FALLBACK);
-						await cache.put(url, response.clone());
-					}
-					// Heights are encoded in exact colour values, so nothing may adjust them.
-					const bitmap = await createImageBitmap(await response.blob(), {
-						colorSpaceConversion: "none",
-						premultiplyAlpha: "none",
-					});
-					const canvas = new OffscreenCanvas(DEM_TILE_SIZE, DEM_TILE_SIZE);
-					const context = canvas.getContext("2d", { willReadFrequently: true });
-					context.drawImage(bitmap, 0, 0);
-					return context.getImageData(0, 0, DEM_TILE_SIZE, DEM_TILE_SIZE).data;
-				} catch {
-					demTiles.delete(key);
-					return null;
-				}
-			})(),
-		);
-	}
-	return demTiles.get(key);
 }
 
 /** Meters per global tile unit at a latitude (see route-graph.js). */

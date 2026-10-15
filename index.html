@@ -194,6 +194,11 @@
           <span id="navTurnFlashIcon" class="nav-turn-flash-icon"></span>
           <span id="navTurnFlashText" class="nav-turn-flash-text"></span>
         </div>
+        <!-- The grade while on a slope. It hangs off the strip, so coming and going never moves the stats. -->
+        <div id="gradeChip" class="grade-chip" role="img" hidden>
+          <svg class="grade-icon" viewBox="0 0 24 16" aria-hidden="true"><path class="grade-icon-up" d="M2 14h20V2z"/><path class="grade-icon-down" d="M2 2v12h20z"/></svg>
+          <span id="gradeValue" class="grade-value"></span>
+        </div>
       </header>
 
       <button id="recenterBtn" class="map-chip recenter">Re-center</button>

@@ -162,6 +162,11 @@ export const MAP_STYLE_NAMES = {
 export const DEM_TILE_URL = "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png";
 export const DEM_MAX_ZOOM = 13;
 export const DEM_ATTRIBUTION = '<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Terrain Tiles</a>';
+// The service worker's map-data cache (vector and terrain tiles), matched by
+// prefix so a version bump in sw.js doesn't need a matching change here. Tiles
+// downloaded outside the map are stored there so the map finds them too.
+export const MAP_DATA_CACHE_PREFIX = "bike-tracker-mapdata-";
+export const MAP_DATA_CACHE_FALLBACK = "bike-tracker-mapdata-v1";
 export const FEET_PER_METER = 3.28084;
 export const TOPO_LAYER_IDS = ["topo-hillshade", "topo-contour-lines", "topo-contour-labels"];
 export const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
@@ -180,6 +185,17 @@ export const BEST_PACE_SLOTS = 12;
 export const BEST_PACE_BAND_M = 500;
 export const BEST_PACE_BAND_OPACITY = 0.6;
 export const BEST_PACE_CLIMB_GRADE = 0.03;
+// The live grade: the slope of the last GRADE_WINDOW_M ridden, from terrain
+// heights every GRADE_STEP_M along it. It shows from a GRADE_SHOW rise or drop
+// and, once showing, stays until the slope eases under GRADE_HIDE, so one
+// hovering at the threshold doesn't flicker it on and off. Its wedge turns
+// amber from GRADE_MODERATE and red from GRADE_STEEP.
+export const GRADE_WINDOW_M = 100;
+export const GRADE_STEP_M = 10;
+export const GRADE_SHOW = 0.02;
+export const GRADE_HIDE = 0.01;
+export const GRADE_MODERATE = 0.05;
+export const GRADE_STEEP = 0.08;
 // The pace chevron beside the live speed: level within this much of the average
 // it's compared with (0.5 mph), and against the ride's own average only once
 // the ride has run this long, before which that average means little.

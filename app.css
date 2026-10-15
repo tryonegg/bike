@@ -38,6 +38,7 @@
   --cta-shadow: 0 8px 24px rgba(20, 24, 26, 0.2);
   --pace-slow: #e05a3a;
   --pace-fast: #2f9c4f;
+  --grade-moderate: #e0a63a;
   /* The best-pace readout when the rider is at or ahead of their best. */
   --pace-ahead-tint: #f1f8f3;
   --pace-ahead-edge: rgba(47, 156, 79, 0.45);
@@ -1146,6 +1147,60 @@ button {
   display: block;
 }
 
+/* The grade, hung just under the strip on the map's edge. Its wedge leans with
+   the slope, amber when it's getting steep and red when it is. */
+.grade-chip {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px 8px 13px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--chip-shadow);
+  pointer-events: none;
+}
+
+.grade-icon {
+  display: block;
+  width: 24px;
+  height: 16px;
+  fill: var(--muted);
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.grade-icon path {
+  display: none;
+}
+
+.grade-chip[data-slope="up"] .grade-icon-up,
+.grade-chip[data-slope="down"] .grade-icon-down {
+  display: block;
+}
+
+.grade-chip[data-steepness="moderate"] .grade-icon {
+  fill: var(--grade-moderate);
+  stroke: var(--grade-moderate);
+}
+
+.grade-chip[data-steepness="steep"] .grade-icon {
+  fill: var(--pace-slow);
+  stroke: var(--pace-slow);
+}
+
+.grade-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
 .ride-side-stats {
   flex: none;
   display: flex;
@@ -1598,6 +1653,12 @@ button {
     flex-basis: 100%;
   }
 
+  /* Beside the column, at the top of the map. */
+  .grade-chip {
+    top: calc(14px + var(--safe-top));
+    left: calc(100% + 14px);
+  }
+
   /* Too narrow for one row of directions: the stop button drops under the
      turn, full width. */
   .nav-main {
@@ -1668,6 +1729,11 @@ button {
 
   .active-screen.stats-right .map-chip.ride-settings {
     right: calc(var(--ride-column) + 14px);
+  }
+
+  .active-screen.stats-right .grade-chip {
+    left: auto;
+    right: calc(100% + 14px);
   }
 
   /* Pre-ride -> active transition, landscape: the stats column slides in from

@@ -319,6 +319,8 @@ export const el = {
 	avgSpeed: document.getElementById("avgSpeed"),
 	paceTrend: document.getElementById("paceTrend"),
 	elapsedTime: document.getElementById("elapsedTime"),
+	gradeChip: document.getElementById("gradeChip"),
+	gradeValue: document.getElementById("gradeValue"),
 	pauseBtn: document.getElementById("pauseBtn"),
 	stopBtn: document.getElementById("stopBtn"),
 	recenterBtn: document.getElementById("recenterBtn"),

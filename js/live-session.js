@@ -22,6 +22,7 @@ import { getSegmentLengthMeters, segmentDistanceLabel, addSegmentMarkerToLayer, 
 import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
 import { trailingPace } from "./pace-index.js";
+import { updateGrade, hideGrade } from "./grade.js";
 import { resetRouteHome } from "./route-home.js";
 import { canFollowPoints, resetRidePlan, destinationRoute } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
@@ -530,6 +531,7 @@ function processPosition(position, forceAdd = false) {
 	updateSegments(point);
 	updateLiveMap(point, heading, safeSpeed);
 	updateLiveStats();
+	updateGrade(session);
 
 	if (Date.now() - state.lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
 		state.lastCheckpointAt = Date.now();
@@ -709,6 +711,7 @@ export async function togglePauseSession() {
 		stopWatch();
 		setPauseButton(true);
 		hideBestPace();
+		hideGrade();
 		await releaseWakeLock();
 		await saveActiveSessionCheckpoint();
 		updateLiveStats();
@@ -790,6 +793,7 @@ export async function finalizeSession() {
 	state.paceIndex = null;
 	state.routePastAvg = null;
 	state.rideRoute = null;
+	hideGrade();
 	resetRouteHome();
 	resetRidePlan();
 	hideDirections();
