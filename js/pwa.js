@@ -155,7 +155,15 @@ export function setupServiceWorkerUpdateChecks(registration) {
 	});
 
 	let hasRefreshed = false;
+	// A first visit's worker claiming the page isn't an update: the page is
+	// already current, and reloading would drop whatever it opened (a shared
+	// route link, whose hash is already cleared).
+	let wasControlled = Boolean(navigator.serviceWorker.controller);
 	navigator.serviceWorker.addEventListener("controllerchange", () => {
+		if (!wasControlled) {
+			wasControlled = true;
+			return;
+		}
 		if (hasRefreshed) return;
 		// A mid-ride reload here would discard the active session; the new worker
 		// simply takes effect on the next natural load instead.

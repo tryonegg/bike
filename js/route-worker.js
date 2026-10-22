@@ -392,28 +392,65 @@ async function fetchMissing(wanted, cached) {
 	const template = await tileTemplate();
 	if (!template) return 0;
 
-	const names = await caches.keys();
-	const cache = await caches.open(names.find((name) => name.startsWith(MAP_DATA_CACHE_PREFIX)) ?? MAP_DATA_CACHE_FALLBACK);
+	const urls = await Promise.all(missing.map((key) => downloadTile(key, template)));
 	let fetched = 0;
-	let next = 0;
-	const fetchOne = async () => {
-		while (next < missing.length) {
-			const key = missing[next++];
-			const [x, y] = key.split("/");
-			const url = template.replace("{z}", TILE_ZOOM).replace("{x}", x).replace("{y}", y);
-			try {
-				const response = await fetch(url);
-				if (!response.ok) continue;
-				await cache.put(url, response);
-				cached.set(key, url);
-				fetched++;
-			} catch {
-				// Offline or blocked: this tile stays missing.
-			}
-		}
-	};
-	await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, fetchOne));
+	missing.forEach((key, i) => {
+		if (!urls[i]) return;
+		cached.set(key, urls[i]);
+		fetched++;
+	});
 	return fetched;
+}
+
+// Tile downloads by "x/y" key, shared by every request: a shared route opens
+// with all its legs routed at once, and their corridors overlap (an out and
+// back route's entirely), so each tile is downloaded once, and no more than
+// FETCH_CONCURRENCY at a time in all, rather than per leg. A failed download
+// is forgotten so a later request tries again.
+const downloads = new Map();
+const downloadSlotWaiters = [];
+let activeDownloads = 0;
+
+/**
+ * Downloads one tile into the map-data cache.
+ * @returns {Promise<string|null>} Its URL, or null when it couldn't be had.
+ */
+function downloadTile(key, template) {
+	if (downloads.has(key)) return downloads.get(key);
+	const download = withDownloadSlot(async () => {
+		const [x, y] = key.split("/");
+		const url = template.replace("{z}", TILE_ZOOM).replace("{x}", x).replace("{y}", y);
+		try {
+			const response = await fetch(url);
+			if (!response.ok) return null;
+			const names = await caches.keys();
+			const cache = await caches.open(names.find((name) => name.startsWith(MAP_DATA_CACHE_PREFIX)) ?? MAP_DATA_CACHE_FALLBACK);
+			await cache.put(url, response);
+			return url;
+		} catch {
+			// Offline or blocked: this tile stays missing.
+			return null;
+		}
+	});
+	downloads.set(key, download);
+	download.then((url) => {
+		if (!url) downloads.delete(key);
+	});
+	return download;
+}
+
+/** Runs `task` once fewer than FETCH_CONCURRENCY downloads are under way, first come first served. */
+async function withDownloadSlot(task) {
+	if (activeDownloads >= FETCH_CONCURRENCY) await new Promise((resolve) => downloadSlotWaiters.push(resolve));
+	else activeDownloads++;
+	try {
+		return await task();
+	} finally {
+		const next = downloadSlotWaiters.shift();
+		// The slot passes straight to the next waiter, so the count stays put.
+		if (next) next();
+		else activeDownloads--;
+	}
 }
 
 let templatePromise = null;
