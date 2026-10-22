@@ -10,7 +10,7 @@
  *   {id, name, created, updated, profile: "bike"|"foot",
  *    source: "planned"|"gpx",                  // "gpx": an imported line, used as drawn
  *    waypoints: [[lng, lat]...],               // empty for a line used as drawn
- *    marks: [{icon, title}|null...],           // what each waypoint is (point-marks.js)
+ *    marks: [{icon, title, stop?}|null...],    // what each waypoint is (point-marks.js)
  *    legs: [{coords, meters, routed}...],      // one per pair of waypoints
  *    coords: [[lng, lat]...], meters,          // the whole route, joined
  *    elevation: {key, distances, heights, climb, descent}}  // its profile, see below
@@ -36,7 +36,7 @@ import { exportRouteGpx, isTurnCue } from "./gpx.js";
 import { renderProfileChart } from "./chart.js";
 import { canFollowPoints } from "./ride-plan.js";
 import { buildShareUrl, isShareHash, parseShareHash, MAX_SHARED_WAYPOINTS } from "./route-share.js";
-import { POINT_ICONS, MAX_POINT_TITLE_LENGTH, markAt, normalizeMark, pointIconSvg, pointMarkerContent } from "./point-marks.js";
+import { POINT_ICONS, MAX_POINT_TITLE_LENGTH, markAt, normalizeMark, isStop, pointIconSvg, pointMarkerContent } from "./point-marks.js";
 
 // Where the planner opens with no route and no GPS fix yet.
 const FALLBACK_VIEW = { center: [-98.5, 39.8], zoom: 3 };
@@ -126,7 +126,7 @@ async function renderRoutesList() {
 }
 
 /**
- * A route's one-line description, e.g. "12.4 mi · 120 ft climb · 5 points".
+ * A route's one-line description, e.g. "12.4 mi · 120 ft climb · 3 stops".
  * @param {Object} route
  * @returns {string}
  */
@@ -136,8 +136,9 @@ export function describeRoute(route) {
 	if (route.source === "gpx") {
 		parts.push("imported, as drawn");
 	} else {
-		const count = route.waypoints.length;
-		parts.push(`${count} point${count === 1 ? "" : "s"}`);
+		// Via points only shape the way, so it's the stops that are counted.
+		const count = route.waypoints.filter((_, i) => isStop(route, i)).length;
+		parts.push(`${count} stop${count === 1 ? "" : "s"}`);
 	}
 	return parts.join(" · ");
 }
@@ -1239,9 +1240,12 @@ function createWaypointMarker(map, lngLat, index, label = "") {
 
 // ---- Point sheet ----
 
-// The point the sheet is open for, and the icon picked in it so far.
+// The point the sheet is open for, the icon picked in it so far, and
+// whether it's been made a stop (true) or a via point (false), or left to
+// follow its icon and title (null).
 let sheetPoint = null;
 let sheetIcon = null;
+let sheetStop = null;
 
 /** Builds the sheet's icon picker: none (the point's number), then each icon. Called once from `wirePlanner`. */
 function wirePointSheet() {
@@ -1256,9 +1260,17 @@ function wirePointSheet() {
 		button.addEventListener("click", () => {
 			sheetIcon = key || null;
 			syncIconChoices();
+			syncKindChoices();
 		});
 		el.pointIconGrid.append(button);
 	}
+	for (const button of el.pointKindGroup.children) {
+		button.addEventListener("click", () => {
+			sheetStop = button.dataset.kind === "stop";
+			syncKindChoices();
+		});
+	}
+	el.pointTitleInput.addEventListener("input", syncKindChoices);
 	el.pointTitleInput.maxLength = MAX_POINT_TITLE_LENGTH;
 	el.pointTitleInput.addEventListener("keydown", (event) => {
 		if (event.key === "Enter") closePointSheet(true);
@@ -1282,10 +1294,38 @@ function openPointSheet(index) {
 	const mark = markAt(state.editingRoute, index);
 	sheetPoint = index;
 	sheetIcon = mark?.icon ?? null;
+	sheetStop = mark?.stop ?? null;
 	el.pointSheetTitle.textContent = `Point ${index + 1}`;
 	el.pointTitleInput.value = mark?.title ?? "";
 	syncIconChoices();
+	syncKindChoices();
 	el.pointSheet.hidden = false;
+}
+
+/** The sheet's point as it'd be saved: stop or via point by what's picked, and fixed as a stop at the route's ends. */
+function sheetMark() {
+	return normalizeMark({ icon: sheetIcon, title: el.pointTitleInput.value, stop: sheetStop ?? undefined });
+}
+
+/** Shows whether the sheet's point is a stop or a via point, and what that means. */
+function syncKindChoices() {
+	const route = state.editingRoute;
+	if (sheetPoint === null || !route) return;
+	const end = sheetPoint === 0 || sheetPoint === route.waypoints.length - 1;
+	const marks = [...(route.marks ?? [])];
+	marks[sheetPoint] = sheetMark();
+	const stop = isStop({ waypoints: route.waypoints, marks }, sheetPoint);
+	for (const button of el.pointKindGroup.children) {
+		const picked = (button.dataset.kind === "stop") === stop;
+		button.classList.toggle("active", picked);
+		button.setAttribute("aria-checked", String(picked));
+		button.disabled = end;
+	}
+	el.pointKindHint.textContent = end
+		? "The start and end are always stops."
+		: stop
+			? "Announced when you reach it, and shown as your next stop."
+			: "Keeps the route on the way you want, in order, without being announced.";
 }
 
 function syncIconChoices() {
@@ -1299,7 +1339,7 @@ function syncIconChoices() {
 /** Closes the sheet, saving what was picked in it (as one step Undo can take back) when `apply`. */
 function closePointSheet(apply) {
 	const index = sheetPoint;
-	const mark = normalizeMark({ icon: sheetIcon, title: el.pointTitleInput.value });
+	const mark = sheetMark();
 	el.pointSheet.hidden = true;
 	sheetPoint = null;
 	if (!apply || index === null) return;
@@ -1307,7 +1347,7 @@ function closePointSheet(apply) {
 		const route = state.editingRoute;
 		if (!route || index >= route.waypoints.length) return;
 		const before = markAt(route, index);
-		if (before?.icon === mark?.icon && (before?.title ?? "") === (mark?.title ?? "")) return;
+		if (before?.icon === mark?.icon && (before?.title ?? "") === (mark?.title ?? "") && before?.stop === mark?.stop) return;
 		remember();
 		ensureMarks(route);
 		route.marks[index] = mark;

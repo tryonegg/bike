@@ -286,7 +286,7 @@ export function createLineTracker(coords) {
  * approximation (fine at these distances).
  * @returns {{point: [number, number], t: number, meters: number}}
  */
-function projectOntoSegment(rider, a, b) {
+export function projectOntoSegment(rider, a, b) {
 	const cosLat = Math.cos((rider.lat * Math.PI) / 180);
 	const ax = (a[0] - rider.lng) * cosLat;
 	const ay = a[1] - rider.lat;

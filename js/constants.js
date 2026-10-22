@@ -118,12 +118,23 @@ export const PLAN_SIMPLIFY_M = 30;
 // back at its start, doesn't count as reached at the start.
 export const PLAN_ARRIVE_M = 30;
 export const PLAN_SKIP_AWAY_M = 60;
+// A via point (point-marks.js) counts as passed, without being reached, once
+// the rider is on the planned leg after it: within ROUTE_OFF_ROUTE_M of it,
+// at least PLAN_VIA_PASSED_M past the via point (looking no further than
+// PLAN_VIA_LOOK_M), and heading within PLAN_VIA_HEADING_DEG of the way it goes.
+export const PLAN_VIA_PASSED_M = 50;
+export const PLAN_VIA_LOOK_M = 1000;
+export const PLAN_VIA_HEADING_DEG = 60;
 
 // Turn-by-turn directions (directions.js). A turn is announced at most
 // twice: once about NAV_EARLY_S seconds ahead at the rider's speed (but no
 // nearer than NAV_EARLY_MIN_M or further than NAV_EARLY_MAX_M), with its
 // distance and the street, and again within NAV_NOW_M, as it's time to turn,
-// with just the turn (and the big turn arrow over the ride stats). A turn
+// with just the turn (and the big turn arrow over the ride stats). The
+// first prompt names the distance when the turn's at least NAV_SAY_DISTANCE_M
+// off (or has no street to name), and otherwise just the turn and street. Just
+// after a turn (NAV_HEADS_UP_AFTER_M to NAV_HEADS_UP_WITHIN_M past it), when
+// the next one is NAV_LONG_M or more away, a heads-up says how far. A turn
 // within NAV_THEN_M after the one announced is chained on ("…, then turn
 // left"). Riding more than NAV_TURN_AROUND_DEG away from the way the route
 // goes (at speed) means turning around. "Rerouting" is said no more often
@@ -131,10 +142,14 @@ export const PLAN_SKIP_AWAY_M = 60;
 // following the route for NAV_FOLLOWING_M. The Route to Start button is
 // offered once the rider is NAV_HOME_AWAY_M from the start, and directions
 // there end on arriving within PLAN_ARRIVE_M of it.
-export const NAV_EARLY_S = 10;
-export const NAV_EARLY_MIN_M = 60;
-export const NAV_EARLY_MAX_M = 300;
+export const NAV_EARLY_S = 25;
+export const NAV_EARLY_MIN_M = 120;
+export const NAV_EARLY_MAX_M = 400;
 export const NAV_NOW_M = 30;
+export const NAV_SAY_DISTANCE_M = 250;
+export const NAV_LONG_M = 800;
+export const NAV_HEADS_UP_AFTER_M = 15;
+export const NAV_HEADS_UP_WITHIN_M = 200;
 export const NAV_THEN_M = 80;
 export const NAV_TURN_AROUND_DEG = 120;
 export const NAV_TURN_AROUND_MIN_SPEED_MPS = 1.5;

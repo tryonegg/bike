@@ -24,6 +24,10 @@ import {
 	NAV_EARLY_MIN_M,
 	NAV_EARLY_MAX_M,
 	NAV_NOW_M,
+	NAV_SAY_DISTANCE_M,
+	NAV_LONG_M,
+	NAV_HEADS_UP_AFTER_M,
+	NAV_HEADS_UP_WITHIN_M,
 	NAV_THEN_M,
 	NAV_TURN_AROUND_DEG,
 	NAV_TURN_AROUND_MIN_SPEED_MPS,
@@ -40,7 +44,7 @@ import { ridePlanGuidance, skipNextPoint, cancelRideRoute } from "./ride-plan.js
 import { latestRouteHome } from "./route-home.js";
 import { say } from "./voice.js";
 import { TURN_WORDS, turnInstruction } from "./route-steps.js";
-import { markAt, pointName } from "./point-marks.js";
+import { markAt, pointName, isStop } from "./point-marks.js";
 import { getElapsedMs } from "./live-session.js";
 
 // Line icons for each turn, drawn in a 24-unit box.
@@ -69,6 +73,51 @@ const SPOKEN_TURNS = {
 	"sharp-right": "make a sharp right",
 	uturn: "make a U-turn",
 };
+
+// Which side a turn's street is on, for "watch for Main Street on your right".
+const TURN_SIDES = {
+	left: "left",
+	right: "right",
+	"slight-left": "left",
+	"slight-right": "right",
+};
+
+// Ways to say a turn's coming up, picked from so the same words don't come
+// every time: with the distance, for a turn further off (or with no street to
+// name), and without it. `turn` is the turn with its street ("turn right onto
+// Main Street"), `d` the distance ("400 feet").
+const EARLY_WITH_DISTANCE = [
+	({ d, turn }) => `in ${d}, ${turn}`,
+	({ d, turn }) => `in about ${d}, ${turn}`,
+	({ d, turn }) => `up ahead in ${d}, ${turn}`,
+	({ d, turn }) => `${turn} in ${d}`,
+];
+const EARLY_WITHOUT_DISTANCE = [
+	({ turn }) => `next, ${turn}`,
+	({ turn }) => `coming up, ${turn}`,
+	({ turn }) => `up ahead, ${turn}`,
+	({ turn }) => `get ready to ${turn}`,
+	({ street, side, turn }) => (side && street ? `watch for ${street} on your ${side}` : `coming up, ${turn}`),
+];
+
+// Heads-ups just after a turn when the next is a long way off. `road` is the
+// way just turned onto ("Main Street", or "this road"), `d` the distance to
+// the next turn, `minutes` about how long that is at the ride's pace (or
+// null when under a couple of minutes), `place` the destination when that's
+// what's next.
+const HEADS_UP = [
+	({ road, d }) => `continue on ${road} for ${d}`,
+	({ road, d }) => `stay on ${road} for about ${d}`,
+	({ d }) => `your next turn is in ${d}`,
+	({ d, minutes }) => (minutes ? `next turn in ${d}, about ${minutes} minutes` : `next turn in ${d}`),
+	({ road, d }) => `follow ${road} for ${d}`,
+	({ d }) => `settle in, it's ${d} to the next turn`,
+];
+const HEADS_UP_ARRIVE = [
+	({ road, d, place }) => `continue on ${road} for ${d} to ${place}`,
+	({ d, place }) => `${d} to go to ${place}`,
+	({ d, minutes, place }) => (minutes ? `about ${minutes} minutes to ${place}` : `${d} to go to ${place}`),
+];
 
 // Riding speeds to estimate time to the next stop with, in m/s, until the
 // ride's own average is worth trusting.
@@ -191,6 +240,8 @@ function freshMemory(session) {
 		lastRerouteSpokenAt: 0,
 		lastTurnAroundSpokenAt: 0,
 		followedAlong: 0,
+		headsUp: new Set(),
+		lastPhrase: new Map(),
 	};
 }
 
@@ -260,6 +311,8 @@ function describe(source, session, point) {
 
 	const view = {
 		step: next,
+		previous: nextIndex > 0 ? steps[nextIndex - 1] : null,
+		sinceTurn: along - previousAlong,
 		after,
 		distance: next ? next.along - along : guidance.target.meters,
 		progress: next ? clamp((along - previousAlong) / Math.max(1, next.along - previousAlong)) : 0,
@@ -423,8 +476,9 @@ function formatEta(seconds) {
 // ---- Voice ----
 
 /**
- * Says what's due: each turn about NAV_EARLY_S ahead, with its distance
- * and street, and again as it's time to turn (a turn close behind each
+ * Says what's due: each turn about NAV_EARLY_S ahead, with its street (and
+ * distance, when further off), a heads-up after a turn when the next is a
+ * long way off, and each turn again as it's time to turn (a turn close behind each
  * chained on), "rerouting" when the rider leaves a route they'd been
  * following, "off route" for a route followed as is, and "turn around" when
  * heading away from a planned route.
@@ -457,7 +511,9 @@ function speakFor(source, view) {
 	}
 
 	const step = view.step;
-	if (!step || step.turn === "arrive") return;
+	if (!step) return;
+	if (speakHeadsUp(source, view)) return;
+	if (step.turn === "arrive") return;
 	// Two prompts a turn at most: about NAV_EARLY_S ahead, and as it's time to turn.
 	const atTurn = view.distance <= NAV_NOW_M;
 	if (!atTurn && view.distance > earlyMeters(state.currentSession)) return;
@@ -467,12 +523,59 @@ function speakFor(source, view) {
 	memory.spoken.set(key, stage);
 
 	// At the turn itself it's just the turn: "Turn right."
-	let text = atTurn ? spokenTurn(step, false) : `in ${spokenDistance(view.distance)}, ${spokenTurn(step, true)}`;
+	let text = atTurn ? spokenTurn(step, false) : earlyPrompt(step, view.distance);
 	const after = view.after;
 	if (after && after.turn !== "arrive" && after.along - step.along <= NAV_THEN_M) {
 		text += `, then ${spokenTurn(after, !atTurn)}`;
 	}
 	say(sentence(text));
+}
+
+/**
+ * The first prompt for a turn, in words picked from the banks above: with
+ * its distance when it's NAV_SAY_DISTANCE_M or more off, or there's no street
+ * to say, and otherwise just the turn and street.
+ */
+function earlyPrompt(step, meters) {
+	const turn = spokenTurn(step, true);
+	const street = step.stay ? null : step.name;
+	const withDistance = meters >= NAV_SAY_DISTANCE_M || turn === spokenTurn(step, false);
+	if (withDistance) return pickPhrase("early-distance", EARLY_WITH_DISTANCE)({ d: spokenDistance(meters), turn });
+	return pickPhrase("early", EARLY_WITHOUT_DISTANCE)({ turn, street, side: TURN_SIDES[step.turn] });
+}
+
+/**
+ * Just after a turn, when the next one (or the end) is NAV_LONG_M or more
+ * away, says so once: "Continue on Main Street for 1.2 miles."
+ * @returns {boolean} Whether it spoke.
+ */
+function speakHeadsUp(source, view) {
+	const { step, previous } = view;
+	if (!previous || previous.turn === "arrive" || view.distance < NAV_LONG_M) return false;
+	if (view.sinceTurn < NAV_HEADS_UP_AFTER_M || view.sinceTurn > NAV_HEADS_UP_WITHIN_M) return false;
+	const key = `${previous.point[0].toFixed(4)},${previous.point[1].toFixed(4)}`;
+	if (memory.headsUp.has(key)) return false;
+	memory.headsUp.add(key);
+
+	const minutes = Math.round(view.distance / paceFor(state.currentSession) / 60);
+	const values = {
+		road: previous.name ?? (previous.kind ? `the ${previous.kind}` : "this road"),
+		d: spokenDistance(view.distance),
+		minutes: minutes >= 2 ? minutes : null,
+		place: targetName(source),
+	};
+	const bank = step.turn === "arrive" ? HEADS_UP_ARRIVE : HEADS_UP;
+	say(sentence(pickPhrase(step.turn === "arrive" ? "heads-up-arrive" : "heads-up", bank)(values)));
+	return true;
+}
+
+/** A phrase from `bank` at random, never the one picked from it last time. */
+function pickPhrase(name, bank) {
+	const last = memory.lastPhrase.get(name);
+	let index = Math.floor(Math.random() * bank.length);
+	if (bank.length > 1 && index === last) index = (index + 1 + Math.floor(Math.random() * (bank.length - 1))) % bank.length;
+	memory.lastPhrase.set(name, index);
+	return bank[index];
 }
 
 /**
@@ -490,7 +593,10 @@ function earlyMeters(session) {
 function spokenDistance(meters) {
 	const [value, unit] = formatNavDistance(meters);
 	const words = { ft: "feet", mi: "miles", m: "meters", km: "kilometers" };
-	return `${value} ${words[unit] ?? unit}`;
+	// "1 mile", not "1.0 miles".
+	const spoken = value.replace(/\.0$/, "");
+	if (spoken === "1" && (unit === "mi" || unit === "km")) return `1 ${unit === "mi" ? "mile" : "kilometer"}`;
+	return `${spoken} ${words[unit] ?? unit}`;
 }
 
 /**
@@ -523,7 +629,8 @@ function listenForArrivals(session, source) {
 	const skipped = memory.skipped && next > memory.nextWaypoint;
 	if (next > memory.nextWaypoint) {
 		memory.skipped = false;
-		if (!skipped && voiceRoute && !plan?.finished) say(`You've reached ${reachedName(next - 1)}.`);
+		// Via points are passed quietly.
+		if (!skipped && voiceRoute && !plan?.finished && isStop(state.rideRoute, next - 1)) say(`You've reached ${reachedName(next - 1)}.`);
 	}
 	memory.nextWaypoint = next;
 
@@ -538,11 +645,12 @@ function listenForArrivals(session, source) {
 	}
 }
 
-/** What to call the planned point the rider just reached: its title or icon's name, or "point N". */
+/** What to call the planned stop the rider just reached: its title or icon's name, or "point N". */
 function reachedName(index) {
 	const route = state.rideRoute;
 	const mark = markAt(route, index);
-	return mark ? pointName(route, index) : `point ${index + 1}`;
+	const name = pointName(route, index);
+	return mark?.title || mark?.icon ? name : name.replace(/^Point/, "point");
 }
 
 // ---- Sheet ----

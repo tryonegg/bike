@@ -10,7 +10,7 @@ import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
 import { haversineMeters, escapeHtml, formatDistance } from "./format.js";
 import { turnInstruction } from "./route-steps.js";
-import { POINT_ICONS, markAt } from "./point-marks.js";
+import { POINT_ICONS, markAt, isStop, pointName } from "./point-marks.js";
 
 // Each turn as a GPX waypoint's symbol and type, in the words Garmin and
 // Ride with GPS cue sheets use, which other apps tend to follow.
@@ -52,9 +52,10 @@ export function exportCurrentGpx() {
 /**
  * Downloads a planned route (see route-plan.js) as a `.gpx` file: one track
  * following the whole route, which bike computers and other apps take as a
- * course to follow; a waypoint for each point given an icon or title in the
- * planner (point-marks.js; the title, or else the icon's name, as its name,
- * and the icon as its symbol and type); and a waypoint at each turn (its
+ * course to follow; a waypoint for each stop given an icon or title, or made
+ * a stop, in the planner (point-marks.js; the title, or else the icon's name,
+ * as its name, and the icon as its symbol and type), via points being left
+ * to the track; and a waypoint at each turn (its
  * instruction as the name, its symbol and type the turn, and how far along
  * the route it is in the description), which they take as cues or course
  * points. It has no times or elevations, since it hasn't been ridden yet.
@@ -69,9 +70,9 @@ export function exportRouteGpx(route, steps = []) {
 	const unitLabel = unit === "imperial" ? "mi" : "km";
 	const places = route.waypoints.flatMap(([lng, lat], i) => {
 		const mark = markAt(route, i);
-		if (!mark) return [];
+		if (!mark || !isStop(route, i)) return [];
 		const icon = mark.icon ? POINT_ICONS[mark.icon] : null;
-		const name = escapeHtml(mark.title || icon.label);
+		const name = escapeHtml(pointName(route, i));
 		return [
 			[
 				`<wpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}">`,

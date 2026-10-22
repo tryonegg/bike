@@ -1,8 +1,8 @@
 /**
  * Shareable route links. A planned route is shared as its name, waypoints,
  * and what they are (point-marks.js), in the URL's hash (which is never sent
- * to a server): `#r1=<points>&n=<name>&m=<marks>`, the name and marks only
- * when there are any. The receiving app routes between the points itself.
+ * to a server): `#r1=<points>&n=<name>&m=<marks>&s=<kinds>`, the name, marks
+ * and kinds only when there are any. The receiving app routes between the points itself.
  *
  * <points> is the waypoints as [lat, lng] pairs at 1e-5 degrees (about a
  * meter), each as the difference from the one before, in the style of
@@ -20,6 +20,11 @@
  * may have dots, but only the first two separate fields). The marks come
  * after the name, so an older copy of the app, which reads everything after
  * `&n=` as the name, still opens the route.
+ *
+ * <kinds> lists the points made a stop or a via point against what their
+ * icon and title would make them (point-marks.js), comma-separated, each as
+ * `<index>.<1 for a stop, 0 for a via point>`. Copies of the app from before
+ * via points ignore it.
  */
 
 import { normalizeMark } from "./point-marks.js";
@@ -53,12 +58,14 @@ export function buildShareUrl(waypoints, name = "", marks = []) {
 		prevLng = lngUnits;
 	}
 	const trimmedName = name.trim().slice(0, MAX_SHARED_NAME_LENGTH);
-	const marked = waypoints
-		.map((_, i) => [i, normalizeMark(marks[i])])
-		.filter(([, mark]) => mark)
+	const normalized = waypoints.map((_, i) => [i, normalizeMark(marks[i])]);
+	const marked = normalized
+		.filter(([, mark]) => mark?.icon || mark?.title)
 		.map(([i, mark]) => `${i}.${mark.icon ?? ""}.${encodeURIComponent(mark.title)}`);
+	const kinds = normalized.filter(([, mark]) => typeof mark?.stop === "boolean").map(([i, mark]) => `${i}.${mark.stop ? 1 : 0}`);
 	let suffix = trimmedName ? `&n=${encodeURIComponent(trimmedName)}` : "";
 	if (marked.length) suffix += `&m=${marked.join(",")}`;
+	if (kinds.length) suffix += `&s=${kinds.join(",")}`;
 	return `${location.origin}${location.pathname}${PREFIX}${data}${suffix}`;
 }
 
@@ -83,6 +90,7 @@ export function parseShareHash(hash) {
 	const [data, ...params] = hash.slice(PREFIX.length).split("&");
 	let name = "";
 	let markText = "";
+	let kindText = "";
 	for (const param of params) {
 		if (param.startsWith("n=")) {
 			try {
@@ -92,6 +100,8 @@ export function parseShareHash(hash) {
 			}
 		} else if (param.startsWith("m=")) {
 			markText = param.slice(2);
+		} else if (param.startsWith("s=")) {
+			kindText = param.slice(2);
 		}
 	}
 
@@ -123,14 +133,14 @@ export function parseShareHash(hash) {
 		points.push([lng / SCALE, lat / SCALE]);
 	}
 	if (points.length < 2 || points.length > MAX_SHARED_WAYPOINTS) return null;
-	return { waypoints: points, name, marks: parseMarks(markText, points.length) };
+	return { waypoints: points, name, marks: parseMarks(markText, kindText, points.length) };
 }
 
 /**
- * The marks in a link, one per point. A damaged entry is left out rather
- * than spoiling the route.
+ * The marks in a link, one per point, with which are stops or via points.
+ * A damaged entry is left out rather than spoiling the route.
  */
-function parseMarks(text, count) {
+function parseMarks(text, kindText, count) {
 	const marks = new Array(count).fill(null);
 	for (const entry of text ? text.split(",") : []) {
 		const first = entry.indexOf(".");
@@ -143,6 +153,12 @@ function parseMarks(text, count) {
 		} catch {
 			// A badly encoded title: the point stays plain.
 		}
+	}
+	for (const entry of kindText ? kindText.split(",") : []) {
+		const [indexText, kind] = entry.split(".");
+		const index = Number(indexText);
+		if (!Number.isInteger(index) || index < 0 || index >= count || (kind !== "0" && kind !== "1")) continue;
+		marks[index] = normalizeMark({ ...(marks[index] ?? {}), stop: kind === "1" });
 	}
 	return marks;
 }

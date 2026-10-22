@@ -1,9 +1,16 @@
 /**
  * What a planned route's points are: each can have an icon (a water stop,
  * the start, …) and a title, both optional. A route keeps them in `marks`,
- * one per waypoint in the same order, each {icon, title} or null for a plain
- * numbered point (an older route may have no `marks`, or fewer than its
- * waypoints: the rest are plain). They're picked in the planner
+ * one per waypoint in the same order, each {icon, title, stop} or null for a
+ * plain point (an older route may have no `marks`, or fewer than its
+ * waypoints: the rest are plain).
+ *
+ * Each point is also either a stop or a via point. Stops are announced when
+ * reached and shown as the next stop; via points only keep the route on the
+ * way planned, in order, and are passed quietly. The start and end are
+ * always stops; in between, a point with an icon or title is a stop and a
+ * plain one is a via point, unless its mark's `stop` (true or false, left
+ * out when it agrees) says otherwise. They're picked in the planner
  * (route-plan.js), drawn on the planner and ride maps, carried in share links
  * (route-share.js), named in directions, and written to GPX exports (gpx.js).
  */
@@ -57,13 +64,38 @@ export const POINT_ICONS = {
  * icons this one doesn't know) loses what it can't use.
  *
  * @param {*} mark
- * @returns {{icon: string|null, title: string}|null}
+ * A `stop` that agrees with what the icon and title make the point anyway
+ * is dropped.
+ *
+ * @returns {{icon: string|null, title: string, stop?: boolean}|null}
  */
 export function normalizeMark(mark) {
 	if (!mark || typeof mark !== "object") return null;
 	const icon = typeof mark.icon === "string" && Object.hasOwn(POINT_ICONS, mark.icon) ? mark.icon : null;
 	const title = typeof mark.title === "string" ? mark.title.trim().slice(0, MAX_POINT_TITLE_LENGTH) : "";
-	return icon || title ? { icon, title } : null;
+	const labelled = Boolean(icon || title);
+	if (typeof mark.stop === "boolean" && mark.stop !== labelled) return { icon, title, stop: mark.stop };
+	return labelled ? { icon, title } : null;
+}
+
+/**
+ * Whether a route's waypoint `index` is a stop rather than a via point (see
+ * above). A route with no waypoints in between has only stops.
+ * @param {{waypoints?: Array, marks?: Array}|null|undefined} route
+ * @param {number} index
+ */
+export function isStop(route, index) {
+	const count = route?.waypoints?.length ?? 0;
+	if (index <= 0 || index >= count - 1) return true;
+	const mark = markAt(route, index);
+	return mark?.stop ?? Boolean(mark);
+}
+
+/** A stop's number among the route's stops, counting from 1. */
+function stopNumber(route, index) {
+	let number = 0;
+	for (let i = 0; i <= index; i++) if (isStop(route, i)) number++;
+	return number;
 }
 
 /**
@@ -77,12 +109,14 @@ export function markAt(route, index) {
 
 /**
  * What to call a route's waypoint `index`: its title, else its icon's name,
- * else "Point N".
+ * else "Point N" (N counting stops only), or "Via point".
  * @returns {string}
  */
 export function pointName(route, index) {
 	const mark = markAt(route, index);
-	return mark?.title || (mark?.icon ? POINT_ICONS[mark.icon].label : `Point ${index + 1}`);
+	if (mark?.title) return mark.title;
+	if (mark?.icon) return POINT_ICONS[mark.icon].label;
+	return isStop(route, index) ? `Point ${stopNumber(route, index)}` : "Via point";
 }
 
 /** An icon's line drawing as an SVG element's markup. */
@@ -92,14 +126,14 @@ export function pointIconSvg(icon) {
 }
 
 /**
- * The inside of a waypoint's map marker: its icon, or else its number. The
- * start and end are coloured like the start and end of a ride.
+ * The inside of a waypoint's map marker: its icon, or else its number among
+ * the stops; a via point without an icon is a small plain dot. The start and
+ * end are coloured like the start and end of a ride.
  * @returns {{html: string, className: string}}
  */
 export function pointMarkerContent(route, index) {
 	const mark = markAt(route, index);
-	return {
-		html: mark?.icon ? pointIconSvg(mark.icon) : String(index + 1),
-		className: mark?.icon ? `has-icon point-${mark.icon}` : "",
-	};
+	const via = isStop(route, index) ? "" : " via";
+	if (mark?.icon) return { html: pointIconSvg(mark.icon), className: `has-icon point-${mark.icon}${via}` };
+	return via ? { html: "", className: "via" } : { html: String(stopNumber(route, index)), className: "" };
 }

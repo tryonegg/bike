@@ -4,7 +4,10 @@
  * point", it's a route worked out live from the rider to the next planned
  * point (route-follow.js), then the planned legs on from there; the next
  * point moves on as the rider reaches each one, and the points still to
- * come are marked on the map.
+ * come are marked on the map. Via points (point-marks.js) are followed the
+ * same way, but passed quietly: one counts as passed once the rider is
+ * riding the planned leg on from it, and the guidance looks past them to
+ * the next stop, with the turns beyond them taken from the planned line.
  *
  * The ride keeps its place on the route in the session (`routeMode`,
  * `nextWaypoint`, `lastReached`, and `routeCancelled` once the rider has
@@ -16,11 +19,11 @@
  * far along it the rider is, and what they're heading for.
  */
 
-import { PLAN_ARRIVE_M, PLAN_SKIP_AWAY_M, ROUTE_OFF_ROUTE_M } from "./constants.js";
+import { PLAN_ARRIVE_M, PLAN_SKIP_AWAY_M, PLAN_VIA_PASSED_M, PLAN_VIA_LOOK_M, PLAN_VIA_HEADING_DEG, ROUTE_OFF_ROUTE_M } from "./constants.js";
 import { state } from "./state.js";
-import { haversineMeters } from "./format.js";
-import { createRouteFollower, createLineTracker } from "./route-follow.js";
-import { pointName, pointMarkerContent } from "./point-marks.js";
+import { haversineMeters, bearingDegrees } from "./format.js";
+import { createRouteFollower, createLineTracker, projectOntoSegment } from "./route-follow.js";
+import { pointName, pointMarkerContent, isStop } from "./point-marks.js";
 
 const follower = createRouteFollower("Route to next point");
 let listener = null;
@@ -29,7 +32,11 @@ let guidance = null;
 // Following a route as is: its progress tracker and its steps, once the
 // worker has worked them out.
 let asIs = null;
+// Following point to point with via points: the planned line through all
+// the points, how far along it each point is, and its steps once worked out.
+let planned = null;
 let directionsWorker = null;
+let nextStepsId = 1;
 // The markers for the points still to come, and which map and which next
 // point they were drawn for.
 let markers = [];
@@ -101,7 +108,7 @@ export function ridePlanLine(point, session) {
 		return route.coords;
 	}
 
-	advance(point, session, route.waypoints);
+	advance(point, session, route);
 	const next = session.nextWaypoint;
 	drawMarkers(route, next);
 	if (next >= route.waypoints.length) {
@@ -117,21 +124,80 @@ export function ridePlanLine(point, session) {
 	// Until the live route arrives, the next point is just straight ahead.
 	const straight = haversineMeters(point.lat, point.lng, goal[1], goal[0]);
 	const toGoal = live ? live.meters : straight;
+	// What's being headed for is the next stop, by way of any via points first.
+	const stop = nextStop(route, next);
+	const following = nextStop(route, stop + 1);
 	guidance = {
 		finished: false,
-		steps: live?.steps ?? [],
+		steps: live ? stepsToStop(route, next, stop, live) : [],
 		along: live?.along ?? 0,
 		offRoute: live?.offRoute ?? false,
-		target: { label: route.destination ? "Destination" : pointName(route, next), meters: toGoal, point: goal },
+		target: {
+			label: route.destination ? "Destination" : pointName(route, stop),
+			meters: route.legs.slice(next, stop).reduce((sum, leg) => sum + leg.meters, toGoal),
+			point: goal,
+		},
 		// The route's last point, by way of the planned legs on from the next one.
 		finish: { meters: route.legs.slice(next).reduce((sum, leg) => sum + leg.meters, toGoal) },
-		following: next + 1 < route.waypoints.length ? pointName(route, next + 1) : null,
-		stopsLeft: route.waypoints.length - next,
+		following: following < route.waypoints.length ? pointName(route, following) : null,
+		stopsLeft: route.waypoints.slice(next).filter((_, i) => isStop(route, next + i)).length,
 		// There's nothing to skip on to from a destination.
 		canSkip: !route.destination,
 		destination: Boolean(route.destination),
 	};
 	return line;
+}
+
+/** The first stop (not a via point) from waypoint `from` on, or the waypoint count when there's none. */
+function nextStop(route, from) {
+	for (let i = from; i < route.waypoints.length; i++) if (isStop(route, i)) return i;
+	return route.waypoints.length;
+}
+
+/**
+ * The steps to the next stop: the live route's to the next point, and when
+ * that's a via point, the planned line's on from it (once worked out), in
+ * the live route's reckoning, ending in arriving at the stop.
+ */
+function stepsToStop(route, next, stop, live) {
+	if (stop === next) return live.steps;
+	const plan = plannedLine(route);
+	const steps = live.steps.filter((step) => step.turn !== "arrive");
+	if (!plan.steps) return steps;
+	const from = plan.waypointAlong[next];
+	const to = plan.waypointAlong[stop];
+	// The planned line's distances, counted on from the end of the live route.
+	const shift = live.total - from;
+	for (const step of plan.steps) {
+		// A turn right at the via point is taken from the planned line too.
+		if (step.turn === "arrive" || step.along < from - 5 || step.along >= to - 1) continue;
+		steps.push({ ...step, along: step.along + shift });
+	}
+	steps.push({ index: -1, along: to + shift, turn: "arrive", name: null, kind: null, stay: false, point: route.waypoints[stop] });
+	return steps;
+}
+
+/**
+ * The planned line through all of a route's points, with how far along it
+ * each point is, and its steps, asked for once and filled in when worked out.
+ */
+function plannedLine(route) {
+	if (planned?.route === route) return planned;
+	const coords = [];
+	const ends = [0];
+	route.legs.forEach((leg, i) => {
+		coords.push(...(i ? leg.coords.slice(1) : leg.coords));
+		ends.push(coords.length - 1);
+	});
+	const { distances } = createLineTracker(coords);
+	const plan = { route, waypointAlong: ends.map((index) => distances[index] ?? 0), steps: null };
+	planned = plan;
+	if (coords.length >= 2) {
+		requestSteps(coords, route.profile, (steps) => {
+			if (planned === plan) plan.steps = steps.map((step) => ({ ...step, along: distances[step.index] }));
+		});
+	}
+	return plan;
 }
 
 /**
@@ -140,8 +206,11 @@ export function ridePlanLine(point, session) {
  */
 function asIsGuidance(point, route) {
 	if (asIs?.route !== route) {
-		asIs = { route, tracker: createLineTracker(route.coords), steps: [] };
-		requestSteps(route);
+		const tracked = { route, tracker: createLineTracker(route.coords), steps: [] };
+		asIs = tracked;
+		requestSteps(route.coords, route.profile, (steps) => {
+			if (asIs === tracked) tracked.steps = steps.map((step) => ({ ...step, along: tracked.tracker.distances[step.index] }));
+		});
 	}
 	const { along, meters } = asIs.tracker.match(point);
 	const total = asIs.tracker.total;
@@ -159,25 +228,28 @@ function asIsGuidance(point, route) {
 	};
 }
 
-/** Asks the routing worker for the turn-by-turn steps along a route followed as is. */
-function requestSteps(route) {
+/**
+ * Asks the routing worker for the turn-by-turn steps along a line (a route
+ * followed as is, or a planned line past via points), handing them to `done`.
+ */
+function requestSteps(coords, profile, done) {
 	try {
 		directionsWorker ??= new Worker(new URL("./route-worker.js", import.meta.url), { type: "module" });
 	} catch (error) {
 		console.warn("Directions unavailable", error);
 		return;
 	}
-	const id = Date.now();
+	const id = nextStepsId++;
 	const handle = (event) => {
 		if (event.data.id !== id) return;
 		directionsWorker?.removeEventListener("message", handle);
 		if (event.data.error) console.warn("Working out directions failed", event.data.error);
-		if (asIs?.route !== route || !event.data.steps) return;
-		asIs.steps = event.data.steps.map((step) => ({ ...step, along: asIs.tracker.distances[step.index] }));
+		if (!event.data.steps) return;
+		done(event.data.steps);
 		listener?.();
 	};
 	directionsWorker.addEventListener("message", handle);
-	directionsWorker.postMessage({ id, type: "directions", coords: route.coords, profile: route.profile ?? "bike" });
+	directionsWorker.postMessage({ id, type: "directions", coords, profile: profile ?? "bike" });
 }
 
 /**
@@ -190,19 +262,21 @@ function requestSteps(route) {
  *   stopsLeft?: number|null, canSkip?: boolean}|null}
  *   `finished` once the route's end has been reached; otherwise `steps`
  *   (each with `along`) and `along` in one reckoning, `target` the next
- *   point (or the route's end) and how far it is along the way, `finish`
+ *   stop (or the route's end) and how far it is along the way, `finish`
  *   how far the route's end is (only when there are points before it), `following`
- *   the point after it, and `stopsLeft` how many points are still to come.
+ *   the stop after it, and `stopsLeft` how many stops are still to come.
+ *   Via points (point-marks.js) aren't targets or counted: they're passed
+ *   on the way.
  */
 export function ridePlanGuidance() {
 	return guidance;
 }
 
-/** Skips the next point of a route followed point to point, making for the one after. */
+/** Skips the next stop of a route followed point to point (and any via points before it), making for the one after. */
 export function skipNextPoint(session) {
 	const route = state.rideRoute;
 	if (!route || session.routeMode !== "points" || session.nextWaypoint >= route.waypoints.length) return;
-	session.nextWaypoint += 1;
+	session.nextWaypoint = nextStop(route, session.nextWaypoint) + 1;
 }
 
 /** Stops following the ride's route: it's taken off the map, and its directions end. */
@@ -216,9 +290,11 @@ export function cancelRideRoute(session) {
  * Moves the ride on past any point the rider has reached: the next one, or
  * a later one (skipping those before it), though a later one only counts
  * once the rider is well away from the last point reached. Otherwise a loop
- * that ends where it starts would count as finished at the start.
+ * that ends where it starts would count as finished at the start. A via
+ * point also counts as passed once the rider's riding the leg on from it.
  */
-function advance(point, session, waypoints) {
+function advance(point, session, route) {
+	const { waypoints } = route;
 	const near = (lngLat, meters) => haversineMeters(point.lat, point.lng, lngLat[1], lngLat[0]) <= meters;
 	const awayFromLast = !session.lastReached || !near(session.lastReached, PLAN_SKIP_AWAY_M);
 	for (let i = session.nextWaypoint; i < waypoints.length; i++) {
@@ -229,6 +305,35 @@ function advance(point, session, waypoints) {
 			return;
 		}
 	}
+	while (session.nextWaypoint < waypoints.length && !isStop(route, session.nextWaypoint) && ridingLegFrom(point, session, route, session.nextWaypoint)) {
+		session.lastReached = waypoints[session.nextWaypoint];
+		session.nextWaypoint += 1;
+	}
+}
+
+/**
+ * Whether the rider is on the planned leg on from waypoint `index`, past it
+ * and heading the way the leg goes, so the point's been passed: taken a
+ * different road to, or ridden by just out of reach. The heading keeps an
+ * out-and-back from counting on the way out.
+ */
+function ridingLegFrom(point, session, route, index) {
+	const leg = route.legs[index];
+	const heading = session.currentHeading;
+	if (!leg || !Number.isFinite(heading)) return false;
+	let covered = 0;
+	for (let i = 0; i + 1 < leg.coords.length && covered < PLAN_VIA_LOOK_M; i++) {
+		const a = leg.coords[i];
+		const b = leg.coords[i + 1];
+		const length = haversineMeters(a[1], a[0], b[1], b[0]);
+		const hit = projectOntoSegment(point, a, b);
+		const along = covered + hit.t * length;
+		covered += length;
+		if (along < PLAN_VIA_PASSED_M || hit.meters > ROUTE_OFF_ROUTE_M) continue;
+		const off = Math.abs(((bearingDegrees(a[1], a[0], b[1], b[0]) - heading + 540) % 360) - 180);
+		if (off <= PLAN_VIA_HEADING_DEG) return true;
+	}
+	return false;
 }
 
 /** Marks the points still to come, numbered as they were planned (or with their icons). */
@@ -247,7 +352,7 @@ function drawMarkers(route, next) {
 	for (let i = next; i < waypoints.length; i++) {
 		const element = document.createElement("div");
 		const content = pointMarkerContent(route, i);
-		element.className = `plan-waypoint live-waypoint ${content.className}${i === next ? " next" : ""}`;
+		element.className = `plan-waypoint live-waypoint ${content.className}${i === nextStop(route, next) ? " next" : ""}`;
 		element.innerHTML = `<span>${content.html}</span>`;
 		markers.push(new maplibregl.Marker({ element }).setLngLat(waypoints[i]).addTo(map));
 	}
@@ -266,6 +371,7 @@ export function resetRidePlan() {
 	clearMarkers();
 	guidance = null;
 	asIs = null;
+	planned = null;
 	directionsWorker?.terminate();
 	directionsWorker = null;
 }
