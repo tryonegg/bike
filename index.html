@@ -251,6 +251,15 @@
         <button id="planDeleteBtn" class="text-danger plan-delete-btn">Delete</button>
       </header>
 
+      <!-- Colors the roads in view by how steep they are (grade-map.js). -->
+      <div class="plan-grades">
+        <button id="planGradesBtn" class="map-chip plan-grades-btn" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19h18L14 7l-4 6-2-3z"/></svg>Grades</button>
+        <div id="planGradeLegend" class="plan-grade-legend" hidden>
+          <ul id="planGradeBands"></ul>
+          <p id="planGradeNote" class="plan-grade-note" hidden>Zoom in to see grades</p>
+        </div>
+      </div>
+
       <div id="planBottomPanel" class="setup-bottom-panel">
         <div class="setup-bottom-panel-inner">
           <div id="planProfile" class="plan-profile" hidden>

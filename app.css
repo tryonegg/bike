@@ -1787,6 +1787,75 @@ button {
   inset: 0;
 }
 
+/* The Grades toggle and its legend, top right under the planner's top bar. */
+.plan-grades {
+  position: absolute;
+  top: calc(86px + var(--safe-top));
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.plan-grades .map-chip {
+  position: static;
+}
+
+.plan-grades-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-grades-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.plan-grades-btn.active {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.plan-grade-legend {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: var(--chip-shadow);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plan-grade-legend ul {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-grade-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-grade-swatch {
+  width: 18px;
+  height: 5px;
+  border-radius: 3px;
+}
+
+.plan-grade-note {
+  max-width: 9em;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .plan-status {
   min-height: 2.6em;
   margin: 10px 0 12px;

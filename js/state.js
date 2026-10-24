@@ -33,6 +33,8 @@ export const state = {
 		backToStart: BACK_TO_START_DEFAULT,
 		// Route mode: steer the route home off the roads ridden out on.
 		routeAvoidRetrace: false,
+		// The route planner colors the roads in view by grade (grade-map.js).
+		planGrades: false,
 		// How a planned route picked in ride setup is followed: "asis" draws it
 		// as planned; "points" routes live to each of its points in turn.
 		rideRouteMode: "asis",
@@ -200,6 +202,10 @@ export const el = {
 	planTopBar: document.getElementById("planTopBar"),
 	planBackBtn: document.getElementById("planBackBtn"),
 	planDeleteBtn: document.getElementById("planDeleteBtn"),
+	planGradesBtn: document.getElementById("planGradesBtn"),
+	planGradeLegend: document.getElementById("planGradeLegend"),
+	planGradeBands: document.getElementById("planGradeBands"),
+	planGradeNote: document.getElementById("planGradeNote"),
 	planNameInput: document.getElementById("planNameInput"),
 	planProfile: document.getElementById("planProfile"),
 	planDistance: document.getElementById("planDistance"),

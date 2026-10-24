@@ -146,6 +146,7 @@ export async function loadPrefs() {
 	state.prefs.mapType = mapType === "road" || mapType in MAP_STYLE_NAMES ? mapType : "road";
 	state.prefs.terrain3d = (await getPref("terrain3d", false)) === true;
 	state.prefs.buildings3d = (await getPref("buildings3d", false)) === true;
+	state.prefs.planGrades = (await getPref("planGrades", false)) === true;
 	// Checked because an imported backup could carry anything, and a bad zoom
 	// would leave the live map unable to draw.
 	const liveMapZoom = await getPref("liveMapZoom", LIVE_MAP_ZOOM);

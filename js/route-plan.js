@@ -36,6 +36,7 @@ import { exportRouteGpx, isTurnCue } from "./gpx.js";
 import { renderProfileChart } from "./chart.js";
 import { canFollowPoints } from "./ride-plan.js";
 import { buildShareUrl, isShareHash, parseShareHash, MAX_SHARED_WAYPOINTS } from "./route-share.js";
+import { addGradeLayers, wireGradeOverlay, wireGradeToggle } from "./grade-map.js";
 import { POINT_ICONS, MAX_POINT_TITLE_LENGTH, markAt, normalizeMark, isStop, pointIconSvg, pointMarkerContent } from "./point-marks.js";
 
 // Where the planner opens with no route and no GPS fix yet.
@@ -327,6 +328,7 @@ export function wirePlanner() {
 	el.setupRouteModeToggle.addEventListener("click", handleRouteModeClick);
 
 	el.planBackBtn.addEventListener("click", () => history.back());
+	wireGradeToggle();
 	el.planDoneBtn.addEventListener("click", saveSharedRoute);
 	el.planShareBtn.addEventListener("click", shareRoute);
 	window.addEventListener("hashchange", openSharedRouteFromHash);
@@ -913,6 +915,7 @@ function createPlanMap() {
 		addWaypoint([event.lngLat.lng, event.lngLat.lat]);
 	});
 	wireLineDrag(map);
+	wireGradeOverlay(map);
 
 	if (!bounds) centerOnRider();
 }
@@ -1031,11 +1034,12 @@ function boundsOf(coords) {
 }
 
 /**
- * The planner map's route layers: a pale casing, then the legs, solid where
+ * The planner map's route layers, over the grade overlay: a pale casing, then the legs, solid where
  * they follow roads and dashed where they couldn't (or haven't yet). Re-run
  * after every style swap by `createVectorMap`.
  */
 function addPlanLayers(map) {
+	addGradeLayers(map);
 	map.addSource(PLAN_ROUTE_SOURCE, { type: "geojson", data: planFeatures() });
 	const round = { "line-cap": "round", "line-join": "round" };
 	map.addLayer({
