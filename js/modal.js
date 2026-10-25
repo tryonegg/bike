@@ -70,6 +70,8 @@ export function confirmWithModal({ title, message, confirmText, cancelText, time
  *   instead of (or alongside) confirm/cancel. Choosing one closes the modal,
  *   settling it with the item's index as a string, and then runs the item's
  *   own click handler.
+ * @param {boolean} [options.keepOpenOnPick] - Leaves the modal open when a
+ *   list item is clicked, for lists of checkboxes read on confirm.
  * @param {number} [options.timeoutMs]
  * @param {string} [options.timeoutLabel]
  * @returns {Promise<string>} Resolves with `"confirm"`, `"cancel"`,
@@ -87,6 +89,7 @@ export function showModal({
 	// Buttons to pick from. Choosing one closes the modal, settling it with the
 	// item's index as a string, and then runs the item's own click handler.
 	listItems = [],
+	keepOpenOnPick = false,
 	timeoutMs,
 	timeoutLabel = "Auto cancel",
 }) {
@@ -105,7 +108,7 @@ export function showModal({
 	el.modalList.innerHTML = "";
 	el.modalList.classList.toggle("hidden", !listItems.length);
 	listItems.forEach((item, index) => {
-		item.addEventListener("click", () => closeModal(String(index)));
+		if (!keepOpenOnPick) item.addEventListener("click", () => closeModal(String(index)));
 		const li = document.createElement("li");
 		li.appendChild(item);
 		el.modalList.appendChild(li);

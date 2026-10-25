@@ -250,13 +250,18 @@ button {
   white-space: nowrap;
 }
 
-.text-danger {
+.text-danger,
+.text-action {
   padding: 10px 14px;
   border: 0;
   background: none;
   color: var(--danger);
   font-size: 14px;
   font-weight: 600;
+}
+
+.text-action {
+  color: var(--text);
 }
 
 /* The primary action, pinned to the bottom of the screen over a fade. */
@@ -3074,6 +3079,7 @@ button {
 .delete-wrap {
   display: flex;
   justify-content: center;
+  gap: 8px;
   margin-top: 26px;
 }
 
@@ -3448,6 +3454,17 @@ button {
   padding: 0;
   list-style: none;
   border-bottom: 1px solid var(--hairline);
+}
+
+.merge-row {
+  cursor: pointer;
+}
+
+.merge-row input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
 }
 
 @keyframes pulse {

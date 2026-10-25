@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.21.0";
+const CACHE_VERSION = "v1.22.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -47,6 +47,7 @@ const APP_MODULES = [
   "./js/post-session.js",
   "./js/chart.js",
   "./js/data-io.js",
+  "./js/ride-merge.js",
   "./js/gpx.js",
   "./js/path-reduction.js",
   "./js/path-lab.js",

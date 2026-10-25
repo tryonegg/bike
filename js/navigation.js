@@ -25,6 +25,7 @@ import { renderPostSummary, openPostSession } from "./post-session.js";
 import { renderElevationChart, clearChartHighlight } from "./chart.js";
 import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abortRideSetup } from "./ride-setup.js";
 import { exportAllData, importAllData, deleteAllRides, deleteCurrentRide } from "./data-io.js";
+import { mergeCurrentRide } from "./ride-merge.js";
 import { importGpxSession, exportCurrentGpx } from "./gpx.js";
 import { openPathLab, wirePathLab } from "./path-lab.js";
 import { wireDestination } from "./destination.js";
@@ -162,6 +163,7 @@ export function wireEvents() {
 	el.recenterBtn.addEventListener("click", recenterLiveMap);
 
 	el.exportGpxBtn.addEventListener("click", exportCurrentGpx);
+	el.mergeRideBtn.addEventListener("click", mergeCurrentRide);
 	el.deleteRideBtn.addEventListener("click", deleteCurrentRide);
 	el.backHomeBtn.addEventListener("click", leavePostSession);
 	el.postBackBtn.addEventListener("click", leavePostSession);

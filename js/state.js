@@ -360,6 +360,7 @@ export const el = {
 	segmentsBody: document.getElementById("segmentsBody"),
 	segmentsSpeedHeader: document.getElementById("segmentsSpeedHeader"),
 	exportGpxBtn: document.getElementById("exportGpxBtn"),
+	mergeRideBtn: document.getElementById("mergeRideBtn"),
 	deleteRideBtn: document.getElementById("deleteRideBtn"),
 	backHomeBtn: document.getElementById("backHomeBtn"),
 	modalBackdrop: document.getElementById("modalBackdrop"),
