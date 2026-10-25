@@ -1281,10 +1281,62 @@ button {
    offered once the map's been panned away from the rider. */
 .map-chip.recenter {
   left: 14px;
-  bottom: calc(100px + var(--safe-bottom));
+  bottom: calc(100px + var(--safe-bottom) + var(--chip-lift, 0px));
 }
 
 .map-chip.recenter[hidden] {
+  display: none;
+}
+
+/* The grade ahead: a climb or descent coming up, its profile colored by
+   grade, just above the ride controls. The map chips step up over it. */
+.grade-ahead {
+  position: absolute;
+  z-index: 2;
+  left: 14px;
+  right: 14px;
+  bottom: calc(96px + var(--safe-bottom));
+  padding: 8px 12px 10px;
+  border-radius: 16px;
+  background: var(--raised);
+  box-shadow: var(--chip-shadow);
+  pointer-events: none;
+}
+
+.grade-ahead[hidden] {
+  display: none;
+}
+
+.active-screen.grade-ahead-on {
+  --chip-lift: 92px;
+}
+
+.grade-ahead-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grade-ahead-label strong {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.grade-ahead-canvas {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin-top: 4px;
+}
+
+.active-screen[data-phase] .grade-ahead {
   display: none;
 }
 
@@ -1293,7 +1345,7 @@ button {
   position: absolute;
   z-index: 2;
   left: 50%;
-  bottom: calc(100px + var(--safe-bottom));
+  bottom: calc(100px + var(--safe-bottom) + var(--chip-lift, 0px));
   display: flex;
   gap: 8px;
   transform: translateX(-50%);
@@ -1315,14 +1367,14 @@ button {
 
 /* Re-center makes way for them, stepping up above. */
 .ride-paused-chips:not([hidden]) ~ .map-chip.recenter {
-  bottom: calc(152px + var(--safe-bottom));
+  bottom: calc(152px + var(--safe-bottom) + var(--chip-lift, 0px));
 }
 
 /* Turns on directions back to the start: offered in the same spot, or
    above Set Destination and Ride a Route while those are showing. */
 .map-chip.ride-start-route {
   left: 50%;
-  bottom: calc(100px + var(--safe-bottom));
+  bottom: calc(100px + var(--safe-bottom) + var(--chip-lift, 0px));
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1338,18 +1390,18 @@ button {
 }
 
 .ride-paused-chips:not([hidden]) ~ .map-chip.ride-start-route {
-  bottom: calc(152px + var(--safe-bottom));
+  bottom: calc(152px + var(--safe-bottom) + var(--chip-lift, 0px));
 }
 
 /* Above Re-center too, when that's stepped up beside it. */
 .ride-paused-chips:not([hidden]) ~ .map-chip.recenter:not([hidden]) ~ .map-chip.ride-start-route {
-  bottom: calc(204px + var(--safe-bottom));
+  bottom: calc(204px + var(--safe-bottom) + var(--chip-lift, 0px));
 }
 
 /* Settings, reachable mid-ride. Mirrors Re-center on the map's other side. */
 .map-chip.ride-settings {
   right: 14px;
-  bottom: calc(100px + var(--safe-bottom));
+  bottom: calc(100px + var(--safe-bottom) + var(--chip-lift, 0px));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1638,12 +1690,22 @@ button {
   .map-chip.recenter,
   .ride-paused-chips:not([hidden]) ~ .map-chip.recenter {
     left: calc(var(--ride-column) + 14px);
-    bottom: calc(14px + var(--safe-bottom));
+    bottom: calc(14px + var(--safe-bottom) + var(--chip-lift, 0px));
   }
 
   .map-chip.ride-settings {
     right: calc(14px + env(safe-area-inset-right, 0px));
+    bottom: calc(14px + var(--safe-bottom) + var(--chip-lift, 0px));
+  }
+
+  .grade-ahead {
+    left: calc(var(--ride-column) + 14px);
     bottom: calc(14px + var(--safe-bottom));
+  }
+
+  .active-screen.stats-right .grade-ahead {
+    left: calc(14px + env(safe-area-inset-left, 0px));
+    right: calc(var(--ride-column) + 14px);
   }
 
   .live-map .maplibregl-ctrl-bottom-right,

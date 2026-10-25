@@ -211,6 +211,18 @@ export const GRADE_SHOW = 0.02;
 export const GRADE_HIDE = 0.01;
 export const GRADE_MODERATE = 0.05;
 export const GRADE_STEEP = 0.08;
+// The grade ahead: while following a route (or directions to the start), the
+// next GRADE_AHEAD_M of it is measured from terrain heights every
+// GRADE_AHEAD_STEP_M, and its profile shown at the bottom of the ride screen
+// once a climb or descent of GRADE_MODERATE or more, at least
+// GRADE_AHEAD_MIN_RUN_M long, starts within GRADE_AHEAD_SHOW_M, and while
+// the rider's on it. Measured again each time the rider's moved
+// GRADE_AHEAD_REFRESH_M.
+export const GRADE_AHEAD_M = 800;
+export const GRADE_AHEAD_STEP_M = 20;
+export const GRADE_AHEAD_SHOW_M = 400;
+export const GRADE_AHEAD_MIN_RUN_M = 80;
+export const GRADE_AHEAD_REFRESH_M = 15;
 // The pace chevron beside the live speed: level within this much of the average
 // it's compared with (0.5 mph), and against the ride's own average only once
 // the ride has run this long, before which that average means little.

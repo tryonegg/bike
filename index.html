@@ -201,6 +201,11 @@
         </div>
       </header>
 
+      <!-- A climb or descent coming up on the route being followed (grade-ahead.js). -->
+      <div id="gradeAhead" class="grade-ahead" role="img" hidden>
+        <div class="grade-ahead-label"><strong id="gradeAheadValue"></strong><span id="gradeAheadText"></span></div>
+        <canvas id="gradeAheadCanvas" class="grade-ahead-canvas" aria-hidden="true"></canvas>
+      </div>
       <div id="ridePausedChips" class="ride-paused-chips" hidden>
         <button id="rideDestinationBtn" class="map-chip ride-destination">Set destination</button>
         <button id="rideRouteBtn" class="map-chip ride-route">Ride a route</button>

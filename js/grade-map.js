@@ -47,6 +47,17 @@ let moveTimer = null;
 // Set when a map tile loads, so the overlay is measured again once the map is idle.
 let tilesArrived = false;
 
+/**
+ * The color the planner's overlay gives a grade, either way, also used by
+ * the live ride's grade-ahead strip (grade-ahead.js).
+ * @param {number} grade - Rise over run.
+ * @returns {string}
+ */
+export function gradeColor(grade) {
+	const steepness = Math.abs(grade);
+	return GRADE_BANDS.find((band) => steepness < band.max).color;
+}
+
 /** Wires the Grades button, and fills its legend; its state is remembered between visits. */
 export function wireGradeToggle() {
 	el.planGradeBands.innerHTML = GRADE_BANDS.map(
@@ -181,7 +192,7 @@ async function gradeFeatures(lines) {
 			return {
 				type: "Feature",
 				geometry: { type: "LineString", coordinates: coords },
-				properties: { color: GRADE_BANDS.find((band) => grade < band.max).color },
+				properties: { color: gradeColor(grade) },
 			};
 		}),
 	);

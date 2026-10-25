@@ -23,6 +23,7 @@ import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
 import { trailingPace } from "./pace-index.js";
 import { updateGrade, hideGrade } from "./grade.js";
+import { updateGradeAhead, hideGradeAhead } from "./grade-ahead.js";
 import { resetRouteHome } from "./route-home.js";
 import { canFollowPoints, resetRidePlan, destinationRoute } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
@@ -532,6 +533,7 @@ function processPosition(position, forceAdd = false) {
 	updateLiveMap(point, heading, safeSpeed);
 	updateLiveStats();
 	updateGrade(session);
+	updateGradeAhead(session);
 
 	if (Date.now() - state.lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
 		state.lastCheckpointAt = Date.now();
@@ -712,6 +714,7 @@ export async function togglePauseSession() {
 		setPauseButton(true);
 		hideBestPace();
 		hideGrade();
+		hideGradeAhead();
 		await releaseWakeLock();
 		await saveActiveSessionCheckpoint();
 		updateLiveStats();
@@ -794,6 +797,7 @@ export async function finalizeSession() {
 	state.routePastAvg = null;
 	state.rideRoute = null;
 	hideGrade();
+	hideGradeAhead();
 	resetRouteHome();
 	resetRidePlan();
 	hideDirections();
