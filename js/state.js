@@ -275,6 +275,8 @@ export const el = {
 	openSettingsBtn: document.getElementById("openSettingsBtn"),
 	settingsBackBtn: document.getElementById("settingsBackBtn"),
 	rideDestinationBtn: document.getElementById("rideDestinationBtn"),
+	rideRouteBtn: document.getElementById("rideRouteBtn"),
+	ridePausedChips: document.getElementById("ridePausedChips"),
 	startRouteBtn: document.getElementById("startRouteBtn"),
 	rideSettingsBtn: document.getElementById("rideSettingsBtn"),
 	stadiaKeyInput: document.getElementById("stadiaKeyInput"),

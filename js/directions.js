@@ -219,6 +219,17 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 	if (sheetFor) fillSheet(source);
 }
 
+/**
+ * Starts directions afresh for a route that's replaced the one the ride was
+ * following, so nothing said or reached on the old one carries over.
+ */
+export function restartDirections() {
+	closeSheet();
+	memory = null;
+	lastView = null;
+	updateDirections();
+}
+
 /** Hides the banner and sheet: no ride, or a new one starting. */
 export function hideDirections() {
 	el.startRouteBtn.hidden = true;

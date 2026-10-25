@@ -674,7 +674,7 @@ export function setPauseButton(paused) {
 	el.pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
 	el.rideStrip.classList.toggle("is-paused", paused);
 	el.speedLabel.textContent = paused ? "Paused" : "Speed";
-	el.rideDestinationBtn.hidden = !paused;
+	el.ridePausedChips.hidden = !paused;
 }
 
 /**

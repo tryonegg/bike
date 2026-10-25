@@ -1277,27 +1277,49 @@ button {
   box-shadow: var(--chip-shadow);
 }
 
-/* Clear of the map credits, which sit just above the ride controls. */
+/* Clear of the map credits, which sit just above the ride controls. Only
+   offered once the map's been panned away from the rider. */
 .map-chip.recenter {
   left: 14px;
   bottom: calc(100px + var(--safe-bottom));
 }
 
-/* Offered while paused, between Re-center and settings. */
-.map-chip.ride-destination {
+.map-chip.recenter[hidden] {
+  display: none;
+}
+
+/* Set Destination and Ride a Route, side by side, offered only while paused. */
+.ride-paused-chips {
+  position: absolute;
+  z-index: 2;
   left: 50%;
   bottom: calc(100px + var(--safe-bottom));
+  display: flex;
+  gap: 8px;
   transform: translateX(-50%);
+}
+
+.ride-paused-chips[hidden] {
+  display: none;
+}
+
+.ride-paused-chips .map-chip {
+  position: static;
+  white-space: nowrap;
+}
+
+.map-chip.ride-destination {
   background: var(--primary);
   color: #fff;
 }
 
-.map-chip.ride-destination[hidden] {
-  display: none;
+/* Re-center makes way for them, stepping up above. */
+.ride-paused-chips:not([hidden]) ~ .map-chip.recenter {
+  bottom: calc(152px + var(--safe-bottom));
 }
 
 /* Turns on directions back to the start: offered in the same spot, or
-   above Set Destination while that's showing. */
+   above Set Destination and Ride a Route while those are showing. */
 .map-chip.ride-start-route {
   left: 50%;
   bottom: calc(100px + var(--safe-bottom));
@@ -1315,8 +1337,13 @@ button {
   height: 16px;
 }
 
-.map-chip.ride-destination:not([hidden]) ~ .map-chip.ride-start-route {
+.ride-paused-chips:not([hidden]) ~ .map-chip.ride-start-route {
   bottom: calc(152px + var(--safe-bottom));
+}
+
+/* Above Re-center too, when that's stepped up beside it. */
+.ride-paused-chips:not([hidden]) ~ .map-chip.recenter:not([hidden]) ~ .map-chip.ride-start-route {
+  bottom: calc(204px + var(--safe-bottom));
 }
 
 /* Settings, reachable mid-ride. Mirrors Re-center on the map's other side. */
@@ -1446,6 +1473,7 @@ button {
 }
 
 .active-screen[data-phase] .map-chip.recenter,
+.active-screen[data-phase] .ride-paused-chips,
 .active-screen[data-phase] .map-chip.ride-settings,
 .active-screen[data-phase] .map-chip.ride-start-route {
   display: none;
@@ -1607,7 +1635,8 @@ button {
     background: none;
   }
 
-  .map-chip.recenter {
+  .map-chip.recenter,
+  .ride-paused-chips:not([hidden]) ~ .map-chip.recenter {
     left: calc(var(--ride-column) + 14px);
     bottom: calc(14px + var(--safe-bottom));
   }

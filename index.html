@@ -201,8 +201,11 @@
         </div>
       </header>
 
-      <button id="recenterBtn" class="map-chip recenter">Re-center</button>
-      <button id="rideDestinationBtn" class="map-chip ride-destination" hidden>Set destination</button>
+      <div id="ridePausedChips" class="ride-paused-chips" hidden>
+        <button id="rideDestinationBtn" class="map-chip ride-destination">Set destination</button>
+        <button id="rideRouteBtn" class="map-chip ride-route">Ride a route</button>
+      </div>
+      <button id="recenterBtn" class="map-chip recenter" hidden>Re-center</button>
       <button id="startRouteBtn" class="map-chip ride-start-route" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h11l-2 4 2 4H6"/></svg>Route to Start</button>
       <button id="rideSettingsBtn" class="map-chip ride-settings" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
 

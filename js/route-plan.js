@@ -28,13 +28,16 @@ import { state, el } from "./state.js";
 import { putRoute, getRoute, getAllRoutes, deleteRoute, setPref } from "./db.js";
 import { haversineMeters, formatDistance, formatElevation, formatElevationValue, escapeHtml } from "./format.js";
 import { distanceUnitLabel } from "./map-visuals.js";
-import { createVectorMap, lineData, setLivePlanData } from "./live-map.js";
+import { createVectorMap, lineData, setLivePlanData, updatePlanLine } from "./live-map.js";
 import { navigateToScreen } from "./navigation.js";
 import { startCountdownFlow } from "./ride-setup.js";
 import { confirmWithModal, showMessage, showModal } from "./modal.js";
 import { exportRouteGpx, isTurnCue } from "./gpx.js";
 import { renderProfileChart } from "./chart.js";
-import { canFollowPoints } from "./ride-plan.js";
+import { canFollowPoints, resetRidePlan } from "./ride-plan.js";
+import { restartDirections } from "./directions.js";
+import { saveActiveSessionCheckpoint } from "./live-session.js";
+import { loadPaceIndex } from "./pace.js";
 import { buildShareUrl, isShareHash, parseShareHash, MAX_SHARED_WAYPOINTS } from "./route-share.js";
 import { addGradeLayers, wireGradeOverlay, wireGradeToggle } from "./grade-map.js";
 import { POINT_ICONS, MAX_POINT_TITLE_LENGTH, markAt, normalizeMark, isStop, pointIconSvg, pointMarkerContent } from "./point-marks.js";
@@ -203,6 +206,66 @@ async function handleRouteModeClick(event) {
 	await setPref("rideRouteMode", state.prefs.rideRouteMode);
 }
 
+// ---- Mid-ride ----
+
+/**
+ * Mid-ride, while paused: lists the saved routes, and the one picked
+ * replaces whatever the ride was following (a route, a destination, or
+ * directions back to the start), followed the way ride setup's Follow
+ * toggle last said.
+ * @returns {Promise<void>}
+ */
+async function pickRideRoute() {
+	if (!state.currentSession?.paused) return;
+	const routes = (await getAllRoutes()).filter((route) => route.coords.length >= 2);
+	if (!routes.length) {
+		await showMessage("No Saved Routes", "Plan a route on the Routes screen first, then pick it here.");
+		return;
+	}
+	const session = state.currentSession;
+	const current = session.routeCancelled ? null : session.routeId;
+	const items = routes.map((route) => {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "session-row";
+		const name = escapeHtml(route.name || "Untitled route");
+		button.innerHTML = `
+			<span class="session-main">
+				<span class="session-when">${name}</span>
+				<span class="session-sub">${escapeHtml(route.id === current ? `Riding now · ${describeRoute(route)}` : describeRoute(route))}</span>
+			</span>`;
+		return button;
+	});
+	const choice = await showModal({
+		title: "Ride a Route",
+		message: state.rideRoute && !session.routeCancelled ? "Picking a route stops the one you're following now." : "",
+		listItems: items,
+		hideConfirm: true,
+	});
+	const route = routes[Number(choice)];
+	// The ride may have ended or resumed while the list was open.
+	if (!route || state.currentSession !== session) return;
+	switchRideRoute(session, route);
+}
+
+/** Replaces whatever the ride was following with `route`, from its start. */
+function switchRideRoute(session, route) {
+	resetRidePlan();
+	state.rideRoute = route;
+	session.routeId = route.id;
+	session.destination = null;
+	session.routeMode = canFollowPoints(route) ? state.prefs.rideRouteMode : "asis";
+	session.routeCancelled = false;
+	session.nextWaypoint = 0;
+	session.lastReached = null;
+	session.startDirections = false;
+	updatePlanLine();
+	restartDirections();
+	saveActiveSessionCheckpoint();
+	// Paced against past rides of this route now.
+	loadPaceIndex(session);
+}
+
 // ---- Planner ----
 
 /**
@@ -326,6 +389,7 @@ export function wirePlanner() {
 	el.newRouteBtn.addEventListener("click", () => openPlanner());
 	el.setupRouteSelect.addEventListener("change", handleSetupRouteChange);
 	el.setupRouteModeToggle.addEventListener("click", handleRouteModeClick);
+	el.rideRouteBtn.addEventListener("click", pickRideRoute);
 
 	el.planBackBtn.addEventListener("click", () => history.back());
 	wireGradeToggle();

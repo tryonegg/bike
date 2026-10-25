@@ -14,7 +14,7 @@ import { state, el } from "./state.js";
 import { formatDistance, haversineMeters } from "./format.js";
 import { distanceUnitLabel } from "./map-visuals.js";
 import { setLivePlanData, updatePlanLine } from "./live-map.js";
-import { updateDirections } from "./directions.js";
+import { restartDirections } from "./directions.js";
 import { saveActiveSessionCheckpoint } from "./live-session.js";
 import { destinationRoute, destinationMarkerElement, resetRidePlan } from "./ride-plan.js";
 
@@ -142,8 +142,9 @@ function setRideDestination(point) {
 	session.routeCancelled = false;
 	session.nextWaypoint = 0;
 	session.lastReached = null;
+	session.startDirections = false;
 	updatePlanLine();
-	updateDirections();
+	restartDirections();
 	saveActiveSessionCheckpoint();
 }
 

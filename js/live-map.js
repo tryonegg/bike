@@ -193,6 +193,7 @@ export function recenterLiveMap() {
 	if (!session || !session.lastPoint || !state.liveMap) return;
 	session.shouldRecenter = true;
 	setLiveZoomAnchor(state.liveMap, true);
+	syncRecenterButton();
 	// Back to the rider's picked riding zoom as well as the rider, dropping any
 	// zoom from looking around. Pitch/padding are reasserted for the same reason
 	// as in followLiveMap: a tap right as the ride starts could otherwise cancel
@@ -204,6 +205,11 @@ export function recenterLiveMap() {
 		pitch: LIVE_MAP_PITCH,
 		padding: ridePadding(state.liveMap),
 	});
+}
+
+/** Offers Re-center only while the camera's stopped following the rider. */
+export function syncRecenterButton() {
+	el.recenterBtn.hidden = state.currentSession?.shouldRecenter !== false;
 }
 
 /**
@@ -221,6 +227,8 @@ export function recenterLiveMap() {
  *   normal tilted riding camera.
  */
 export function initLiveMap(lat, lng, { overhead = false } = {}) {
+	// A new ride (or setup) starts out following the rider.
+	syncRecenterButton();
 	if (state.liveMap) {
 		state.liveMap.remove();
 		state.liveMap = null;
@@ -286,6 +294,7 @@ export function initLiveMap(lat, lng, { overhead = false } = {}) {
 		if (gesture.touches && gesture.touches.length > 1) return;
 		state.currentSession.shouldRecenter = false;
 		setLiveZoomAnchor(map, false);
+		syncRecenterButton();
 	});
 
 	// A zoom made while following is the rider picking their riding zoom, so it
