@@ -77,13 +77,17 @@ export const state = {
 	markerLayer: null,
 	guideLabelMarker: null,
 	riderMarker: null,
-	// Built from the saved rides when a ride starts; null until it is ready.
+	// The best pace map's sections, indexed when a ride starts; null until ready.
 	paceIndex: null,
 	// Average speed (m/s) over past rides of the ride's saved route, or null.
 	routePastAvg: null,
 	bestPaceChip: null,
-	// What the band shows, kept so a style swap can redraw it.
+	// What the band shows (a FeatureCollection), kept so a style swap can redraw it.
 	bestPaceBand: null,
+	// Where the rider was when the band was last drawn ({lat, lng}), or null.
+	bestPaceBandFrom: null,
+	// The best pace map screen's map, created the first time it opens.
+	paceMap: null,
 	postMap: null,
 	// The route planner's map, created the first time the planner opens.
 	planMap: null,
@@ -165,6 +169,7 @@ export const el = {
 		plan: document.getElementById("planScreen"),
 		routes: document.getElementById("routesScreen"),
 		pathlab: document.getElementById("pathLabScreen"),
+		pacemap: document.getElementById("paceMapScreen"),
 	},
 	unitToggle: document.getElementById("unitToggle"),
 	themeToggle: document.getElementById("themeToggle"),
@@ -297,6 +302,20 @@ export const el = {
 	dataActions: document.getElementById("dataActions"),
 	dataActionsRideNote: document.getElementById("dataActionsRideNote"),
 	storageStatus: document.getElementById("storageStatus"),
+	openPaceMapBtn: document.getElementById("openPaceMapBtn"),
+	paceMapBackBtn: document.getElementById("paceMapBackBtn"),
+	paceMapSummary: document.getElementById("paceMapSummary"),
+	paceMapActivities: document.getElementById("paceMapActivities"),
+	paceMapDetail: document.getElementById("paceMapDetail"),
+	paceMapDetailBest: document.getElementById("paceMapDetailBest"),
+	paceMapDetailMeta: document.getElementById("paceMapDetailMeta"),
+	paceMapDetailRide: document.getElementById("paceMapDetailRide"),
+	paceMapLegend: document.getElementById("paceMapLegend"),
+	paceMapScale: document.getElementById("paceMapScale"),
+	paceMapSlow: document.getElementById("paceMapSlow"),
+	paceMapFast: document.getElementById("paceMapFast"),
+	paceMapStatus: document.getElementById("paceMapStatus"),
+	paceMapRebuildBtn: document.getElementById("paceMapRebuildBtn"),
 	openPathLabBtn: document.getElementById("openPathLabBtn"),
 	pathLabBackBtn: document.getElementById("pathLabBackBtn"),
 	pathLabRideSelect: document.getElementById("pathLabRideSelect"),

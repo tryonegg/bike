@@ -28,6 +28,7 @@ import { exportAllData, importAllData, deleteAllRides, deleteCurrentRide } from 
 import { mergeCurrentRide } from "./ride-merge.js";
 import { importGpxSession, exportCurrentGpx } from "./gpx.js";
 import { openPathLab, wirePathLab } from "./path-lab.js";
+import { openPaceMap, wirePaceMap } from "./pace-map-view.js";
 import { wireDestination } from "./destination.js";
 import { confirmWithModal, closeModal } from "./modal.js";
 import { requestWakeLock, releaseWakeLock, maybeShowInstallBanner, renderStorageStatus } from "./pwa.js";
@@ -127,6 +128,7 @@ export function wireEvents() {
 	// returns to the ride without tripping the leave-ride guard.
 	el.rideSettingsBtn.addEventListener("click", openSettings);
 	wirePathLab();
+	wirePaceMap();
 
 	el.guideContrastToggle.addEventListener("click", (event) => handleGuideContrastClick(event));
 
@@ -585,7 +587,7 @@ export async function leavePostSession() {
 /**
  * Shows one screen and hides the rest, and records which one is current.
  * Does not touch browser history — see `navigateToScreen` for that.
- * @param {"home"|"active"|"post"|"settings"|"plan"|"routes"|"pathlab"} name
+ * @param {"home"|"active"|"post"|"settings"|"plan"|"routes"|"pathlab"|"pacemap"} name
  */
 export function showScreen(name) {
 	Object.entries(el.screens).forEach(([key, screen]) => {
@@ -601,7 +603,7 @@ export function showScreen(name) {
  * Shows a screen and updates browser history to match, so back/forward and
  * the popstate handler in `wireEvents` can navigate between the app's screens.
  *
- * @param {"home"|"active"|"post"|"settings"|"plan"|"routes"|"pathlab"} name
+ * @param {"home"|"active"|"post"|"settings"|"plan"|"routes"|"pathlab"|"pacemap"} name
  * @param {"push"|"replace"|string} [mode] - `"push"` adds a new history
  *   entry (the normal case, e.g. following a link/button); `"replace"` swaps
  *   the current entry (used when restoring state without wanting an extra
@@ -672,6 +674,11 @@ export async function applyHistoryState(targetState, mode = "none", savedSession
 
 		if (targetState.screen === "pathlab") {
 			await openPathLab(mode);
+			return;
+		}
+
+		if (targetState.screen === "pacemap") {
+			await openPaceMap(mode);
 			return;
 		}
 

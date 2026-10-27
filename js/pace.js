@@ -1,17 +1,18 @@
 /**
- * "Best past pace" comparison: building a searchable index of past rides at
- * the start of a new one, then — as the rider moves — reading off the best
- * pace ever recorded near the current point and coloring the roads ahead by
- * how fast they were ridden before. `pace-index.js` holds the pure
- * geometry/matching logic; this module is the live-map-facing layer on top
- * of it (the readout chip and the colored band).
+ * "Best past pace" comparison: as the rider moves, reading off the best pace
+ * ever recorded on the road section they're on, and coloring the roads ahead
+ * by how fast they were ridden before. Both come from the best pace map
+ * (pace-map.js), loaded once as the ride starts; `pace-index.js` holds the
+ * lookups, and this module is the live-map-facing layer on top of them (the
+ * readout chip and the colored band).
  */
 
-import { BEST_PACE_LAYER, BEST_PACE_SLOTS, BEST_PACE_BAND_M, BEST_PACE_BAND_OPACITY, BEST_PACE_CLIMB_GRADE, CLEAR_LINE_GRADIENT } from "./constants.js";
+import { BEST_PACE_LAYER, BEST_PACE_BAND_M, BEST_PACE_BAND_OPACITY, BEST_PACE_CLIMB_GRADE, BEST_PACE_BAND_STEP_M } from "./constants.js";
 import { state } from "./state.js";
-import { getAllSessions } from "./db.js";
-import { buildPaceIndex, bestPaceAt, pathsAhead, trailingPace } from "./pace-index.js";
-import { animateMarkerTo, lineData, isMapStyleReady } from "./live-map.js";
+import { getAllSessionSummaries } from "./db.js";
+import { loadPaceSections } from "./pace-map.js";
+import { buildSectionIndex, sectionAt, sectionsAhead, trailingPace } from "./pace-index.js";
+import { animateMarkerTo, isMapStyleReady } from "./live-map.js";
 import { haversineMeters, formatSpeed } from "./format.js";
 import { speedUnitLabel } from "./map-visuals.js";
 import { paceColor } from "./colors.js";
@@ -19,13 +20,13 @@ import { paceColor } from "./colors.js";
 // ---- Best past pace ----
 
 /**
- * Builds the pace index for this ride from every past saved ride of the same
- * activity type, and installs it on `state.paceIndex` once ready. Indexing
- * runs async and this ride may have ended (or another begun) before it
- * finishes, so the result is only installed if `session` is still the
- * current one. A no-op if the "compare with past rides" preference is off.
- * Also works out the average speed over past rides of the ride's saved
- * route, if it has one, for the pace chevron (`state.routePastAvg`).
+ * Loads the best pace map's sections for this ride's activity and indexes
+ * them on `state.paceIndex`. Loading is async and this ride may have ended
+ * (or another begun) before it finishes, so the result is only installed if
+ * `session` is still the current one. Skipped if the "compare with past
+ * rides" preference is off. Also works out the average speed over past rides
+ * of the ride's saved route, if it has one, for the pace chevron
+ * (`state.routePastAvg`).
  *
  * @param {Object} session - The ride that's starting.
  * @returns {Promise<void>}
@@ -33,18 +34,19 @@ import { paceColor } from "./colors.js";
 export async function loadPaceIndex(session) {
 	state.paceIndex = null;
 	state.routePastAvg = null;
+	state.bestPaceBandFrom = null;
 	if (!state.prefs.comparePastRides && session.routeId == null) return;
 	const activity = session.activityType || "bike";
 	try {
-		const sessions = (await getAllSessions()).filter((saved) => (saved.activityType || "bike") === activity);
+		const summaries = (await getAllSessionSummaries()).filter((saved) => (saved.activityType || "bike") === activity);
 		if (state.currentSession !== session) return;
-		state.routePastAvg = routeAverage(sessions, session.routeId);
+		state.routePastAvg = routeAverage(summaries, session.routeId);
 		if (!state.prefs.comparePastRides) return;
-		const index = await buildPaceIndex(sessions);
-		// The ride may have ended, or another begun, while the index was building.
+		const index = buildSectionIndex(await loadPaceSections(activity));
+		// The ride may have ended, or another begun, while the sections loaded.
 		if (state.currentSession === session) state.paceIndex = index;
 	} catch (error) {
-		console.warn("Indexing past rides failed", error);
+		console.warn("Loading the best pace map failed", error);
 	}
 }
 
@@ -53,7 +55,7 @@ export async function loadPaceIndex(session) {
  * distance over all their moving time, so a long ride counts for more than
  * a short one.
  *
- * @param {Array<Object>} sessions - Saved rides.
+ * @param {Array<Object>} sessions - Saved rides, or their summaries.
  * @param {number|null} routeId
  * @returns {number|null} m/s, or null with no route or no past rides of it.
  */
@@ -89,21 +91,27 @@ export function updateBestPace(point, heading) {
 		return;
 	}
 
-	// The band shows every known path ahead even where this spot has no history,
-	// such as a new street leading onto roads ridden before.
-	setBestPaceBand(pathsAhead(index, point, heading, BEST_PACE_BAND_M));
+	// The band shows every known road ahead even where this spot has no history,
+	// such as a new street leading onto roads ridden before. It only needs
+	// redrawing once the rider has moved a little.
+	const last = state.bestPaceBandFrom;
+	if (!last || haversineMeters(last.lat, last.lng, point.lat, point.lng) >= BEST_PACE_BAND_STEP_M) {
+		state.bestPaceBandFrom = { lat: point.lat, lng: point.lng };
+		setBestPaceBand(sectionsAhead(index, point, heading, BEST_PACE_BAND_M));
+	}
 
-	const here = bestPaceAt(index, point.lat, point.lng, heading);
-	if (!Number.isFinite(here.best)) {
+	const here = sectionAt(index, point.lat, point.lng, heading);
+	if (!Number.isFinite(here?.best)) {
 		renderBestPaceChip({ empty: true });
 		return;
 	}
-	renderBestPaceChip({ best: here.best, current: trailingPace(session.points), grade: here.grade });
+	renderBestPaceChip({ best: here.best, current: trailingPace(session.points), grade: here.grade ?? 0 });
 }
 
 /** Hides both the best-pace chip and the colored band of roads ahead. */
 export function hideBestPace() {
 	renderBestPaceChip(null);
+	state.bestPaceBandFrom = null;
 	setBestPaceBand(null);
 }
 
@@ -183,63 +191,36 @@ export function renderBestPaceChip(view) {
 }
 
 /**
- * Colours the known paths ahead of the rider by the best past pace recorded
- * along them, on the rider's own slow-to-fast range for this ride
- * (`index.slow`/`index.fast`), fading out with distance from the rider. Each
- * path becomes one MapLibre line-gradient layer, so color and fade change
- * smoothly along it and nothing overlaps itself. Only the longest
- * `BEST_PACE_SLOTS` paths are drawn — there is one map layer pre-allocated
- * per slot (see `addLiveOverlayLayers` in live-map.js).
+ * Colours the road sections ahead of the rider by the best past pace on
+ * each, on the rider's own slow-to-fast range (`index.slow`/`index.fast`),
+ * fading out with distance from the rider. Drawn as one GeoJSON source with
+ * each section's color and opacity as feature properties (see
+ * `addLiveOverlayLayers` in live-map.js).
  *
- * @param {null|Array<{coords: Array<[number, number]>, paces: number[],
- *   distances: number[]}>} lines - Candidate paths from `pathsAhead`, or
- *   `null` to clear the band entirely.
+ * @param {null|Array<{section: Object, distance: number}>} ahead - From
+ *   `sectionsAhead`, or `null` to clear the band entirely.
  */
-export function setBestPaceBand(lines) {
+export function setBestPaceBand(ahead) {
 	const index = state.paceIndex;
-	const paths = [];
-	if (lines && index) {
+	const features = [];
+	if (ahead && index) {
 		const range = index.fast - index.slow;
-		const measured = lines.map((line) => {
-			const along = [0];
-			for (let k = 1; k < line.coords.length; k++) {
-				const [lngA, latA] = line.coords[k - 1];
-				const [lngB, latB] = line.coords[k];
-				along.push(along[k - 1] + haversineMeters(latA, lngA, latB, lngB));
-			}
-			return { line, along };
-		});
-		measured.sort((a, b) => b.along[b.along.length - 1] - a.along[a.along.length - 1]);
-
-		for (const { line, along } of measured.slice(0, BEST_PACE_SLOTS)) {
-			const total = along[along.length - 1];
-			const stops = [];
-			let lastProgress = -1;
-			for (let k = 0; k < line.coords.length; k++) {
-				const progress = along[k] / total;
-				// line-gradient needs strictly rising stops.
-				if (!(progress > lastProgress)) continue;
-				lastProgress = progress;
-				const t = range > 0 && Number.isFinite(line.paces[k]) ? (line.paces[k] - index.slow) / range : 0.5;
-				const alpha = BEST_PACE_BAND_OPACITY * Math.max(0, 1 - (line.distances[k] / BEST_PACE_BAND_M) ** 1.4);
-				stops.push(progress, paceColor(t).replace("rgb(", "rgba(").replace(")", `, ${alpha.toFixed(3)})`));
-			}
-			if (stops.length >= 4) {
-				paths.push({ coords: line.coords, gradient: ["interpolate", ["linear"], ["line-progress"], ...stops] });
-			}
+		for (const { section, distance } of ahead) {
+			const t = range > 0 ? (section.best - index.slow) / range : 0.5;
+			const opacity = BEST_PACE_BAND_OPACITY * Math.max(0, 1 - (distance / BEST_PACE_BAND_M) ** 1.4);
+			if (opacity <= 0.01) continue;
+			features.push({
+				type: "Feature",
+				properties: { color: paceColor(t), opacity },
+				geometry: { type: "LineString", coordinates: section.coords },
+			});
 		}
 	}
-
-	// Slots that were empty before and still are need no update.
-	const slotsInUse = Math.max(state.bestPaceBand?.length ?? 0, paths.length);
-	state.bestPaceBand = paths;
+	// Clearing a band that's already clear (every fix while there's no index) needs no redraw.
+	const wasEmpty = !state.bestPaceBand?.features.length;
+	state.bestPaceBand = { type: "FeatureCollection", features };
+	if (wasEmpty && !features.length) return;
 
 	const map = state.liveMap;
-	if (!isMapStyleReady(map)) return;
-	for (let slot = 0; slot < slotsInUse; slot++) {
-		const id = `${BEST_PACE_LAYER}-${slot}`;
-		if (!map.getLayer(id)) continue;
-		map.getSource(id).setData(lineData(paths[slot]?.coords ?? []));
-		map.setPaintProperty(id, "line-gradient", paths[slot]?.gradient ?? CLEAR_LINE_GRADIENT);
-	}
+	if (isMapStyleReady(map)) map.getSource(BEST_PACE_LAYER)?.setData(state.bestPaceBand);
 }

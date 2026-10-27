@@ -6,7 +6,7 @@
 
 import { ACTIVITIES } from "./constants.js";
 import { state, el } from "./state.js";
-import { getAllSessions } from "./db.js";
+import { getAllSessionSummaries } from "./db.js";
 import { getSegmentLengthMeters, distanceUnitLabel, speedUnitLabel } from "./map-visuals.js";
 import { formatDistance, formatSpeed, formatDurationMinutes } from "./format.js";
 import { paceColor } from "./colors.js";
@@ -14,7 +14,7 @@ import { openPostSession } from "./post-session.js";
 import { showModal } from "./modal.js";
 
 /**
- * Loads every saved ride and re-renders the whole "Past rides" section: the
+ * Loads every saved ride's summary and re-renders the whole "Past rides" section: the
  * home totals header, and whichever of the list/calendar views is currently
  * selected (the other is left stale until it's shown, to avoid building both
  * on every render).
@@ -22,7 +22,8 @@ import { showModal } from "./modal.js";
  * @returns {Promise<void>}
  */
 export async function renderPastRides() {
-	const sessions = await getAllSessions();
+	// Summaries, not rides: nothing here needs a ride's GPS points.
+	const sessions = await getAllSessionSummaries();
 	sessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
 	const showCalendar = state.prefs.ridesView === "calendar";
@@ -674,7 +675,8 @@ function sessionDayPart(session, date) {
  * (which excludes stops) only stands in for a ride that recorded no points
  * at all.
  *
- * @param {Object} session
+ * @param {Object} session - A ride or its summary (whose `endTime` is the
+ *   last fix's time).
  * @param {Date} startDate
  * @returns {Date}
  */
@@ -682,7 +684,8 @@ function sessionEndDate(session, startDate) {
 	// The last fix is the real end. movingTime excludes stops, so it only stands in
 	// when a ride recorded no points at all.
 	const points = session.points;
-	const lastTimestamp = Array.isArray(points) && points.length ? points[points.length - 1].timestamp : null;
+	const lastTimestamp =
+		session.endTime ?? (Array.isArray(points) && points.length ? points[points.length - 1].timestamp : null);
 	if (Number.isFinite(lastTimestamp)) return new Date(lastTimestamp);
 	return new Date(startDate.getTime() + (session.movingTime || 0));
 }

@@ -6,7 +6,7 @@
  */
 
 import { state } from "./state.js";
-import { getAllSessions, addSession } from "./db.js";
+import { getAllSessionSummaries, getSessionById, addSession } from "./db.js";
 import { showModal, showMessage, confirmWithModal } from "./modal.js";
 import { renderPastRides, sessionTimeTitle } from "./history-view.js";
 import { openPostSession } from "./post-session.js";
@@ -28,7 +28,8 @@ export async function mergeCurrentRide() {
 	if (!current) return;
 
 	const currentStart = rideStart(current);
-	const candidates = (await getAllSessions())
+	// Summaries to pick from; only the rides picked are read in full.
+	const candidates = (await getAllSessionSummaries())
 		.filter((session) => session.id !== current.id)
 		.sort((a, b) => Math.abs(rideStart(a) - currentStart) - Math.abs(rideStart(b) - currentStart))
 		.slice(0, MERGE_CANDIDATE_LIMIT)
@@ -56,7 +57,9 @@ export async function mergeCurrentRide() {
 	});
 	if (result !== "confirm") return;
 
-	const picked = candidates.filter((_, index) => checkboxes[index].checked);
+	const pickedIds = candidates.filter((_, index) => checkboxes[index].checked).map((summary) => summary.id);
+	if (!pickedIds.length) return;
+	const picked = (await Promise.all(pickedIds.map((id) => getSessionById(id)))).filter(Boolean);
 	if (!picked.length) return;
 
 	const rides = [current, ...picked];
@@ -116,9 +119,9 @@ function buildCandidateRow(session) {
 	return label;
 }
 
-/** @param {Object} session @returns {number} The first fix's time, or the ride's date. */
+/** @param {Object} session - A ride or its summary. @returns {number} The first fix's time, or the ride's date. */
 function rideStart(session) {
-	const first = session.points?.[0]?.timestamp;
+	const first = session.startTime ?? session.points?.[0]?.timestamp;
 	return Number.isFinite(first) ? first : new Date(session.date).getTime() || 0;
 }
 

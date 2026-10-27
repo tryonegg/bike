@@ -1883,6 +1883,105 @@ button {
   inset: 0;
 }
 
+/* ---- Best pace map (a full-screen map like the planner's) ---- */
+
+/* Activity chips, top right under the top bar, when more than one is mapped. */
+.pace-map-activities {
+  position: absolute;
+  top: calc(86px + var(--safe-top));
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pace-map-activities[hidden] {
+  display: none;
+}
+
+.pace-map-activities .map-chip {
+  position: static;
+}
+
+.pace-map-activities .map-chip.is-active {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.pace-map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.pace-map-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pace-map-detail[hidden],
+.pace-map-legend[hidden] {
+  display: none;
+}
+
+.pace-map-detail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pace-map-detail-main strong {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pace-map-detail-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pace-map-scale {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.pace-map-scale-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pace-map-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pace-map-status {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pace-map-footer .text-action {
+  flex: none;
+  padding-right: 0;
+}
+
+.pace-map-footer .text-action:disabled {
+  opacity: 0.4;
+}
+
 /* The Grades toggle and its legend, top right under the planner's top bar. */
 .plan-grades {
   position: absolute;

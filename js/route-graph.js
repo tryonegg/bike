@@ -105,6 +105,19 @@ const PROFILES = {
 		oneway: false,
 		minCost: 0.9,
 	},
+	// Every way there is, whatever its access tags: for matching a recorded
+	// ride to the ways it went along (pace-sections.js), never for routing.
+	any: {
+		classes: { motorway: 1, trunk: 1, primary: 1, secondary: 1, tertiary: 1, minor: 1, service: 1, track: 1, busway: 1, raceway: 1 },
+		paths: {},
+		otherPath: 1,
+		tag: null,
+		allowedPathCost: 1,
+		unpavedFactor: 1,
+		oneway: false,
+		minCost: 1,
+		ignoreAccess: true,
+	},
 };
 
 const ALLOWED_TAG_VALUES = new Set(["yes", "designated", "permissive"]);
@@ -156,16 +169,18 @@ export function usableWay(props, profileName) {
  *
  * @param {Object} props - The tile feature's OpenMapTiles properties.
  * @param {Object} profile - One of PROFILES.
- * @returns {{forward: number, backward: number, level: number, path: boolean}|null}
+ * @returns {{forward: number, backward: number, level: number, path: boolean, rank: number}|null}
  *   Cost multipliers per direction (a closed direction costs WRONG_WAY_COST
- *   times more), and whether it's a path or track (see GAP_REACH_M); or null
- *   when the way can't be used at all.
+ *   times more), whether it's a path or track (see GAP_REACH_M), and its rank:
+ *   0 for a street, 1 for a service road or track, 2 for a path (the best
+ *   pace map's sections run on past junctions with ways of a lower rank; see
+ *   pace-sections.js); or null when the way can't be used at all.
  */
 function wayRule(props, profile) {
-	const tagValue = props[profile.tag];
+	const tagValue = profile.tag ? props[profile.tag] : undefined;
 	if (tagValue === "no") return null;
 	const allowed = ALLOWED_TAG_VALUES.has(tagValue);
-	if ((props.access === "no" || props.access === "private") && !allowed) return null;
+	if ((props.access === "no" || props.access === "private") && !allowed && !profile.ignoreAccess) return null;
 
 	let cost;
 	if (props.class === "path") {
@@ -189,6 +204,7 @@ function wayRule(props, profile) {
 		backward: oneway === 1 ? cost * WRONG_WAY_COST : cost,
 		level,
 		path: props.class === "path" || props.class === "track",
+		rank: props.class === "path" ? 2 : props.class === "service" || props.class === "track" ? 1 : 0,
 	};
 }
 
@@ -242,8 +258,8 @@ export function buildGraph({ tiles, start, track = [], profile: profileName }) {
 	const metersPerUnit = (EARTH_CIRCUMFERENCE_M * Math.cos((start[1] * Math.PI) / 180)) / WORLD_UNITS;
 
 	// ---- 1. Segments, clipped to their own tile ----
-	const seg = { ax: [], ay: [], bx: [], by: [], aEdge: [], bEdge: [], forward: [], backward: [], level: [], path: [] };
-	const addSegment = (ax, ay, bx, by, aEdge, bEdge, forward, backward, level, path) => {
+	const seg = { ax: [], ay: [], bx: [], by: [], aEdge: [], bEdge: [], forward: [], backward: [], level: [], path: [], rank: [] };
+	const addSegment = (ax, ay, bx, by, aEdge, bEdge, forward, backward, level, path, rank) => {
 		seg.ax.push(ax);
 		seg.ay.push(ay);
 		seg.bx.push(bx);
@@ -254,6 +270,7 @@ export function buildGraph({ tiles, start, track = [], profile: profileName }) {
 		seg.backward.push(backward);
 		seg.level.push(level);
 		seg.path.push(path);
+		seg.rank.push(rank);
 	};
 
 	for (const tile of tiles) {
@@ -283,6 +300,7 @@ export function buildGraph({ tiles, start, track = [], profile: profileName }) {
 						rule.backward,
 						rule.level,
 						rule.path,
+						rule.rank,
 					);
 				}
 			}
@@ -309,7 +327,7 @@ export function buildGraph({ tiles, start, track = [], profile: profileName }) {
 		let prev = graph.node(points[0][0], points[0][1], points[0][2]);
 		for (let k = 1; k < points.length; k++) {
 			const next = graph.node(points[k][0], points[k][1], points[k][2]);
-			graph.link(prev, next, seg.forward[i], seg.backward[i], seg.path[i], seg.level[i]);
+			graph.link(prev, next, seg.forward[i], seg.backward[i], seg.path[i], seg.level[i], seg.rank[i]);
 			prev = next;
 		}
 	}
@@ -478,11 +496,12 @@ function createGraphStore(metersPerUnit, profile) {
 		edgeB: [],
 		edgeForward: [],
 		edgeBackward: [],
-		// Per edge: whether it's a path or track, its level (see wayRule), and
-		// whether it has been replaced by the two halves it was split into
-		// (see splitEdge).
+		// Per edge: whether it's a path or track, its level and rank (see
+		// wayRule), and whether it has been replaced by the two halves it was
+		// split into (see splitEdge).
 		edgePath: [],
 		edgeLevel: [],
+		edgeRank: [],
 		edgeDead: [],
 		nodeCells: new Map(),
 		edgeCells: new Map(),
@@ -539,7 +558,7 @@ function createGraphStore(metersPerUnit, profile) {
 	};
 
 	/** Joins two nodes with an edge, costed per direction by the multipliers given. */
-	graph.link = (a, b, forward, backward, path = false, level = 0) => {
+	graph.link = (a, b, forward, backward, path = false, level = 0, rank = 2) => {
 		if (a === b) return;
 		const meters = Math.hypot(graph.x[b] - graph.x[a], graph.y[b] - graph.y[a]) * metersPerUnit;
 		const edge = graph.edgeA.length;
@@ -552,6 +571,7 @@ function createGraphStore(metersPerUnit, profile) {
 		graph.edgeBackward.push(backward);
 		graph.edgePath.push(path);
 		graph.edgeLevel.push(level);
+		graph.edgeRank.push(rank);
 		graph.edgeDead.push(false);
 		const minX = Math.floor(Math.min(graph.x[a], graph.x[b]) / SEGMENT_CELL_UNITS);
 		const maxX = Math.floor(Math.max(graph.x[a], graph.x[b]) / SEGMENT_CELL_UNITS);
@@ -701,9 +721,9 @@ function splitEdge(graph, { edge, x, y }) {
 	// A junction now (the join lands here), so findable by junctionNear.
 	graph.indexNode(middle);
 	const { edgeForward, edgeBackward, edgePath } = graph;
-	const { edgeLevel } = graph;
-	graph.link(a, middle, edgeForward[edge], edgeBackward[edge], edgePath[edge], edgeLevel[edge]);
-	graph.link(middle, b, edgeForward[edge], edgeBackward[edge], edgePath[edge], edgeLevel[edge]);
+	const { edgeLevel, edgeRank } = graph;
+	graph.link(a, middle, edgeForward[edge], edgeBackward[edge], edgePath[edge], edgeLevel[edge], edgeRank[edge]);
+	graph.link(middle, b, edgeForward[edge], edgeBackward[edge], edgePath[edge], edgeLevel[edge], edgeRank[edge]);
 	return middle;
 }
 

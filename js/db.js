@@ -1,8 +1,10 @@
 /**
  * The IndexedDB persistence layer: one shared connection, a generic
  * transaction helper, and thin CRUD wrappers over the "sessions" (saved
- * rides), "preferences" and "routes" (saved planned routes) object stores. No other module talks to
- * `indexedDB` directly.
+ * rides), "summaries" (one small record per ride), "preferences", "routes"
+ * (saved planned routes), "checkpointPoints" (the in-progress ride's
+ * points) and "paceSections" (the best pace map) object stores. No other
+ * module talks to `indexedDB` directly.
  */
 
 import {
@@ -11,6 +13,9 @@ import {
 	SESSION_STORE,
 	PREF_STORE,
 	ROUTE_STORE,
+	SUMMARY_STORE,
+	CHECKPOINT_STORE,
+	PACE_SECTION_STORE,
 	LIVE_MAP_ZOOM,
 	MAP_STYLE_NAMES,
 	ACTIVITIES,
@@ -50,6 +55,22 @@ export function openDB() {
 			}
 			if (!db.objectStoreNames.contains(ROUTE_STORE)) {
 				db.createObjectStore(ROUTE_STORE, { keyPath: "id", autoIncrement: true });
+			}
+			if (!db.objectStoreNames.contains(CHECKPOINT_STORE)) {
+				db.createObjectStore(CHECKPOINT_STORE, { keyPath: "start" });
+			}
+			if (!db.objectStoreNames.contains(PACE_SECTION_STORE)) {
+				db.createObjectStore(PACE_SECTION_STORE, { keyPath: "id", autoIncrement: true });
+			}
+			if (!db.objectStoreNames.contains(SUMMARY_STORE)) {
+				const summaries = db.createObjectStore(SUMMARY_STORE, { keyPath: "id" });
+				// Rides saved before summaries existed get theirs now, once.
+				request.transaction.objectStore(SESSION_STORE).openCursor().onsuccess = (event) => {
+					const cursor = event.target.result;
+					if (!cursor) return;
+					summaries.put(summarizeSession(cursor.value));
+					cursor.continue();
+				};
 			}
 		};
 
@@ -107,6 +128,28 @@ export async function withStore(storeName, mode, fn) {
 }
 
 /**
+ * Runs `fn` against a transaction over several stores, for writes that must
+ * land together or not at all (a ride and its summary, say).
+ *
+ * @param {Array<string>} storeNames
+ * @param {IDBTransactionMode} mode
+ * @param {(tx: IDBTransaction) => (() => *)|void} fn - Called synchronously
+ *   with the open transaction. It may return a function, called once the
+ *   transaction completes, whose value this resolves with (an id learned
+ *   from a request's result, say).
+ * @returns {Promise<*>}
+ */
+async function withStores(storeNames, mode, fn) {
+	const db = await openDB();
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction(storeNames, mode);
+		const after = fn(tx);
+		tx.oncomplete = () => resolve(typeof after === "function" ? after() : undefined);
+		tx.onerror = tx.onabort = () => reject(transactionError(tx));
+	});
+}
+
+/**
  * What a failed or aborted transaction rejects with. `tx.error` is null when
  * the transaction was aborted outright rather than by a failing request.
  *
@@ -150,59 +193,65 @@ export async function getPref(key, fallback) {
  * @returns {Promise<void>}
  */
 export async function loadPrefs() {
-	state.prefs.unit = await getPref("unit", "imperial");
-	state.prefs.theme = await getPref("theme", "light");
-	state.prefs.stadiaKey = await getPref("stadiaKey", "");
-	const mapType = await getPref("mapType", "road");
+	// One read for every preference, rather than a transaction per key.
+	const stored = new Map(
+		((await withStore(PREF_STORE, "readonly", (store) => store.getAll())) || []).map((pref) => [pref.key, pref.value]),
+	);
+	const pref = (key, fallback) => stored.get(key) ?? fallback;
+
+	state.prefs.unit = pref("unit", "imperial");
+	state.prefs.theme = pref("theme", "light");
+	state.prefs.stadiaKey = pref("stadiaKey", "");
+	const mapType = pref("mapType", "road");
 	// Satellite was dropped (Stadia only serves it on a paid plan), and an
 	// imported backup could carry any value.
 	state.prefs.mapType = mapType === "road" || mapType in MAP_STYLE_NAMES ? mapType : "road";
-	state.prefs.terrain3d = (await getPref("terrain3d", false)) === true;
-	state.prefs.buildings3d = (await getPref("buildings3d", false)) === true;
-	state.prefs.planGrades = (await getPref("planGrades", false)) === true;
+	state.prefs.terrain3d = pref("terrain3d", false) === true;
+	state.prefs.buildings3d = pref("buildings3d", false) === true;
+	state.prefs.planGrades = pref("planGrades", false) === true;
 	// Checked because an imported backup could carry anything, and a bad zoom
 	// would leave the live map unable to draw.
-	const liveMapZoom = await getPref("liveMapZoom", LIVE_MAP_ZOOM);
+	const liveMapZoom = pref("liveMapZoom", LIVE_MAP_ZOOM);
 	state.prefs.liveMapZoom = Number.isFinite(liveMapZoom) ? liveMapZoom : LIVE_MAP_ZOOM;
-	state.prefs.comparePastRides = (await getPref("comparePastRides", true)) !== false;
-	state.prefs.rideStatsSide = (await getPref("rideStatsSide", "left")) === "right" ? "right" : "left";
-	state.prefs.guideContrast = await getPref("guideContrast", "high");
-	state.prefs.markerSize = await getPref("markerSize", "medium");
-	const guideHideDistance = await getPref("guideHideDistance", GUIDE_HIDE_DISTANCE_DEFAULT_M);
+	state.prefs.comparePastRides = pref("comparePastRides", true) !== false;
+	state.prefs.rideStatsSide = pref("rideStatsSide", "left") === "right" ? "right" : "left";
+	state.prefs.guideContrast = pref("guideContrast", "high");
+	state.prefs.markerSize = pref("markerSize", "medium");
+	const guideHideDistance = pref("guideHideDistance", GUIDE_HIDE_DISTANCE_DEFAULT_M);
 	state.prefs.guideHideDistance = GUIDE_HIDE_DISTANCE_OPTIONS_M.includes(guideHideDistance)
 		? guideHideDistance
 		: GUIDE_HIDE_DISTANCE_DEFAULT_M;
-	const backToStart = await getPref("backToStart", BACK_TO_START_DEFAULT);
+	const backToStart = pref("backToStart", BACK_TO_START_DEFAULT);
 	state.prefs.backToStart = BACK_TO_START_MODES.includes(backToStart) ? backToStart : BACK_TO_START_DEFAULT;
-	state.prefs.routeAvoidRetrace = (await getPref("routeAvoidRetrace", false)) === true;
-	state.prefs.rideRouteMode = (await getPref("rideRouteMode", "asis")) === "points" ? "points" : "asis";
-	state.prefs.navRouteVisual = (await getPref("navRouteVisual", true)) !== false;
-	state.prefs.navRouteVoice = (await getPref("navRouteVoice", false)) === true;
-	state.prefs.navHomeVisual = (await getPref("navHomeVisual", false)) === true;
-	state.prefs.navHomeVoice = (await getPref("navHomeVoice", false)) === true;
-	const voiceURI = await getPref("voiceURI", "");
+	state.prefs.routeAvoidRetrace = pref("routeAvoidRetrace", false) === true;
+	state.prefs.rideRouteMode = pref("rideRouteMode", "asis") === "points" ? "points" : "asis";
+	state.prefs.navRouteVisual = pref("navRouteVisual", true) !== false;
+	state.prefs.navRouteVoice = pref("navRouteVoice", false) === true;
+	state.prefs.navHomeVisual = pref("navHomeVisual", false) === true;
+	state.prefs.navHomeVoice = pref("navHomeVoice", false) === true;
+	const voiceURI = pref("voiceURI", "");
 	state.prefs.voiceURI = typeof voiceURI === "string" ? voiceURI : "";
-	const voiceVolume = await getPref("voiceVolume", 1);
+	const voiceVolume = pref("voiceVolume", 1);
 	state.prefs.voiceVolume = Number.isFinite(voiceVolume) && voiceVolume >= 0 && voiceVolume <= 1 ? voiceVolume : 1;
-	await migratePlannedRoute();
-	state.prefs.ridesView = await getPref("ridesView", "list");
-	const statsActivity = await getPref("statsActivity", "all");
+	await migratePlannedRoute(pref("plannedRoute", null));
+	state.prefs.ridesView = pref("ridesView", "list");
+	const statsActivity = pref("statsActivity", "all");
 	state.prefs.statsActivity = statsActivity === "all" || ACTIVITIES[statsActivity] ? statsActivity : "all";
-	const calendarColor = await getPref("calendarColor", "distance");
+	const calendarColor = pref("calendarColor", "distance");
 	state.prefs.calendarColor = CALENDAR_COLOR_NOTES[calendarColor] ? calendarColor : "distance";
-	state.prefs.installDismissed = await getPref("installDismissed", false);
-	state.prefs.debugGpsAccuracy = (await getPref("debugGpsAccuracy", false)) === true;
-	state.prefs.debugClipGpsWarmup = (await getPref("debugClipGpsWarmup", false)) === true;
-	state.prefs.dataSaver = await getPref("dataSaver", false);
+	state.prefs.installDismissed = pref("installDismissed", false);
+	state.prefs.debugGpsAccuracy = pref("debugGpsAccuracy", false) === true;
+	state.prefs.debugClipGpsWarmup = pref("debugClipGpsWarmup", false) === true;
+	state.prefs.dataSaver = pref("dataSaver", false);
 }
 
 /**
  * Moves the single planned route that earlier versions kept as a preference
  * (or that an old backup restored as one) into the routes store.
+ * @param {Object|null} plan - The "plannedRoute" preference's value.
  * @returns {Promise<void>}
  */
-async function migratePlannedRoute() {
-	const plan = await getPref("plannedRoute", null);
+async function migratePlannedRoute(plan) {
 	if (!plan) return;
 	if (isRoute(plan)) {
 		const now = new Date().toISOString();
@@ -247,17 +296,12 @@ export function isSession(session) {
  * @returns {Promise<void>}
  */
 export async function importRecords({ sessions, routes, prefs }) {
-	const db = await openDB();
-	return new Promise((resolve, reject) => {
-		const tx = db.transaction([SESSION_STORE, ROUTE_STORE, PREF_STORE], "readwrite");
-		const sessionStore = tx.objectStore(SESSION_STORE);
+	await withStores([SESSION_STORE, SUMMARY_STORE, ROUTE_STORE, PREF_STORE], "readwrite", (tx) => {
+		for (const { id, ...rest } of sessions) addSessionIn(tx, rest);
 		const routeStore = tx.objectStore(ROUTE_STORE);
-		const prefStore = tx.objectStore(PREF_STORE);
-		for (const { id, ...rest } of sessions) sessionStore.add(rest);
 		for (const { id, ...rest } of routes) routeStore.add(rest);
+		const prefStore = tx.objectStore(PREF_STORE);
 		for (const pref of prefs) prefStore.put(pref);
-		tx.oncomplete = () => resolve();
-		tx.onerror = tx.onabort = () => reject(transactionError(tx));
 	});
 }
 
@@ -307,8 +351,61 @@ export async function deleteRoute(id) {
  * @returns {Promise<number>} The new session's auto-assigned id.
  */
 export async function addSession(session) {
-	const req = await withStore(SESSION_STORE, "readwrite", (store) => store.add(session));
-	return req;
+	return withStores([SESSION_STORE, SUMMARY_STORE], "readwrite", (tx) => {
+		const request = addSessionIn(tx, session);
+		return () => request.result;
+	});
+}
+
+/**
+ * Adds a ride, and its summary once the ride has its id, inside a
+ * transaction that spans both stores.
+ *
+ * @param {IDBTransaction} tx
+ * @param {Object} session
+ * @returns {IDBRequest} The ride's add request; its result is the new id.
+ */
+function addSessionIn(tx, session) {
+	const request = tx.objectStore(SESSION_STORE).add(session);
+	request.onsuccess = () => {
+		tx.objectStore(SUMMARY_STORE).put(summarizeSession({ ...session, id: request.result }));
+	};
+	return request;
+}
+
+/**
+ * The summary record kept for a ride: what the rides list, calendar, totals
+ * and merge picker need, with the first and last fix times standing in for
+ * the points themselves.
+ *
+ * @param {Object} session - A saved ride, with its id.
+ * @returns {Object}
+ */
+export function summarizeSession(session) {
+	const points = Array.isArray(session.points) ? session.points : [];
+	const first = points[0]?.timestamp;
+	const last = points[points.length - 1]?.timestamp;
+	return {
+		id: session.id,
+		date: session.date,
+		activityType: session.activityType,
+		totalDistance: session.totalDistance,
+		movingTime: session.movingTime,
+		avgSpeed: session.avgSpeed,
+		routeId: session.routeId ?? null,
+		startTime: Number.isFinite(first) ? first : null,
+		endTime: Number.isFinite(last) ? last : null,
+	};
+}
+
+/**
+ * Reads every saved ride's summary (see `summarizeSession`), without any
+ * of their GPS points.
+ *
+ * @returns {Promise<Array<Object>>} In store order (unsorted).
+ */
+export async function getAllSessionSummaries() {
+	return (await withStore(SUMMARY_STORE, "readonly", (store) => store.getAll())) || [];
 }
 
 /**
@@ -357,7 +454,10 @@ export async function getSessionById(id) {
  * @returns {Promise<void>}
  */
 export async function deleteSessionById(id) {
-	await withStore(SESSION_STORE, "readwrite", (store) => store.delete(id));
+	await withStores([SESSION_STORE, SUMMARY_STORE], "readwrite", (tx) => {
+		tx.objectStore(SESSION_STORE).delete(id);
+		tx.objectStore(SUMMARY_STORE).delete(id);
+	});
 }
 
 /**
@@ -366,5 +466,146 @@ export async function deleteSessionById(id) {
  * @returns {Promise<void>}
  */
 export async function clearAllSessions() {
-	await withStore(SESSION_STORE, "readwrite", (store) => store.clear());
+	await withStores([SESSION_STORE, SUMMARY_STORE], "readwrite", (tx) => {
+		tx.objectStore(SESSION_STORE).clear();
+		tx.objectStore(SUMMARY_STORE).clear();
+	});
+}
+
+/**
+ * Reads every section of the best pace map.
+ *
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getAllPaceSections() {
+	return (await withStore(PACE_SECTION_STORE, "readonly", (store) => store.getAll())) || [];
+}
+
+/**
+ * Saves the best pace map's sections changed by one ride, and marks that
+ * ride's summary as mapped, in one transaction: a ride is never counted
+ * twice, nor marked without its sections. New sections are given their ids
+ * in place.
+ *
+ * @param {number} rideId
+ * @param {Array<Object>} sections - New (no id yet) and updated records.
+ * @returns {Promise<void>}
+ */
+export async function savePaceSections(rideId, sections) {
+	await withStores([PACE_SECTION_STORE, SUMMARY_STORE], "readwrite", (tx) => {
+		const store = tx.objectStore(PACE_SECTION_STORE);
+		for (const section of sections) {
+			const request = store.put(section);
+			request.onsuccess = () => {
+				section.id = request.result;
+			};
+		}
+		markPaceMapped(tx.objectStore(SUMMARY_STORE), rideId);
+	});
+}
+
+/**
+ * Updates some of the best pace map's sections and deletes others, in one
+ * transaction.
+ *
+ * @param {Array<Object>} sections - Records to write back.
+ * @param {Array<number>} deleteIds
+ * @returns {Promise<void>}
+ */
+export async function replacePaceSections(sections, deleteIds) {
+	await withStore(PACE_SECTION_STORE, "readwrite", (store) => {
+		for (const section of sections) store.put(section);
+		for (const id of deleteIds) store.delete(id);
+	});
+}
+
+/**
+ * Marks a ride's summary as taken into the best pace map without changing
+ * it, for a ride with nothing to map (too few points, say).
+ *
+ * @param {number} rideId
+ * @returns {Promise<void>}
+ */
+export async function markRidePaceMapped(rideId) {
+	await withStore(SUMMARY_STORE, "readwrite", (store) => markPaceMapped(store, rideId));
+}
+
+/**
+ * Empties the best pace map and marks every ride as not yet in it, so it is
+ * built again from the rides saved now.
+ *
+ * @returns {Promise<void>}
+ */
+export async function clearPaceSections() {
+	await withStores([PACE_SECTION_STORE, SUMMARY_STORE], "readwrite", (tx) => {
+		tx.objectStore(PACE_SECTION_STORE).clear();
+		tx.objectStore(SUMMARY_STORE).openCursor().onsuccess = (event) => {
+			const cursor = event.target.result;
+			if (!cursor) return;
+			if (cursor.value.paceMapped) cursor.update({ ...cursor.value, paceMapped: false });
+			cursor.continue();
+		};
+	});
+}
+
+/** Flags a summary as taken into the best pace map, inside an open transaction. */
+function markPaceMapped(summaries, rideId) {
+	const request = summaries.get(rideId);
+	request.onsuccess = () => {
+		if (request.result) summaries.put({ ...request.result, paceMapped: true });
+	};
+}
+
+/**
+ * Saves an in-progress ride's checkpoint: its small state record, under
+ * `key` in the preferences store, and the points recorded since the last
+ * save, as one chunk starting at index `start`. Both land in one
+ * transaction, so the record never describes points that weren't saved.
+ *
+ * @param {string} key - The preference key the record lives under.
+ * @param {number} start - Index of the chunk's first point in the ride.
+ * @param {Array<Object>} points - The chunk.
+ * @param {Object} record - Everything but the points.
+ * @returns {Promise<void>}
+ */
+export async function writeCheckpoint(key, start, points, record) {
+	await withStores([PREF_STORE, CHECKPOINT_STORE], "readwrite", (tx) => {
+		const chunks = tx.objectStore(CHECKPOINT_STORE);
+		// A save from the first point starts a new ride's chunks.
+		if (start === 0) chunks.clear();
+		if (points.length) chunks.put({ start, points });
+		tx.objectStore(PREF_STORE).put({ key, value: record });
+	});
+}
+
+/**
+ * Reads the in-progress ride's saved points back into one array. Chunks may
+ * overlap by a point (a save rewrites the last point before it, which data
+ * saver can replace), so each is laid down at its own index, later over
+ * earlier.
+ *
+ * @returns {Promise<Array<Object>>}
+ */
+export async function readCheckpointPoints() {
+	const chunks = (await withStore(CHECKPOINT_STORE, "readonly", (store) => store.getAll())) || [];
+	const points = [];
+	for (const chunk of chunks.sort((a, b) => a.start - b.start)) {
+		chunk.points.forEach((point, index) => {
+			points[chunk.start + index] = point;
+		});
+	}
+	return points.filter(Boolean);
+}
+
+/**
+ * Clears the in-progress ride's checkpoint: its record and its points.
+ *
+ * @param {string} key - The preference key the record lives under.
+ * @returns {Promise<void>}
+ */
+export async function clearCheckpoint(key) {
+	await withStores([PREF_STORE, CHECKPOINT_STORE], "readwrite", (tx) => {
+		tx.objectStore(CHECKPOINT_STORE).clear();
+		tx.objectStore(PREF_STORE).put({ key, value: null });
+	});
 }

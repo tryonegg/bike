@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.24.0";
+const CACHE_VERSION = "v1.25.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -41,6 +41,8 @@ const APP_MODULES = [
   "./js/live-session.js",
   "./js/live-map.js",
   "./js/pace.js",
+  "./js/pace-map.js",
+  "./js/pace-map-view.js",
   "./js/grade.js",
   "./js/grade-map.js",
   "./js/terrain.js",
@@ -66,6 +68,7 @@ const APP_MODULES = [
   "./js/point-marks.js",
   "./js/route-worker.js",
   "./js/route-graph.js",
+  "./js/pace-sections.js",
   "./js/mvt.js",
 ];
 
@@ -114,6 +117,17 @@ const UPDATE_WATCH_SUFFIXES = [
   "/vendor/maplibre/maplibre-gl.js",
   "/vendor/maplibre-contour/maplibre-contour.min.js",
 ];
+
+// Tile caches are trimmed every this many new tiles, and on the first new
+// tile after the worker starts, rather than listing every key on every new
+// tile. A cache can run this far past its cap in between.
+const TILE_TRIM_EVERY = 50;
+// New tiles added to each tile cache since it was last trimmed, by cache name.
+const tilesSinceTrim = new Map();
+// Tiles already moved to the back of their cache's eviction order since the
+// worker started. A tile is moved once per worker lifetime: enough to keep the
+// tiles in use from aging out, without a cache write on every map redraw.
+const refreshedTiles = new Set();
 
 // Set once an update notification has been sent, so a burst of changed shell
 // files (a whole new deploy) only prompts the rider once, not per file.
@@ -193,12 +207,12 @@ self.addEventListener("fetch", (event) => {
       } else if (pathname.startsWith("/fonts/") || pathname.startsWith("/sprites/")) {
         event.respondWith(cacheFirst(request, MAP_STYLE_CACHE));
       } else {
-        event.respondWith(tileFirst(request, MAP_DATA_CACHE, MAP_DATA_CACHE_MAX));
+        event.respondWith(tileFirst(event, request, MAP_DATA_CACHE, MAP_DATA_CACHE_MAX));
       }
       return;
     }
     if (request.url.includes("tiles.stadiamaps.com")) {
-      event.respondWith(stadiaFirst(request));
+      event.respondWith(tileFirst(event, request, STADIA_CACHE, STADIA_CACHE_MAX));
     }
     return;
   }
@@ -276,79 +290,74 @@ async function cacheFirstWithRevalidate(event, request, cacheName, notifyOnChang
 }
 
 /**
- * Cache-first fetch for Stadia map tiles, with an LRU-ish eviction cap.
- * Serves a cached tile immediately if present; otherwise fetches, caches
- * (evicting old entries first if at capacity), and returns it. Serves the
- * stale cached copy on a network failure rather than throwing, since a
- * slightly outdated tile is far better than a blank one.
+ * Cache-first fetch for map tiles (Stadia, OpenFreeMap and elevation), with
+ * a cap on each cache that evicts the least recently used tiles first.
  *
- * @param {Request} request
- * @returns {Promise<Response>}
- * @throws {Error} If the network fails and nothing is cached.
- */
-async function stadiaFirst(request) {
-  const cache = await caches.open(STADIA_CACHE);
-  const cached = await cache.match(request);
-  if (cached) return cached;
-
-  try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      await limitTileCache(cache, STADIA_CACHE_MAX);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    if (cached) return cached; // serve stale on network failure
-    throw new Error("Stadia tile unavailable offline and not cached");
-  }
-}
-
-/**
- * Cache-first fetch for OpenFreeMap/elevation tiles, with the same
- * eviction-cap behavior as `stadiaFirst` but without a stale-on-failure
- * fallback (there is none to fall back to on a cache miss + network failure).
+ * Caches keep their entries in insertion order, so `cache.keys()` lists the
+ * oldest first. A tile served from the cache is put back (in the background)
+ * to move it to the end of that order, so the tiles of roads ridden often
+ * stay while ones not seen in a long time go first. New tiles are cached in
+ * the background too, and the cache trimmed only every `TILE_TRIM_EVERY`.
  *
+ * @param {FetchEvent} event
  * @param {Request} request
  * @param {string} cacheName
  * @param {number} maxEntries
  * @returns {Promise<Response>}
  * @throws {Error} If the network fails and nothing is cached.
  */
-async function tileFirst(request, cacheName, maxEntries) {
+async function tileFirst(event, request, cacheName, maxEntries) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
-  if (cached) return cached;
-
-  try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      await limitTileCache(cache, maxEntries);
-      cache.put(request, response.clone());
+  if (cached) {
+    if (!refreshedTiles.has(request.url)) {
+      refreshedTiles.add(request.url);
+      const copy = cached.clone();
+      event.waitUntil(cache.delete(request).then(() => cache.put(request, copy)).catch(() => {}));
     }
-    return response;
+    return cached;
+  }
+
+  let response;
+  try {
+    response = await fetch(request);
   } catch {
     throw new Error("Tile unavailable offline and not cached");
   }
+  if (response && response.ok) {
+    refreshedTiles.add(request.url);
+    const copy = response.clone();
+    event.waitUntil(
+      cache
+        .put(request, copy)
+        .then(() => trimTileCache(cache, cacheName, maxEntries))
+        .catch(() => {}),
+    );
+  }
+  return response;
 }
 
 /**
- * Evicts the oldest entries from a tile cache once it's about to exceed
- * `maxEntries`, making room for the one about to be added. Cache iteration
- * order approximates insertion order, so the oldest entries are simply the
- * first ones `cache.keys()` returns.
+ * Counts a new tile toward its cache's next trim, and trims the cache down
+ * to `maxEntries` when it's due, deleting the oldest entries (the first ones
+ * `cache.keys()` returns; see `tileFirst`). Due on the first new tile after
+ * the worker starts, so a cap is enforced however briefly the worker lives.
  *
  * @param {Cache} cache
+ * @param {string} cacheName
  * @param {number} maxEntries
  * @returns {Promise<void>}
  */
-async function limitTileCache(cache, maxEntries) {
-  const keys = await cache.keys();
-  if (keys.length < maxEntries) return;
-  const overflow = keys.length - maxEntries + 1;
-  for (let i = 0; i < overflow; i += 1) {
-    await cache.delete(keys[i]);
+async function trimTileCache(cache, cacheName, maxEntries) {
+  const added = tilesSinceTrim.get(cacheName);
+  if (added !== undefined && added + 1 < TILE_TRIM_EVERY) {
+    tilesSinceTrim.set(cacheName, added + 1);
+    return;
   }
+  tilesSinceTrim.set(cacheName, 0);
+  const keys = await cache.keys();
+  const overflow = keys.slice(0, Math.max(0, keys.length - maxEntries));
+  await Promise.all(overflow.map((key) => cache.delete(key)));
 }
 
 /**

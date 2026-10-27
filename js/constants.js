@@ -6,11 +6,22 @@
  */
 
 export const DB_NAME = "bike-tracker-db";
-export const DB_VERSION = 2;
+export const DB_VERSION = 4;
 export const SESSION_STORE = "sessions";
 export const PREF_STORE = "preferences";
 // Saved planned routes (see route-plan.js). Added in DB_VERSION 2.
 export const ROUTE_STORE = "routes";
+// One small record per saved ride, keyed by the ride's id, holding just what
+// the rides list, calendar and totals show, so those never read GPS points.
+// Added in DB_VERSION 3.
+export const SUMMARY_STORE = "summaries";
+// The in-progress ride's points, in chunks appended at each checkpoint; the
+// rest of the checkpoint stays small, under ACTIVE_SESSION_KEY in the
+// preferences store. Added in DB_VERSION 3.
+export const CHECKPOINT_STORE = "checkpointPoints";
+// The best pace map: one record per road section ever ridden, holding the
+// fastest it was ever ridden (see pace-map.js). Added in DB_VERSION 4.
+export const PACE_SECTION_STORE = "paceSections";
 
 export const METERS_PER_MILE = 1609.344;
 export const METERS_PER_KM = 1000;
@@ -191,13 +202,13 @@ export const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
 // at the live map's close riding zoom without looking cartoonish.
 export const TERRAIN_EXAGGERATION = 1.2;
 
-// Best past pace: the band colours the known paths within this distance ahead,
-// fading out, and a stretch at least this steep gets a climb tag in the readout.
-// Each path is a line layer of its own, since a line gradient is set per layer;
-// the longest paths get the slots.
+// Best past pace: the band colours the best pace map's sections within this
+// distance ahead, fading out, redrawn each time the rider moves BAND_STEP_M,
+// and a section at least this steep gets a climb tag in the readout. The
+// layer and its GeoJSON source share the one id.
 export const BEST_PACE_LAYER = "live-best-pace";
-export const BEST_PACE_SLOTS = 12;
 export const BEST_PACE_BAND_M = 500;
+export const BEST_PACE_BAND_STEP_M = 10;
 export const BEST_PACE_BAND_OPACITY = 0.6;
 export const BEST_PACE_CLIMB_GRADE = 0.03;
 // The live grade: the slope of the last GRADE_WINDOW_M ridden, from terrain
@@ -228,7 +239,6 @@ export const GRADE_AHEAD_REFRESH_M = 15;
 // the ride has run this long, before which that average means little.
 export const PACE_TREND_EVEN_MPS = 0.5 * 0.44704;
 export const PACE_TREND_MIN_MS = 60000;
-export const CLEAR_LINE_GRADIENT = ["interpolate", ["linear"], ["line-progress"], 0, "rgba(0, 0, 0, 0)", 1, "rgba(0, 0, 0, 0)"];
 
 // noun names one outing in a title ("Morning walk"); plural heads the home count.
 export const ACTIVITIES = {

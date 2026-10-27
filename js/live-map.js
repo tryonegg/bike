@@ -24,8 +24,6 @@ import {
 	TOPO_LAYER_IDS,
 	TOPO_SOURCE_IDS,
 	BEST_PACE_LAYER,
-	BEST_PACE_SLOTS,
-	CLEAR_LINE_GRADIENT,
 	MAP_STYLE_NAMES,
 	TERRAIN_EXAGGERATION,
 } from "./constants.js";
@@ -472,7 +470,7 @@ function setMapStyle(map, useStadia) {
  * or Stadia-key change.
  */
 export function rebuildMapStyles() {
-	for (const map of [state.liveMap, state.postMap, state.planMap]) {
+	for (const map of [state.liveMap, state.postMap, state.planMap, state.paceMap]) {
 		if (map) setMapStyle(map, Boolean(state.prefs.stadiaKey));
 	}
 }
@@ -543,8 +541,8 @@ export function setLivePlanData() {
 
 /**
  * Adds the live map's own overlay sources/layers: the ride's chosen route
- * (if any), the route line, the guide line (with halo), and one pre-allocated
- * line layer per best-pace-band slot.
+ * (if any), the route line, the guide line (with halo), and the best-pace
+ * band.
  * Passed to `createVectorMap` as its `addOverlays` callback, so it also runs
  * again after every style swap.
  *
@@ -565,25 +563,22 @@ function addLiveOverlayLayers(map) {
 	// The best-pace band sits under the road names, like a highlighter on the
 	// roads, while the route and guide line stay on top of everything.
 	const labelBeforeId = styleLayerAnchors(map).labelBeforeId;
-	for (let slot = 0; slot < BEST_PACE_SLOTS; slot++) {
-		const id = `${BEST_PACE_LAYER}-${slot}`;
-		const path = state.bestPaceBand?.[slot];
-		map.addSource(id, { type: "geojson", data: lineData(path?.coords ?? []), lineMetrics: true });
-		map.addLayer(
-			{
-				id,
-				type: "line",
-				source: id,
-				layout: round,
-				paint: {
-					"line-width": ["interpolate", ["linear"], ["zoom"], 13, 6, 16, 20, 19, 46],
-					"line-blur": 1,
-					"line-gradient": path?.gradient ?? CLEAR_LINE_GRADIENT,
-				},
+	map.addSource(BEST_PACE_LAYER, { type: "geojson", data: state.bestPaceBand ?? { type: "FeatureCollection", features: [] } });
+	map.addLayer(
+		{
+			id: BEST_PACE_LAYER,
+			type: "line",
+			source: BEST_PACE_LAYER,
+			layout: round,
+			paint: {
+				"line-width": ["interpolate", ["linear"], ["zoom"], 13, 6, 16, 20, 19, 46],
+				"line-blur": 1,
+				"line-color": ["get", "color"],
+				"line-opacity": ["get", "opacity"],
 			},
-			labelBeforeId,
-		);
-	}
+		},
+		labelBeforeId,
+	);
 
 	// The planned route sits under the ride's own line, which draws over it as
 	// the rider follows it.
@@ -955,7 +950,7 @@ export function addTopoLayers(map, mapType = state.prefs.mapType) {
  * the display unit, so a unit change has to redraw them.
  */
 export function refreshTopoLayers() {
-	for (const map of [state.liveMap, state.postMap, state.planMap]) {
+	for (const map of [state.liveMap, state.postMap, state.planMap, state.paceMap]) {
 		if (!isMapStyleReady(map)) continue;
 		// "topo-dem" is torn down below along with the rest, but 3D terrain may
 		// still be pointed at it — clearing terrain first avoids removeSource

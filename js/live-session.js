@@ -22,6 +22,7 @@ import { getSegmentLengthMeters, segmentDistanceLabel, addSegmentMarkerToLayer, 
 import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
 import { trailingPace } from "./pace-index.js";
+import { syncPaceMap } from "./pace-map.js";
 import { updateGrade, hideGrade } from "./grade.js";
 import { updateGradeAhead, hideGradeAhead } from "./grade-ahead.js";
 import { resetRouteHome } from "./route-home.js";
@@ -31,7 +32,7 @@ import { navigateToScreen } from "./navigation.js";
 import { requestWakeLock, releaseWakeLock, protectStoredData } from "./pwa.js";
 import { confirmWithModal } from "./modal.js";
 import { openPostSession } from "./post-session.js";
-import { addSession, setPref, getPref, getRoute } from "./db.js";
+import { addSession, getPref, getRoute, writeCheckpoint, readCheckpointPoints, clearCheckpoint } from "./db.js";
 import { renderPastRides } from "./history-view.js";
 
 /**
@@ -826,6 +827,8 @@ export async function finalizeSession() {
 	await clearActiveSessionCheckpoint();
 	// Not awaited: a browser that prompts for it shouldn't hold up the summary.
 	protectStoredData();
+	// Nor is taking the ride into the best pace map, which runs in a worker.
+	syncPaceMap();
 	state.currentSession = null;
 	state.rideFlowPhase = null;
 	setPauseButton(false);
@@ -839,14 +842,26 @@ export async function finalizeSession() {
  * pause/backgrounding. Failures are logged, not surfaced — a missed
  * checkpoint isn't worth interrupting the ride over.
  *
+ * Only the points recorded since the last save are written, as a new chunk
+ * (see db.js's `writeCheckpoint`), so a save costs the same an hour into a
+ * ride as a minute in. Each chunk repeats the last point already saved,
+ * since data saver may have replaced it since.
+ *
  * @returns {Promise<void>}
  */
 export async function saveActiveSessionCheckpoint() {
 	const session = state.currentSession;
 	if (!session) return;
 
+	// How many points earlier saves covered; unset for a new ride (or one
+	// recovered from an older, single-record checkpoint), which saves them all.
+	const saved = session.checkpointedPoints;
+	const start = Number.isInteger(saved) ? Math.max(0, saved - 1) : 0;
+	const chunk = session.points.slice(start);
+	session.checkpointedPoints = session.points.length;
+
 	try {
-		await setPref(ACTIVE_SESSION_KEY, {
+		await writeCheckpoint(ACTIVE_SESSION_KEY, start, chunk, {
 			date: session.date,
 			unit: session.unit,
 			activityType: session.activityType,
@@ -858,7 +873,6 @@ export async function saveActiveSessionCheckpoint() {
 			lastReached: session.lastReached ?? null,
 			routeCancelled: Boolean(session.routeCancelled),
 			startDirections: Boolean(session.startDirections),
-			points: session.points,
 			totalDistance: session.totalDistance,
 			movingTime: getElapsedMs(),
 			maxSpeed: session.maxSpeed,
@@ -876,6 +890,8 @@ export async function saveActiveSessionCheckpoint() {
 			checkpointedAt: Date.now(),
 		});
 	} catch (error) {
+		// Start the next save from this chunk again, so its points aren't lost.
+		session.checkpointedPoints = Math.min(session.checkpointedPoints, start);
 		console.warn("Ride checkpoint failed", error);
 	}
 }
@@ -888,7 +904,7 @@ export async function saveActiveSessionCheckpoint() {
  */
 export async function clearActiveSessionCheckpoint() {
 	try {
-		await setPref(ACTIVE_SESSION_KEY, null);
+		await clearCheckpoint(ACTIVE_SESSION_KEY);
 	} catch (error) {
 		console.warn("Clearing ride checkpoint failed", error);
 	}
@@ -975,6 +991,11 @@ export async function maybeRecoverSession() {
 	let checkpoint = null;
 	try {
 		checkpoint = await getPref(ACTIVE_SESSION_KEY, null);
+		// Checkpoints keep their points in chunks of their own; older ones held
+		// them in the record itself.
+		if (checkpoint && !Array.isArray(checkpoint.points)) {
+			checkpoint = { ...checkpoint, points: await readCheckpointPoints(), pointsChunked: true };
+		}
 	} catch (error) {
 		console.warn("Reading ride checkpoint failed", error);
 		return;
@@ -986,6 +1007,9 @@ export async function maybeRecoverSession() {
 	}
 
 	const restored = restoreSessionFromCheckpoint(checkpoint);
+	// Chunks already hold these points, so a resumed ride's saves carry on
+	// from them; an older checkpoint's are saved over again as chunks.
+	if (checkpoint.pointsChunked) restored.checkpointedPoints = restored.points.length;
 	const unitLabel = distanceUnitLabel(state.prefs.unit);
 	const distanceText = `${formatDistance(restored.totalDistance, state.prefs.unit)} ${unitLabel}`;
 	const resume = await confirmWithModal({

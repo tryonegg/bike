@@ -23,9 +23,12 @@
  * - {id, type: "directions", coords, profile} — turn-by-turn steps along a
  *   line routed elsewhere (a planned route, followed as is), from the road
  *   graph rebuilt around it. Routes from this worker come with theirs.
+ * - {id, type: "paceSections", points, pauses} — the road sections
+ *   a saved ride covered and how fast, for the best pace map (see
+ *   pace-sections.js). `points` are [lng, lat, timestamp, estimated].
  * Message out: {id, route: {coords, meters, steps}|null, stats}, {id, fetched},
- * {id, profile}, {id, snapped: [lng, lat]|null, meters}, {id, steps}, or
- * {id, error}.
+ * {id, profile}, {id, snapped: [lng, lat]|null, meters}, {id, steps},
+ * {id, sections}|{id, missing}, or {id, error}.
  */
 
 import { decodeLineLayer } from "./mvt.js";
@@ -33,6 +36,7 @@ import { MAP_DATA_CACHE_PREFIX, MAP_DATA_CACHE_FALLBACK } from "./constants.js";
 import { heightAt } from "./terrain.js";
 import { buildGraph, findRoute, markRetraced, tileFor, toUnits, toLngLat, usableWay, TILE_ZOOM } from "./route-graph.js";
 import { buildWayIndex, routeSteps } from "./route-steps.js";
+import { rideSections } from "./pace-sections.js";
 
 // The service worker's tile caches, matched by prefix so a version bump there
 // doesn't need a matching change here.
@@ -61,6 +65,10 @@ const DIRECTIONS_JUNCTION_REACH_M = 8;
 // apart on a long route so there are no more than ELEVATION_MAX_SAMPLES.
 const ELEVATION_STEP_M = 25;
 const ELEVATION_MAX_SAMPLES = 500;
+// A ride's sections are found on the tiles it passed through and this many
+// tiles around each, so the roads it rode reach their next junction inside
+// the graph rather than stopping short at the edge of the loaded map.
+const PACE_TILE_MARGIN = 1;
 
 // Beyond the tiles spanning the rider and the start, the search area reaches
 // this far out (a share of that span, but at least one tile) so a route can
@@ -80,7 +88,15 @@ self.addEventListener("message", async (event) => {
 	const { id, type, goalKey } = event.data;
 	try {
 		const handler =
-			{ leg: routeLeg, prefetch: prefetchLine, elevation: elevationProfile, snap: snapPoint, snapTrack, directions: routeDirections }[type] ??
+			{
+				leg: routeLeg,
+				prefetch: prefetchLine,
+				elevation: elevationProfile,
+				snap: snapPoint,
+				snapTrack,
+				directions: routeDirections,
+				paceSections,
+			}[type] ??
 			routeHome;
 		self.postMessage({ id, goalKey, ...(await handler(event.data)) });
 	} catch (error) {
@@ -261,6 +277,57 @@ async function snapTrack({ points, profile, maxRoad, maxPath, sticky }) {
 		meters,
 		stats: { tiles: tiles.length, wanted: wanted.size, fetched, ...graph.stats, ms: Math.round(performance.now() - began) },
 	};
+}
+
+/**
+ * The road sections a saved ride covered end to end and how fast, with each
+ * section's grade from the terrain tiles where they can be had. Tiles are
+ * downloaded where missing, as planning does; when any tile the ride itself
+ * passed through still can't be had (offline, say), nothing is returned, so
+ * the ride is tried again later rather than mapped with holes in it.
+ *
+ * @returns {Promise<{sections: Array<{coords: Array<[number, number]>,
+ *   meters: number, speed: number|null, grade: number|null}>}|{missing: number}>}
+ */
+async function paceSections({ points, pauses }) {
+	const coords = points.map(([lng, lat]) => [lng, lat]);
+	const ridden = lineTileKeys(coords);
+	const wanted = new Set();
+	for (const key of ridden) {
+		const [x, y] = key.split("/").map(Number);
+		for (let dx = -PACE_TILE_MARGIN; dx <= PACE_TILE_MARGIN; dx++) {
+			for (let dy = -PACE_TILE_MARGIN; dy <= PACE_TILE_MARGIN; dy++) wanted.add(`${x + dx}/${y + dy}`);
+		}
+	}
+	const cached = await cachedTiles();
+	await fetchMissing([...wanted], cached);
+	const missing = ridden.filter((key) => !cached.has(key)).length;
+	if (missing) return { missing };
+
+	const tiles = [];
+	for (const key of wanted) {
+		const url = cached.get(key);
+		const tile = url && (await loadTile(url));
+		if (tile) tiles.push(tile);
+	}
+	// Every way, not just those the activity would be routed along: the ride
+	// went where it went.
+	const graph = buildGraph({ tiles, start: coords[0], profile: "any" });
+	const sections = rideSections(graph, points, pauses);
+
+	// Neighbouring sections share their ends, so each height is looked up once.
+	const heights = new Map();
+	const height = (lngLat) => {
+		const key = lngLat.join(",");
+		if (!heights.has(key)) heights.set(key, heightAt(lngLat).catch(() => null));
+		return heights.get(key);
+	};
+	for (const section of sections) {
+		const start = await height(section.coords[0]);
+		const end = await height(section.coords[section.coords.length - 1]);
+		section.grade = section.meters > 0 && start !== null && end !== null ? (end - start) / section.meters : null;
+	}
+	return { sections };
 }
 
 /** Downloads the tiles a line passes through that aren't cached yet. */

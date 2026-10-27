@@ -78,6 +78,7 @@
       <div class="bottom-bar">
         <button id="openSettingsBtn" class="round-btn bar-round-btn" aria-label="Open settings"><span class="settings-icon" aria-hidden="true"></span></button>
         <button id="openRoutesBtn" class="round-btn bar-round-btn" aria-label="Routes"><span class="plan-icon" aria-hidden="true"></span></button>
+        <button id="openPaceMapBtn" class="round-btn bar-round-btn" aria-label="Best pace map"><svg class="lab-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5"/><path d="M15 6.5V20"/></svg></button>
         <button id="openPathLabBtn" class="round-btn bar-round-btn" aria-label="Path Reduction Lab"><svg class="lab-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18 8 9l5 6 8-10"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="13" cy="15" r="1.5" fill="currentColor"/><circle cx="21" cy="5" r="1.5" fill="currentColor"/></svg></button>
         <button id="startRideBtn" class="btn primary pill grow cta">Start New Ride</button>
       </div>
@@ -707,6 +708,39 @@
             <p class="setting-note">Sacrifices some accuracy, but removes redundant data.</p>
           </div>
         </details>
+      </div>
+    </section>
+
+    <section id="paceMapScreen" class="screen plan-screen hidden">
+      <div id="paceMapMap" class="map plan-map"></div>
+
+      <header class="setup-top-bar">
+        <button id="paceMapBackBtn" class="round-btn" aria-label="Back to home">←</button>
+        <div class="app-bar-titles">
+          <h2>Best Pace</h2>
+          <p id="paceMapSummary" class="app-bar-note"></p>
+        </div>
+      </header>
+
+      <div id="paceMapActivities" class="pace-map-activities" hidden></div>
+
+      <div class="setup-bottom-panel pace-map-panel">
+        <div id="paceMapDetail" class="pace-map-detail" hidden>
+          <div class="pace-map-detail-main">
+            <span class="label">Best here</span>
+            <strong id="paceMapDetailBest"></strong>
+            <span id="paceMapDetailMeta" class="pace-map-detail-meta"></span>
+          </div>
+          <button id="paceMapDetailRide" class="text-action" hidden>View ride</button>
+        </div>
+        <div id="paceMapLegend" class="pace-map-legend" hidden>
+          <div id="paceMapScale" class="pace-map-scale"></div>
+          <div class="pace-map-scale-labels"><span id="paceMapSlow"></span><span id="paceMapFast"></span></div>
+        </div>
+        <div class="pace-map-footer">
+          <p id="paceMapStatus" class="pace-map-status"></p>
+          <button id="paceMapRebuildBtn" class="text-action">Rebuild</button>
+        </div>
       </div>
     </section>
 

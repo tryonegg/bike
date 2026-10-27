@@ -8,7 +8,7 @@
 import { ACTIVE_SESSION_KEY, PREF_STORE } from "./constants.js";
 import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
-import { deleteSessionById, getAllSessions, clearAllSessions, withStore, loadPrefs, getAllRoutes, isRoute, isSession, importRecords } from "./db.js";
+import { deleteSessionById, getAllSessions, getAllSessionSummaries, countSessions, clearAllSessions, withStore, loadPrefs, getAllRoutes, isRoute, isSession, importRecords } from "./db.js";
 import { protectStoredData } from "./pwa.js";
 import { navigateToScreen, applyRideLayout } from "./navigation.js";
 import { renderPastRides } from "./history-view.js";
@@ -44,7 +44,7 @@ export async function deleteCurrentRide() {
  * @returns {Promise<void>}
  */
 export async function deleteAllRides() {
-	const count = (await getAllSessions()).length;
+	const count = await countSessions();
 	if (!count) {
 		await showMessage("No Rides to Delete", "There are no saved rides on this device.");
 		return;
@@ -126,11 +126,11 @@ export async function exportAllData() {
  * A ride's identity across devices and backups: ids are reassigned on every
  * import, but no two real rides start at the same moment and cover the same
  * distance.
- * @param {Object} session
+ * @param {Object} session - A ride or its summary.
  * @returns {string}
  */
 function sessionKey(session) {
-	return `${new Date(session.date).getTime()}|${Math.round(session.totalDistance)}`;
+	return `${new Date(session.date).getTime()}|${Math.round(session.totalDistance || 0)}`;
 }
 
 /**
@@ -171,7 +171,7 @@ export async function importAllData(event) {
 		}
 
 		const fileRoutes = Array.isArray(data.routes) ? data.routes : [];
-		const haveSessions = new Set((await getAllSessions()).filter(isSession).map(sessionKey));
+		const haveSessions = new Set((await getAllSessionSummaries()).map(sessionKey));
 		const haveRoutes = new Set((await getAllRoutes()).map(routeKey));
 
 		// Keyed sets also catch a ride listed twice within the file itself.
