@@ -13,7 +13,12 @@
  * out when it agrees) says otherwise. They're picked in the planner
  * (route-plan.js), drawn on the planner and ride maps, carried in share links
  * (route-share.js), named in directions, and written to GPX exports (gpx.js).
+ *
+ * A route can also have places beside it, which aren't points of the route
+ * at all (see below).
  */
+
+import { escapeHtml } from "./format.js";
 
 /** Longest title a point may have. */
 export const MAX_POINT_TITLE_LENGTH = 40;
@@ -136,4 +141,57 @@ export function pointMarkerContent(route, index) {
 	const via = isStop(route, index) ? "" : " via";
 	if (mark?.icon) return { html: pointIconSvg(mark.icon), className: `has-icon point-${mark.icon}${via}` };
 	return via ? { html: "", className: "via" } : { html: String(stopNumber(route, index)), className: "" };
+}
+
+/*
+ * Places: points of interest beside a route rather than on it (parking
+ * near the start, a café off the end), kept in a route's `places` as
+ * {at: [lng, lat], icon, title}. They don't shape the route, aren't
+ * snapped to a way, and aren't stops: they're only shown, on the planner
+ * and ride maps, and carried in share links and GPX exports.
+ */
+
+/** Most places a route may have, so a bad link or file can't add thousands of markers. */
+export const MAX_PLACES = 50;
+
+/**
+ * A place as stored or received, made safe to use (see `normalizeMark`),
+ * or null when its position isn't a usable [lng, lat].
+ * @param {*} place
+ * @returns {{at: [number, number], icon: string|null, title: string}|null}
+ */
+export function normalizePlace(place) {
+	const at = place?.at;
+	if (!Array.isArray(at) || !Number.isFinite(at[0]) || !Number.isFinite(at[1]) || Math.abs(at[0]) > 180 || Math.abs(at[1]) > 90) return null;
+	const mark = normalizeMark(place);
+	return { at: [at[0], at[1]], icon: mark?.icon ?? null, title: mark?.title ?? "" };
+}
+
+/**
+ * A route's places, normalized, leaving out any that can't be used. Routes
+ * from before places have none.
+ * @param {{places?: Array}|null|undefined} route
+ */
+export function placesOf(route) {
+	return (Array.isArray(route?.places) ? route.places : []).map(normalizePlace).filter(Boolean).slice(0, MAX_PLACES);
+}
+
+/** What to call a place: its title, else its icon's name, else "Place". */
+export function placeName(place) {
+	return place.title || (place.icon ? POINT_ICONS[place.icon].label : "Place");
+}
+
+/**
+ * A place's map marker element: its icon (or a plain dot) in a rounded
+ * square, so it reads as something beside the route rather than a point
+ * on it, with its title under it when `withTitle`.
+ * @returns {HTMLElement}
+ */
+export function placeMarkerElement(place, withTitle = true) {
+	const element = document.createElement("div");
+	element.className = `plan-waypoint plan-place${place.icon ? ` has-icon point-${place.icon}` : ""}`;
+	const title = withTitle && place.title ? `<em class="plan-waypoint-title">${escapeHtml(place.title)}</em>` : "";
+	element.innerHTML = `<span>${place.icon ? pointIconSvg(place.icon) : ""}</span>${title}`;
+	element.setAttribute("aria-label", placeName(place));
+	return element;
 }

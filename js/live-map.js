@@ -35,7 +35,7 @@ import { getGuideLineStyle, getMarkerSizeConfig, distanceUnitLabel } from "./map
 import { setPref } from "./db.js";
 import { updateBestPace, createBestPaceChip } from "./pace.js";
 import { routeHomeFrom, onRouteHomeChange } from "./route-home.js";
-import { ridePlanLine, onRidePlanChange } from "./ride-plan.js";
+import { ridePlanLine, onRidePlanChange, drawRidePlaces } from "./ride-plan.js";
 import { updateDirections, setDirectionsRedraw } from "./directions.js";
 
 // A route home, or to a planned route's next point (or the steps along a
@@ -538,6 +538,7 @@ export function setLiveLineData(sourceId, coords) {
 export function setLivePlanData() {
 	state.livePlanCoords = state.rideRoute?.coords ?? [];
 	setLiveLineData(LIVE_PLAN_SOURCE, state.livePlanCoords);
+	drawRidePlaces();
 }
 
 /**
@@ -558,6 +559,8 @@ function addLiveOverlayLayers(map) {
 	map.addSource(LIVE_ROUTE_SOURCE, { type: "geojson", data: lineData(state.liveRouteCoords) });
 	map.addSource(LIVE_PLAN_SOURCE, { type: "geojson", data: lineData(state.livePlanCoords) });
 	map.addSource(LIVE_GUIDE_SOURCE, { type: "geojson", data: lineData(state.liveGuideCoords) });
+	// The route's places are markers, so they outlast a style swap; this draws them on a new map.
+	drawRidePlaces(map);
 
 	// The best-pace band sits under the road names, like a highlighter on the
 	// roads, while the route and guide line stay on top of everything.

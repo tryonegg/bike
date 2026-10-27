@@ -223,6 +223,7 @@ export const el = {
 	pointSheetTitle: document.getElementById("pointSheetTitle"),
 	pointTitleInput: document.getElementById("pointTitleInput"),
 	pointIconGrid: document.getElementById("pointIconGrid"),
+	pointKindLabel: document.getElementById("pointKindLabel"),
 	pointKindGroup: document.getElementById("pointKindGroup"),
 	pointKindHint: document.getElementById("pointKindHint"),
 	pointRemoveBtn: document.getElementById("pointRemoveBtn"),

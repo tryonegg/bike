@@ -10,7 +10,7 @@ import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
 import { haversineMeters, escapeHtml, formatDistance } from "./format.js";
 import { turnInstruction } from "./route-steps.js";
-import { POINT_ICONS, markAt, isStop, pointName } from "./point-marks.js";
+import { POINT_ICONS, markAt, isStop, pointName, placesOf, placeName } from "./point-marks.js";
 
 // Each turn as a GPX waypoint's symbol and type, in the words Garmin and
 // Ride with GPS cue sheets use, which other apps tend to follow.
@@ -55,7 +55,8 @@ export function exportCurrentGpx() {
  * course to follow; a waypoint for each stop given an icon or title, or made
  * a stop, in the planner (point-marks.js; the title, or else the icon's name,
  * as its name, and the icon as its symbol and type), via points being left
- * to the track; and a waypoint at each turn (its
+ * to the track; a waypoint for each place beside the route (likewise, but
+ * described as off the route); and a waypoint at each turn (its
  * instruction as the name, its symbol and type the turn, and how far along
  * the route it is in the description), which they take as cues or course
  * points. It has no times or elevations, since it hasn't been ridden yet.
@@ -68,7 +69,7 @@ export function exportRouteGpx(route, steps = []) {
 	const name = route.name || "Planned route";
 	const unit = state.prefs.unit;
 	const unitLabel = unit === "imperial" ? "mi" : "km";
-	const places = route.waypoints.flatMap(([lng, lat], i) => {
+	const stops = route.waypoints.flatMap(([lng, lat], i) => {
 		const mark = markAt(route, i);
 		if (!mark || !isStop(route, i)) return [];
 		const icon = mark.icon ? POINT_ICONS[mark.icon] : null;
@@ -83,6 +84,19 @@ export function exportRouteGpx(route, steps = []) {
 				`</wpt>`,
 			].join(""),
 		];
+	});
+	const beside = placesOf(route).map((place) => {
+		const [lng, lat] = place.at;
+		const icon = place.icon ? POINT_ICONS[place.icon] : null;
+		const name = escapeHtml(placeName(place));
+		return [
+			`<wpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}">`,
+			`<name>${name}</name>`,
+			`<desc>${icon && place.title ? `${escapeHtml(icon.label)}: ` : ""}${name} (off route)</desc>`,
+			`<sym>${escapeHtml(icon?.gpx ?? "Pin, Blue")}</sym>`,
+			icon ? `<type>${escapeHtml(icon.label)}</type>` : "",
+			`</wpt>`,
+		].join("");
 	});
 	const turns = steps
 		.filter((step) => step.turn !== "arrive")
@@ -105,7 +119,7 @@ export function exportRouteGpx(route, steps = []) {
 <gpx version="1.1" creator="Bike Tracker" xmlns="http://www.topografix.com/GPX/1/1">
 	<metadata>
 		<name>${escapeHtml(name)}</name>
-	</metadata>${[...places, ...turns].map((wpt) => `\n\t${wpt}`).join("")}
+	</metadata>${[...stops, ...beside, ...turns].map((wpt) => `\n\t${wpt}`).join("")}
 	<trk>
 		<name>${escapeHtml(name)}</name>
 		<trkseg>

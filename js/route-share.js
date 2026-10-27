@@ -1,8 +1,8 @@
 /**
  * Shareable route links. A planned route is shared as its name, waypoints,
  * and what they are (point-marks.js), in the URL's hash (which is never sent
- * to a server): `#r1=<points>&n=<name>&m=<marks>&s=<kinds>`, the name, marks
- * and kinds only when there are any. The receiving app routes between the points itself.
+ * to a server): `#r1=<points>&n=<name>&m=<marks>&s=<kinds>&p=<places>`, the
+ * name, marks, kinds and places only when there are any. The receiving app routes between the points itself.
  *
  * <points> is the waypoints as [lat, lng] pairs at 1e-5 degrees (about a
  * meter), each as the difference from the one before, in the style of
@@ -25,9 +25,14 @@
  * icon and title would make them (point-marks.js), comma-separated, each as
  * `<index>.<1 for a stop, 0 for a via point>`. Copies of the app from before
  * via points ignore it.
+ *
+ * <places> lists the route's places (point-marks.js), comma-separated, each
+ * as `<at>.<icon>.<title>`: its [lat, lng] encoded like <points> (but not as
+ * a difference from anything), then its icon and title as in <marks>.
+ * Copies of the app from before places ignore it.
  */
 
-import { normalizeMark } from "./point-marks.js";
+import { normalizeMark, normalizePlace, MAX_PLACES } from "./point-marks.js";
 
 const PREFIX = "#r1=";
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -44,9 +49,10 @@ export const MAX_SHARED_NAME_LENGTH = 60;
  *   app can offer it as a starting point (the recipient can still rename
  *   it). Left out when blank or auto-generated.
  * @param {Array} [marks] - What each waypoint is, in the same order (see point-marks.js).
+ * @param {Array} [places] - The places beside the route (see point-marks.js).
  * @returns {string}
  */
-export function buildShareUrl(waypoints, name = "", marks = []) {
+export function buildShareUrl(waypoints, name = "", marks = [], places = []) {
 	let data = "";
 	let prevLat = 0;
 	let prevLng = 0;
@@ -66,6 +72,12 @@ export function buildShareUrl(waypoints, name = "", marks = []) {
 	let suffix = trimmedName ? `&n=${encodeURIComponent(trimmedName)}` : "";
 	if (marked.length) suffix += `&m=${marked.join(",")}`;
 	if (kinds.length) suffix += `&s=${kinds.join(",")}`;
+	const placed = places
+		.map(normalizePlace)
+		.filter(Boolean)
+		.slice(0, MAX_PLACES)
+		.map(({ at: [lng, lat], icon, title }) => `${encodeNumber(Math.round(lat * SCALE))}${encodeNumber(Math.round(lng * SCALE))}.${icon ?? ""}.${encodeURIComponent(title)}`);
+	if (placed.length) suffix += `&p=${placed.join(",")}`;
 	return `${location.origin}${location.pathname}${PREFIX}${data}${suffix}`;
 }
 
@@ -80,9 +92,9 @@ export function isShareHash(hash) {
 /**
  * The route in a shared route hash.
  * @param {string} hash - `location.hash`.
- * @returns {{waypoints: Array<[number, number]>, name: string, marks: Array}|null}
- *   `name` is `""` when the link carried none, and `marks` has one entry per
- *   waypoint, null for a plain one. Null when the hash is damaged, has fewer
+ * @returns {{waypoints: Array<[number, number]>, name: string, marks: Array, places: Array}|null}
+ *   `name` is `""` when the link carried none, `marks` has one entry per
+ *   waypoint, null for a plain one, and `places` may be empty. Null when the hash is damaged, has fewer
  *   than two points, or has too many.
  */
 export function parseShareHash(hash) {
@@ -91,6 +103,7 @@ export function parseShareHash(hash) {
 	let name = "";
 	let markText = "";
 	let kindText = "";
+	let placeText = "";
 	for (const param of params) {
 		if (param.startsWith("n=")) {
 			try {
@@ -102,13 +115,53 @@ export function parseShareHash(hash) {
 			markText = param.slice(2);
 		} else if (param.startsWith("s=")) {
 			kindText = param.slice(2);
+		} else if (param.startsWith("p=")) {
+			placeText = param.slice(2);
 		}
 	}
 
+	const numbers = decodeNumbers(data);
+	if (!numbers || numbers.length % 2 !== 0) return null;
+
+	const points = [];
+	let lat = 0;
+	let lng = 0;
+	for (let i = 0; i < numbers.length; i += 2) {
+		lat += numbers[i];
+		lng += numbers[i + 1];
+		if (Math.abs(lat) > 90 * SCALE || Math.abs(lng) > 180 * SCALE) return null;
+		points.push([lng / SCALE, lat / SCALE]);
+	}
+	if (points.length < 2 || points.length > MAX_SHARED_WAYPOINTS) return null;
+	return { waypoints: points, name, marks: parseMarks(markText, kindText, points.length), places: parsePlaces(placeText) };
+}
+
+/** The places in a link. A damaged entry is left out rather than spoiling the route. */
+function parsePlaces(text) {
+	const places = [];
+	for (const entry of text ? text.split(",").slice(0, MAX_PLACES) : []) {
+		const first = entry.indexOf(".");
+		const second = entry.indexOf(".", first + 1);
+		if (first < 1 || second < 0) continue;
+		const numbers = decodeNumbers(entry.slice(0, first));
+		if (numbers?.length !== 2) continue;
+		try {
+			const title = decodeURIComponent(entry.slice(second + 1));
+			const place = normalizePlace({ at: [numbers[1] / SCALE, numbers[0] / SCALE], icon: entry.slice(first + 1, second), title });
+			if (place) places.push(place);
+		} catch {
+			// A badly encoded title: the place is left out.
+		}
+	}
+	return places;
+}
+
+/** The integers in encoded text (see `encodeNumber`), or null when it's damaged. */
+function decodeNumbers(text) {
 	const numbers = [];
 	let value = 0;
 	let shift = 0;
-	for (const char of data) {
+	for (const char of text) {
 		const group = ALPHABET.indexOf(char);
 		if (group < 0) return null;
 		value += (group & 31) * 2 ** shift;
@@ -121,19 +174,7 @@ export function parseShareHash(hash) {
 		value = 0;
 		shift = 0;
 	}
-	if (shift !== 0 || numbers.length % 2 !== 0) return null;
-
-	const points = [];
-	let lat = 0;
-	let lng = 0;
-	for (let i = 0; i < numbers.length; i += 2) {
-		lat += numbers[i];
-		lng += numbers[i + 1];
-		if (Math.abs(lat) > 90 * SCALE || Math.abs(lng) > 180 * SCALE) return null;
-		points.push([lng / SCALE, lat / SCALE]);
-	}
-	if (points.length < 2 || points.length > MAX_SHARED_WAYPOINTS) return null;
-	return { waypoints: points, name, marks: parseMarks(markText, kindText, points.length) };
+	return shift === 0 ? numbers : null;
 }
 
 /**

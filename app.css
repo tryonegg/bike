@@ -2181,6 +2181,44 @@ button {
   background: #c4473a;
 }
 
+/* A place (point-marks.js) is beside the route, not on it: a rounded
+   square in a slate colour, rather than a route point's purple circle. */
+.plan-waypoint.plan-place span,
+.plan-waypoint.plan-place.has-icon:not(.live-waypoint) span {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #3f5468;
+}
+
+.plan-waypoint.plan-place:not(.has-icon) span {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+}
+
+.plan-waypoint.plan-place span svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Smaller on the ride map, like the points still to come. */
+.plan-waypoint.plan-place.live-place span {
+  width: 22px;
+  height: 22px;
+  opacity: 0.9;
+}
+
+.plan-waypoint.plan-place.live-place:not(.has-icon) span {
+  width: 12px;
+  height: 12px;
+}
+
+.plan-waypoint.plan-place.live-place span svg {
+  width: 13px;
+  height: 13px;
+}
+
 /* Its title, hung under the marker without moving its anchor (MapLibre
    positions markers absolutely, so the title is placed against it). */
 .plan-waypoint-title {

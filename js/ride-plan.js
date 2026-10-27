@@ -8,6 +8,8 @@
  * same way, but passed quietly: one counts as passed once the rider is
  * riding the planned leg on from it, and the guidance looks past them to
  * the next stop, with the turns beyond them taken from the planned line.
+ * The route's places (point-marks.js), beside it, are shown however it's
+ * followed.
  *
  * The ride keeps its place on the route in the session (`routeMode`,
  * `nextWaypoint`, `lastReached`, and `routeCancelled` once the rider has
@@ -23,7 +25,7 @@ import { PLAN_ARRIVE_M, PLAN_SKIP_AWAY_M, PLAN_VIA_PASSED_M, PLAN_VIA_LOOK_M, PL
 import { state } from "./state.js";
 import { haversineMeters, bearingDegrees } from "./format.js";
 import { createRouteFollower, createLineTracker, projectOntoSegment } from "./route-follow.js";
-import { pointName, pointMarkerContent, isStop } from "./point-marks.js";
+import { pointName, pointMarkerContent, isStop, placesOf, placeMarkerElement } from "./point-marks.js";
 
 const follower = createRouteFollower("Route to next point");
 let listener = null;
@@ -42,6 +44,10 @@ let nextStepsId = 1;
 let markers = [];
 let markersMap = null;
 let markersFrom = -1;
+// The route places drawn on the live map, and which map and route they were drawn for.
+let placeMarkers = [];
+let placesMap = null;
+let placesRoute = null;
 
 /**
  * Registers the function called whenever a new route to the next point
@@ -101,8 +107,10 @@ export function ridePlanLine(point, session) {
 	if (!route || session.routeCancelled) {
 		guidance = null;
 		clearMarkers();
+		clearPlaces();
 		return [];
 	}
+	drawRidePlaces();
 	if (session.routeMode !== "points" || !canFollowPoints(route)) {
 		guidance = asIsGuidance(point, route);
 		return route.coords;
@@ -284,6 +292,7 @@ export function cancelRideRoute(session) {
 	session.routeCancelled = true;
 	guidance = null;
 	clearMarkers();
+	clearPlaces();
 }
 
 /**
@@ -365,10 +374,37 @@ function clearMarkers() {
 	markersFrom = -1;
 }
 
+/**
+ * Marks the ride's route's places on the live map, or clears them when
+ * there's no route. Drawn again only for a new map or route.
+ * @param {maplibregl.Map|null} [map] - The live map, when it isn't `state.liveMap` yet.
+ */
+export function drawRidePlaces(map = state.liveMap) {
+	const route = state.rideRoute;
+	if (map === placesMap && route === placesRoute) return;
+	clearPlaces();
+	placesMap = map;
+	placesRoute = route;
+	if (!map) return;
+	for (const place of placesOf(route)) {
+		const element = placeMarkerElement(place, false);
+		element.classList.add("live-waypoint", "live-place");
+		placeMarkers.push(new maplibregl.Marker({ element }).setLngLat(place.at).addTo(map));
+	}
+}
+
+function clearPlaces() {
+	for (const marker of placeMarkers) marker.remove();
+	placeMarkers = [];
+	placesMap = null;
+	placesRoute = null;
+}
+
 /** Forgets the route to the next point and its markers: at the end of a ride, or before a new one. */
 export function resetRidePlan() {
 	follower.reset();
 	clearMarkers();
+	clearPlaces();
 	guidance = null;
 	asIs = null;
 	planned = null;
