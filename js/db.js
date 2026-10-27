@@ -100,8 +100,21 @@ export async function withStore(storeName, mode, fn) {
 		const result = fn(store);
 
 		tx.oncomplete = () => resolve(result?.result ?? result);
-		tx.onerror = () => reject(tx.error);
+		// A transaction can abort without any request failing (a full disk
+		// raises QuotaExceededError this way), and then onerror never fires.
+		tx.onerror = tx.onabort = () => reject(transactionError(tx));
 	});
+}
+
+/**
+ * What a failed or aborted transaction rejects with. `tx.error` is null when
+ * the transaction was aborted outright rather than by a failing request.
+ *
+ * @param {IDBTransaction} tx
+ * @returns {Error}
+ */
+function transactionError(tx) {
+	return tx.error ?? new DOMException("The database transaction was aborted.", "AbortError");
 }
 
 /**
@@ -209,6 +222,46 @@ export function isRoute(route) {
 }
 
 /**
+ * Whether a value looks like a saved ride, for anything read back from a
+ * backup file: a real date, a list of points and a distance.
+ * @param {*} session
+ * @returns {boolean}
+ */
+export function isSession(session) {
+	return (
+		Boolean(session) &&
+		typeof session === "object" &&
+		Number.isFinite(new Date(session.date).getTime()) &&
+		Array.isArray(session.points) &&
+		Number.isFinite(session.totalDistance) &&
+		session.totalDistance >= 0
+	);
+}
+
+/**
+ * Writes a backup's rides, routes and preferences in one transaction, so a
+ * failure part way through (a full disk, say) leaves the database exactly as
+ * it was instead of half imported. Records get fresh ids from their stores.
+ *
+ * @param {{sessions: Array<Object>, routes: Array<Object>, prefs: Array<{key: string, value: *}>}} records
+ * @returns {Promise<void>}
+ */
+export async function importRecords({ sessions, routes, prefs }) {
+	const db = await openDB();
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction([SESSION_STORE, ROUTE_STORE, PREF_STORE], "readwrite");
+		const sessionStore = tx.objectStore(SESSION_STORE);
+		const routeStore = tx.objectStore(ROUTE_STORE);
+		const prefStore = tx.objectStore(PREF_STORE);
+		for (const { id, ...rest } of sessions) sessionStore.add(rest);
+		for (const { id, ...rest } of routes) routeStore.add(rest);
+		for (const pref of prefs) prefStore.put(pref);
+		tx.oncomplete = () => resolve();
+		tx.onerror = tx.onabort = () => reject(transactionError(tx));
+	});
+}
+
+/**
  * Saves a planned route, adding it when it has no id yet.
  * @param {Object} route - See route-plan.js for the shape.
  * @returns {Promise<number>} Its id.
@@ -266,6 +319,24 @@ export async function addSession(session) {
 export async function getAllSessions() {
 	const req = await withStore(SESSION_STORE, "readonly", (store) => store.getAll());
 	return req || [];
+}
+
+/**
+ * Counts the saved rides without reading them.
+ *
+ * @returns {Promise<number>}
+ */
+export async function countSessions() {
+	return withStore(SESSION_STORE, "readonly", (store) => store.count());
+}
+
+/**
+ * Counts the saved routes without reading them.
+ *
+ * @returns {Promise<number>}
+ */
+export async function countRoutes() {
+	return withStore(ROUTE_STORE, "readonly", (store) => store.count());
 }
 
 /**

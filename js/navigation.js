@@ -30,7 +30,7 @@ import { importGpxSession, exportCurrentGpx } from "./gpx.js";
 import { openPathLab, wirePathLab } from "./path-lab.js";
 import { wireDestination } from "./destination.js";
 import { confirmWithModal, closeModal } from "./modal.js";
-import { requestWakeLock, releaseWakeLock, maybeShowInstallBanner } from "./pwa.js";
+import { requestWakeLock, releaseWakeLock, maybeShowInstallBanner, renderStorageStatus } from "./pwa.js";
 
 /**
  * Wires up every DOM event listener the app uses: every settings toggle
@@ -560,6 +560,7 @@ export function fillSettingsForm() {
 	const riding = Boolean(state.currentSession);
 	el.dataActions.hidden = riding;
 	el.dataActionsRideNote.hidden = !riding;
+	renderStorageStatus();
 }
 
 /** Opens the settings screen, from home or from a live ride. */

@@ -296,6 +296,7 @@ export const el = {
 	deleteAllRidesBtn: document.getElementById("deleteAllRidesBtn"),
 	dataActions: document.getElementById("dataActions"),
 	dataActionsRideNote: document.getElementById("dataActionsRideNote"),
+	storageStatus: document.getElementById("storageStatus"),
 	openPathLabBtn: document.getElementById("openPathLabBtn"),
 	pathLabBackBtn: document.getElementById("pathLabBackBtn"),
 	pathLabRideSelect: document.getElementById("pathLabRideSelect"),

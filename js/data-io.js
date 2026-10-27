@@ -8,7 +8,8 @@
 import { ACTIVE_SESSION_KEY, PREF_STORE } from "./constants.js";
 import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
-import { deleteSessionById, getAllSessions, clearAllSessions, withStore, addSession, setPref, loadPrefs, getAllRoutes, putRoute, isRoute } from "./db.js";
+import { deleteSessionById, getAllSessions, clearAllSessions, withStore, loadPrefs, getAllRoutes, isRoute, isSession, importRecords } from "./db.js";
+import { protectStoredData } from "./pwa.js";
 import { navigateToScreen, applyRideLayout } from "./navigation.js";
 import { renderPastRides } from "./history-view.js";
 
@@ -76,7 +77,8 @@ export async function deleteAllRides() {
 }
 
 /**
- * Exports every saved ride, planned route and preference (excluding the machine-local
+ * Exports every saved ride, planned route and preference (excluding the Stadia
+ * API key and the machine-local
  * active-ride checkpoint) as a downloadable JSON backup file.
  * @returns {Promise<void>}
  */
@@ -90,6 +92,9 @@ export async function exportAllData() {
 			// The in-progress ride checkpoint is machine-local scratch state, not a
 			// preference; exporting it would resurrect a stranger's ride on import.
 			if (pref.key === ACTIVE_SESSION_KEY) return;
+			// An API key is a secret tied to the rider's Stadia account; a backup
+			// file gets copied and shared too freely to carry it.
+			if (pref.key === "stadiaKey") return;
 			prefsObj[pref.key] = pref.value;
 		});
 
@@ -118,10 +123,31 @@ export async function exportAllData() {
 }
 
 /**
+ * A ride's identity across devices and backups: ids are reassigned on every
+ * import, but no two real rides start at the same moment and cover the same
+ * distance.
+ * @param {Object} session
+ * @returns {string}
+ */
+function sessionKey(session) {
+	return `${new Date(session.date).getTime()}|${Math.round(session.totalDistance)}`;
+}
+
+/**
+ * A saved route's identity across devices and backups, as for `sessionKey`.
+ * @param {Object} route
+ * @returns {string}
+ */
+function routeKey(route) {
+	return `${route.name || ""}|${route.created || ""}|${route.coords.length}`;
+}
+
+/**
  * The hidden file input's `change` handler for JSON backup import: validates
- * the file, confirms with the rider (it overwrites preferences), imports
- * every session with a fresh auto-assigned id, and reloads prefs from the
- * merged result.
+ * the file, confirms with the rider (it overwrites preferences), and imports
+ * every ride and route not already on this device, with fresh ids, all in one
+ * transaction. Rides and routes that are already here, or that don't look
+ * like one, are skipped, so importing the same backup twice adds nothing.
  *
  * @param {Event} event - A `change` event on `el.importFileInput`.
  * @returns {Promise<void>}
@@ -134,19 +160,66 @@ export async function importAllData(event) {
 		const text = await file.text();
 		const data = JSON.parse(text);
 
-		if (data.version !== 1) {
+		if (data?.version !== 1) {
 			await showMessage("Import Error", "Unsupported file version.");
 			return;
 		}
 
-		if (!Array.isArray(data.sessions) || typeof data.preferences !== "object") {
+		if (!Array.isArray(data.sessions) || !data.preferences || typeof data.preferences !== "object") {
 			await showMessage("Import Error", "Invalid file format.");
 			return;
 		}
 
+		const fileRoutes = Array.isArray(data.routes) ? data.routes : [];
+		const haveSessions = new Set((await getAllSessions()).filter(isSession).map(sessionKey));
+		const haveRoutes = new Set((await getAllRoutes()).map(routeKey));
+
+		// Keyed sets also catch a ride listed twice within the file itself.
+		const sessions = [];
+		let invalid = 0;
+		let duplicates = 0;
+		for (const session of data.sessions) {
+			if (!isSession(session)) {
+				invalid += 1;
+				continue;
+			}
+			const key = sessionKey(session);
+			if (haveSessions.has(key)) {
+				duplicates += 1;
+				continue;
+			}
+			haveSessions.add(key);
+			sessions.push(session);
+		}
+		const routes = [];
+		for (const route of fileRoutes) {
+			if (!isRoute(route)) {
+				invalid += 1;
+				continue;
+			}
+			const key = routeKey(route);
+			if (haveRoutes.has(key)) {
+				duplicates += 1;
+				continue;
+			}
+			haveRoutes.add(key);
+			routes.push(route);
+		}
+
+		const prefs = [];
+		for (const [key, value] of Object.entries(data.preferences)) {
+			if (key === ACTIVE_SESSION_KEY) continue;
+			// Backups no longer carry the Stadia key, but older ones did. Restore it
+			// only onto a device without one, never over a key already entered here.
+			if (key === "stadiaKey" && (state.prefs.stadiaKey || typeof value !== "string")) continue;
+			prefs.push({ key, value });
+		}
+
+		const adding = [plural(sessions.length, "ride"), routes.length ? plural(routes.length, "route") : ""].filter(Boolean).join(" and ");
+		const skipping = duplicates ? ` ${plural(duplicates, "duplicate")} will be skipped.` : "";
 		const confirmed = await confirmWithModal({
 			title: "Import Confirmation",
-			message: `This will import ${data.sessions.length} session(s)${Array.isArray(data.routes) && data.routes.length ? ` and ${data.routes.length} route(s)` : ""} and overwrite your preferences. Continue?`,
+			message: `This will import ${adding} and overwrite your preferences.${skipping} Continue?`,
 			confirmText: "Import",
 			cancelText: "Cancel",
 		});
@@ -155,31 +228,29 @@ export async function importAllData(event) {
 
 		if (!confirmed) return;
 
-		for (const session of data.sessions) {
-			// Drop the exported primary key so the autoIncrement store assigns a fresh
-			// one; re-adding a colliding id throws ConstraintError mid-loop.
-			const { id, ...rest } = session;
-			await addSession(rest);
-		}
-
-		// Planned routes, in backups made since they were added.
-		for (const route of Array.isArray(data.routes) ? data.routes : []) {
-			if (!isRoute(route)) continue;
-			const { id, ...rest } = route;
-			await putRoute(rest);
-		}
-
-		for (const [key, value] of Object.entries(data.preferences)) {
-			if (key === ACTIVE_SESSION_KEY) continue;
-			await setPref(key, value);
-		}
+		await importRecords({ sessions, routes, prefs });
 
 		await loadPrefs();
 		applyRideLayout();
 		await renderPastRides();
-		await showMessage("Import Success", "Your data has been imported successfully.");
+		protectStoredData();
+		const notes = [
+			duplicates ? `Skipped ${plural(duplicates, "duplicate")}.` : "",
+			invalid ? `Skipped ${plural(invalid, "item")} that couldn't be read.` : "",
+		].filter(Boolean);
+		await showMessage("Import Success", `Imported ${adding}.${notes.length ? ` ${notes.join(" ")}` : ""}`);
 	} catch (error) {
 		el.importFileInput.value = "";
 		await showMessage("Import Error", `Failed to import data: ${error.message}`);
 	}
+}
+
+/**
+ * A count with its noun, e.g. "1 ride" or "3 rides".
+ * @param {number} count
+ * @param {string} noun
+ * @returns {string}
+ */
+function plural(count, noun) {
+	return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

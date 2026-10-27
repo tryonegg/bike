@@ -28,7 +28,7 @@ import { resetRouteHome } from "./route-home.js";
 import { canFollowPoints, resetRidePlan, destinationRoute } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
 import { navigateToScreen } from "./navigation.js";
-import { requestWakeLock, releaseWakeLock } from "./pwa.js";
+import { requestWakeLock, releaseWakeLock, protectStoredData } from "./pwa.js";
 import { confirmWithModal } from "./modal.js";
 import { openPostSession } from "./post-session.js";
 import { addSession, setPref, getPref, getRoute } from "./db.js";
@@ -824,6 +824,8 @@ export async function finalizeSession() {
 	const id = await addSession(saved);
 	saved.id = id;
 	await clearActiveSessionCheckpoint();
+	// Not awaited: a browser that prompts for it shouldn't hold up the summary.
+	protectStoredData();
 	state.currentSession = null;
 	state.rideFlowPhase = null;
 	setPauseButton(false);

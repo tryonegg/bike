@@ -677,7 +677,7 @@
                 <button id="importDataBtn" class="btn pill">Import data</button>
                 <input id="importFileInput" type="file" accept=".json" hidden>
               </div>
-              <p class="setting-note">Everything on this device, rides, routes and settings, in one file you can import again later.</p>
+              <p class="setting-note">Everything on this device, rides, routes and settings, in one file you can import again later. Your Stadia API key is left out. Importing skips rides and routes already here.</p>
             </div>
             <div class="setting-row stacked">
               <div class="data-buttons">
@@ -695,6 +695,9 @@
           </div>
           <div class="setting-row info-row" id="dataActionsRideNote" hidden>
             <p class="setting-note">Export, import and delete are available once this ride is finished.</p>
+          </div>
+          <div class="setting-row info-row">
+            <p class="setting-note" id="storageStatus" aria-live="polite"></p>
           </div>
           <div class="setting-row stacked">
             <div class="setting-row-main">

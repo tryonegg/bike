@@ -6,6 +6,7 @@
 
 import { state, el } from "./state.js";
 import { confirmWithModal } from "./modal.js";
+import { countSessions, countRoutes } from "./db.js";
 
 /**
  * Shows or hides the install banner and sets its message/button state,
@@ -27,6 +28,63 @@ export function maybeShowInstallBanner() {
 		el.installMessage.textContent = "Install is available from your browser menu if the button is disabled.";
 		el.installBtn.disabled = true;
 	}
+}
+
+/**
+ * Asks the browser to keep this app's storage rather than clearing it when
+ * space runs low. Rides and routes live only on this device, so losing the
+ * database loses them for good. Only asked once there is something to keep,
+ * since some browsers show the rider a prompt for it. Safe to call often:
+ * it returns at once when storage is already persistent.
+ *
+ * @returns {Promise<boolean>} Whether storage is persistent afterwards.
+ */
+export async function protectStoredData() {
+	if (!navigator.storage?.persist) return false;
+	try {
+		if (await navigator.storage.persisted()) return true;
+		const [rides, routes] = await Promise.all([countSessions(), countRoutes()]);
+		if (!rides && !routes) return false;
+		return await navigator.storage.persist();
+	} catch (error) {
+		console.warn("Persistent storage request failed", error);
+		return false;
+	}
+}
+
+/**
+ * Fills the settings screen's storage note: whether the browser has agreed
+ * to keep the app's data, and roughly how much space it takes.
+ *
+ * @returns {Promise<void>}
+ */
+export async function renderStorageStatus() {
+	const storage = navigator.storage;
+	if (!storage?.persisted) {
+		el.storageStatus.textContent = "This browser can't promise to keep your rides. Export your data now and then.";
+		return;
+	}
+	try {
+		const [persisted, estimate] = await Promise.all([storage.persisted(), storage.estimate ? storage.estimate() : null]);
+		const used = Number.isFinite(estimate?.usage) ? ` Using ${formatBytes(estimate.usage)}.` : "";
+		el.storageStatus.textContent = persisted
+			? `Storage is protected: the browser won't clear your rides to free up space.${used}`
+			: `Storage isn't protected yet, so the browser may clear your rides if the device runs low on space. Installing the app usually fixes this. Export your data now and then.${used}`;
+	} catch (error) {
+		console.warn("Reading storage status failed", error);
+		el.storageStatus.textContent = "";
+	}
+}
+
+/**
+ * A byte count as a short size, e.g. "4.2 MB".
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatBytes(bytes) {
+	if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /**

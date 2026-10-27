@@ -9,7 +9,7 @@ import { loadPrefs } from "./js/db.js";
 import { applyTheme, applyRideLayout, syncToggles, wireEvents } from "./js/navigation.js";
 import { renderPastRides } from "./js/history-view.js";
 import { maybeRecoverSession } from "./js/live-session.js";
-import { registerServiceWorker, maybeShowInstallBanner } from "./js/pwa.js";
+import { registerServiceWorker, maybeShowInstallBanner, protectStoredData } from "./js/pwa.js";
 import { showMessage } from "./js/modal.js";
 import { openSharedRouteFromHash, openSharedRouteFromUrl } from "./js/route-plan.js";
 
@@ -37,9 +37,10 @@ if ("launchQueue" in window) {
  * Boots the app: loads preferences, applies the theme/layout they imply,
  * wires up every DOM event listener, establishes the initial history entry,
  * renders the home screen's past-rides list, offers to recover an
- * in-progress ride left over from a prior session, and (last, since neither
- * is essential to a usable first paint) registers the service worker and
- * shows the install banner if appropriate.
+ * in-progress ride left over from a prior session, and (last, since none
+ * is essential to a usable first paint) registers the service worker,
+ * shows the install banner if appropriate, and asks the browser to keep
+ * the saved rides from being cleared.
  *
  * @returns {Promise<void>}
  */
@@ -55,4 +56,5 @@ async function init() {
 	await openSharedRouteFromHash();
 	registerServiceWorker();
 	maybeShowInstallBanner();
+	protectStoredData();
 }

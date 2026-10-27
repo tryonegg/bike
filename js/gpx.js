@@ -36,6 +36,7 @@ export function isTurnCue(node) {
 	return Boolean(type) && TURN_TYPES.has(type);
 }
 import { addSession } from "./db.js";
+import { protectStoredData } from "./pwa.js";
 import { renderPastRides } from "./history-view.js";
 
 /**
@@ -240,6 +241,7 @@ export async function importGpxSession(event) {
 
 		const id = await addSession(session);
 		session.id = id;
+		protectStoredData();
 		await renderPastRides();
 		await showMessage("Import Success", "The ride has been imported.");
 	} catch (error) {
