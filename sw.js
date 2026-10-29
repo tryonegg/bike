@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.26.0";
+const CACHE_VERSION = "v1.27.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -132,6 +132,9 @@ const refreshedTiles = new Set();
 // Set once an update notification has been sent, so a burst of changed shell
 // files (a whole new deploy) only prompts the rider once, not per file.
 let updateNotified = false;
+// The shell refresh in progress (see refreshShell), so changes spotted in
+// several files at once start only one.
+let shellRefresh = null;
 
 /**
  * Precaches every app-shell asset. Each is fetched past the browser's HTTP
@@ -151,10 +154,14 @@ self.addEventListener("install", (event) => {
  * Drops every cache from a previous version/deploy (matched by prefix,
  * per cache family) once the new worker takes over, and claims existing
  * open tabs immediately rather than waiting for their next navigation.
+ * First makes sure this version's own precache is still whole: it can have
+ * been deleted while this worker waited (index.html's "Reset app files"
+ * clears the shell caches, and a waiting worker outlives that), and an empty
+ * shell cache would leave the app unable to start offline.
  */
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
+    ensureShellCached().then(() => caches.keys()).then((keys) =>
       Promise.all(
         keys
           .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
@@ -171,6 +178,19 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+/**
+ * Precaches the app shell again, all at once, if this version's cache is
+ * missing any of it. A failure (offline) leaves it as it was; files still
+ * missing are then fetched from the network as they're asked for.
+ *
+ * @returns {Promise<void>}
+ */
+async function ensureShellCached() {
+  const cache = await caches.open(CACHE_NAME);
+  if ((await cache.keys()).length >= ASSETS.length) return;
+  await refreshShell();
+}
+
 /** Lets the page (via js/pwa.js) tell a waiting worker to activate immediately instead of waiting for all tabs to close. */
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") {
@@ -182,9 +202,8 @@ self.addEventListener("message", (event) => {
  * Routes every GET request to the right caching strategy: map data/style/
  * tile hosts get their own strategies (see the `MAP_DATA_HOSTS` branch and
  * the Stadia branch below), a same-origin navigation or shell asset is
- * served cache-first with the network fetched in the background to refresh
- * the cache (diffed for update notifications where `shouldWatchForUpdates`
- * applies), and anything else same-origin is plain cache-first (fetched
+ * served from this version's precache (see `shellFirst`), and anything else
+ * same-origin is plain cache-first (fetched
  * from the network only on a cache miss, with no background refresh).
  * Non-GET requests and unrecognized cross-origin requests are left to the
  * browser's default handling.
@@ -218,12 +237,12 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(cacheFirstWithRevalidate(event, request, CACHE_NAME, true));
+    event.respondWith(shellFirst(event, request, true));
     return;
   }
 
   if (isShellAsset(url.pathname)) {
-    event.respondWith(cacheFirstWithRevalidate(event, request, CACHE_NAME, shouldWatchForUpdates(url.pathname)));
+    event.respondWith(shellFirst(event, request, shouldWatchForUpdates(url.pathname)));
     return;
   }
 
@@ -241,39 +260,115 @@ function shouldWatchForUpdates(pathname) {
 }
 
 /**
- * Cache-first fetch with background revalidation: serves the cached
- * response immediately when one exists, so the shell/style is never
- * blocked on the network — unlike a network-first strategy, a slow or
- * flaky connection can't make this hang, since the network is never on the
- * critical path for a cache hit. A network fetch (bypassing the HTTP cache
- * via `{cache: "no-cache"}`, so a conditional GET still revalidates) always
- * runs alongside it to refresh the cache for next time and, optionally,
- * diff the response against whatever was cached to detect a shell update.
- * Registered with `event.waitUntil` so the worker stays alive to finish
- * that background fetch even though it outlives the response already sent.
- * Only waits on the network directly when there's nothing cached yet.
+ * Serves an app-shell file (the page, its CSS and modules, the vendored
+ * libraries) from this version's precache, so every file a page loads comes
+ * from the same deploy. The app's modules import named exports from each
+ * other, so one module newer than the rest stops the app from starting.
+ *
+ * The cache is never written here, file by file. For an update-watched file,
+ * the network copy is fetched in the background only to compare with the
+ * cached one; a difference starts `checkForShellUpdate`, which brings in a
+ * whole new set of files at once. Falls back to the network only for a file
+ * the precache somehow lacks.
+ *
+ * @param {FetchEvent} event
+ * @param {Request} request
+ * @param {boolean} watch - Whether a change to this file means an update.
+ * @returns {Promise<Response>}
+ */
+async function shellFirst(event, request, watch) {
+  const cache = await caches.open(CACHE_NAME);
+  // A navigation can carry a query string the precached page doesn't.
+  const cached = await cache.match(request, { ignoreSearch: request.mode === "navigate" });
+  if (!cached) return fetch(request);
+
+  if (watch) {
+    const copy = cached.clone();
+    event.waitUntil(
+      fetch(request, { cache: "no-cache" })
+        .then(async (response) => {
+          if (response.ok && (await hasResponseChanged(copy, response))) await checkForShellUpdate(request.url);
+        })
+        .catch(() => {}),
+    );
+  }
+  return cached;
+}
+
+/**
+ * Handles a shell file found changed on the server. A deploy that bumped
+ * `CACHE_VERSION` comes with a new sw.js, which this worker's registration
+ * picks up and installs with its own complete cache; the page then offers to
+ * switch to it. Without a new worker (the version wasn't bumped), this
+ * worker refreshes its own cache as a whole set instead, before the page is
+ * told. Either way the rider is only offered a reload once all the new files
+ * are in place, never part way through.
+ *
+ * @param {string} changedUrl
+ * @returns {Promise<void>}
+ */
+async function checkForShellUpdate(changedUrl) {
+  if (updateNotified) return;
+  try {
+    await self.registration.update();
+  } catch {
+    // Offline or the server is unreachable: nothing new can be had now.
+    return;
+  }
+  // The new worker announces itself to the page (pwa.js's "updatefound").
+  if (self.registration.installing || self.registration.waiting) return;
+  shellRefresh ??= refreshShell().finally(() => {
+    shellRefresh = null;
+  });
+  if (await shellRefresh) notifyUpdateAvailable(changedUrl);
+}
+
+/**
+ * Downloads every shell file past the HTTP cache and, only once all of them
+ * have arrived, writes them into this version's cache together. A failed
+ * download leaves the cache as it was, so it never holds a mix of old and
+ * new files.
+ *
+ * @returns {Promise<boolean>} Whether the cache was refreshed.
+ */
+async function refreshShell() {
+  try {
+    const responses = await Promise.all(
+      ASSETS.map(async (asset) => {
+        const request = new Request(asset, { cache: "reload" });
+        const response = await fetch(request);
+        if (!response.ok) throw new Error(`${asset}: ${response.status}`);
+        return [request, response];
+      }),
+    );
+    const cache = await caches.open(CACHE_NAME);
+    await Promise.all(responses.map(([request, response]) => cache.put(request, response)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Cache-first fetch with background revalidation, for OpenFreeMap's style
+ * and TileJSON, which change when it publishes new data: serves the cached
+ * response at once when there is one, so the map is never held up by the
+ * network, and refreshes the cache in the background for next time. Only
+ * waits on the network when nothing is cached yet. Not for app-shell files,
+ * which must change together (see `shellFirst`).
  *
  * @param {FetchEvent} event
  * @param {Request} request
  * @param {string} cacheName
- * @param {boolean} [notifyOnChange] - When true (used for the shell's
- *   update-watched assets), compares the new response against the cached one
- *   and fires an update notification if they differ.
  * @returns {Promise<Response>}
  * @throws {Error} If nothing is cached and the network fails too.
  */
-async function cacheFirstWithRevalidate(event, request, cacheName, notifyOnChange = false) {
+async function cacheFirstWithRevalidate(event, request, cacheName) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
 
   const revalidate = fetch(request, { cache: "no-cache" })
-    .then(async (response) => {
-      if (notifyOnChange && cached && response && response.ok) {
-        const changed = await hasResponseChanged(cached, response);
-        if (changed) {
-          notifyUpdateAvailable(request.url);
-        }
-      }
+    .then((response) => {
       if (response && response.ok) {
         cache.put(request, response.clone());
       }
@@ -425,7 +520,7 @@ async function safeReadText(response) {
 
 /**
  * Tells every open tab (including ones not currently controlled by this
- * worker) that a shell update is available, so each can offer the rider a
+ * worker) that a shell update is available and already cached, so each can offer the rider a
  * reload — see the `APP_SHELL_UPDATE_AVAILABLE` handler in
  * js/pwa.js's `setupServiceWorkerUpdateChecks`. Only fires once per worker
  * lifetime (`updateNotified`), so a whole new deploy's worth of changed

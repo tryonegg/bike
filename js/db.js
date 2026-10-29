@@ -399,6 +399,42 @@ export function summarizeSession(session) {
 }
 
 /**
+ * Makes sure every saved ride has a summary and every summary a ride, since
+ * the rides list reads only summaries and a ride without one would vanish
+ * from it. Counting both stores is cheap, so that's all a normal startup
+ * does; only when the counts differ are the rides read (points and all) and
+ * the summaries put right. A summary already there is kept as it is, so it
+ * keeps its place in the best pace map.
+ *
+ * @returns {Promise<boolean>} Whether anything needed repairing.
+ */
+export async function repairSessionSummaries() {
+	const counts = await withStores([SESSION_STORE, SUMMARY_STORE], "readonly", (tx) => {
+		const rides = tx.objectStore(SESSION_STORE).count();
+		const summaries = tx.objectStore(SUMMARY_STORE).count();
+		return () => [rides.result, summaries.result];
+	});
+	if (counts[0] === counts[1]) return false;
+
+	await withStores([SESSION_STORE, SUMMARY_STORE], "readwrite", (tx) => {
+		const summaries = tx.objectStore(SUMMARY_STORE);
+		summaries.getAllKeys().onsuccess = (event) => {
+			const orphans = new Set(event.target.result);
+			tx.objectStore(SESSION_STORE).openCursor().onsuccess = (cursorEvent) => {
+				const cursor = cursorEvent.target.result;
+				if (!cursor) {
+					for (const id of orphans) summaries.delete(id);
+					return;
+				}
+				if (!orphans.delete(cursor.key)) summaries.put(summarizeSession(cursor.value));
+				cursor.continue();
+			};
+		};
+	});
+	return true;
+}
+
+/**
  * Reads every saved ride's summary (see `summarizeSession`), without any
  * of their GPS points.
  *

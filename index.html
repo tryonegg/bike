@@ -693,7 +693,7 @@
               <div class="data-buttons">
                 <button id="deleteAllRidesBtn" class="btn pill danger-outline">Delete all past rides</button>
               </div>
-              <p class="setting-note">Removes every saved ride from this device. Settings are kept. Export first if you might want them back.</p>
+              <p class="setting-note">Removes every saved ride from this device, and the best pace map built from them. Settings and routes are kept. Export first if you might want them back.</p>
             </div>
           </div>
           <div class="setting-row info-row" id="dataActionsRideNote" hidden>
@@ -812,8 +812,67 @@
     </div>
   </div>
 
+  <div id="bootFailure" class="boot-failure" role="alertdialog" aria-labelledby="bootFailureTitle" aria-describedby="bootFailureMessage" hidden>
+    <div class="boot-failure-card">
+      <h2 id="bootFailureTitle">Bike Tracker didn't start</h2>
+      <p id="bootFailureMessage">Your rides, routes and settings are safe on this device. Try reloading. If that doesn't help, reset the app files: they're downloaded again, and your data is left alone.</p>
+      <div class="row">
+        <button id="bootResetBtn" class="btn pill">Reset app files</button>
+        <button id="bootReloadBtn" class="btn primary pill">Reload</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // A plain script, not a module, so it runs even when the app's modules
+    // can't load (a missing file, or files from two different versions). If
+    // app.js hasn't reported in by the deadline, or startup throws first, it
+    // shows the screen above. Resetting deletes the app-file caches and the
+    // service worker, never IndexedDB, so no ride or route is touched.
+    (function () {
+      var BOOT_DEADLINE_MS = 15000;
+      var screen = document.getElementById("bootFailure");
+      function show() {
+        if (window.bikeAppStarted) return;
+        screen.hidden = false;
+      }
+      window.bikeBootFailed = function () {
+        clearTimeout(timer);
+        screen.hidden = false;
+      };
+      var timer = setTimeout(show, BOOT_DEADLINE_MS);
+      window.addEventListener("error", function () {
+        if (window.bikeAppStarted) return;
+        clearTimeout(timer);
+        // Give a slow-to-report app.js a moment before deciding it failed.
+        timer = setTimeout(show, 1500);
+      });
+      document.getElementById("bootReloadBtn").addEventListener("click", function () {
+        location.reload();
+      });
+      document.getElementById("bootResetBtn").addEventListener("click", async function () {
+        this.disabled = true;
+        try {
+          if ("serviceWorker" in navigator) {
+            var registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map(function (r) { return r.unregister(); }));
+          }
+          if ("caches" in window) {
+            // Map tiles are left, so maps still work offline afterwards.
+            var keys = await caches.keys();
+            await Promise.all(keys.filter(function (key) {
+              return key.indexOf("bike-tracker-shell-") === 0 || key.indexOf("bike-tracker-runtime-") === 0;
+            }).map(function (key) { return caches.delete(key); }));
+          }
+        } catch (error) {
+          console.warn("Resetting app files failed", error);
+        }
+        location.reload();
+      });
+    })();
+  </script>
   <script src="vendor/maplibre/maplibre-gl.js"></script>
   <script src="vendor/maplibre-contour/maplibre-contour.min.js"></script>
-  <script src="app.js" type="module"></script>
+  <!-- onerror: a module that fails to download reports it here, not on window. -->
+  <script src="app.js" type="module" onerror="window.bikeBootFailed()"></script>
 </body>
 </html>

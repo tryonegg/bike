@@ -3784,3 +3784,38 @@ button {
   width: 13px;
   height: 13px;
 }
+
+/* Shown by index.html's inline script when the app's modules fail to load or
+   startup throws, so it relies on nothing the app itself sets up. */
+.boot-failure {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--bg, #fcfcfa);
+  color: var(--text, #14181a);
+}
+
+.boot-failure[hidden] {
+  display: none;
+}
+
+.boot-failure-card {
+  max-width: 420px;
+}
+
+.boot-failure-card .row {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .boot-failure {
+    background: #111413;
+    color: #eef1ef;
+  }
+}

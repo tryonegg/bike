@@ -12,6 +12,7 @@ import { deleteSessionById, getAllSessions, getAllSessionSummaries, countSession
 import { protectStoredData } from "./pwa.js";
 import { navigateToScreen, applyRideLayout } from "./navigation.js";
 import { renderPastRides } from "./history-view.js";
+import { clearPaceMap } from "./pace-map.js";
 
 /**
  * The post-ride summary screen's "Delete" button handler: confirms, then
@@ -22,7 +23,7 @@ export async function deleteCurrentRide() {
 	if (!state.currentPostSession) return;
 	const ok = await confirmWithModal({
 		title: "Delete Ride?",
-		message: "This ride will be removed permanently.",
+		message: "This ride will be removed permanently. Any best times it set stay on the best pace map until you rebuild the map.",
 		confirmText: "Delete",
 		cancelText: "Cancel",
 	});
@@ -39,8 +40,9 @@ export async function deleteCurrentRide() {
 /**
  * The settings screen's "Delete All Rides" handler: asks twice (once to say
  * what will go, then again as the point of no return) before wiping every
- * saved ride. Preferences are left untouched, and an in-progress ride's
- * checkpoint is not a saved ride, so it's left alone too.
+ * saved ride, and the best pace map built from them. Preferences are left
+ * untouched, and an in-progress ride's checkpoint is not a saved ride, so
+ * it's left alone too.
  * @returns {Promise<void>}
  */
 export async function deleteAllRides() {
@@ -53,7 +55,7 @@ export async function deleteAllRides() {
 	const rides = count === 1 ? "1 saved ride" : `all ${count} saved rides`;
 	const first = await confirmWithModal({
 		title: "Delete All Past Rides?",
-		message: `This will remove ${rides} from this device. Your settings are kept.`,
+		message: `This will remove ${rides} from this device, along with the best pace map built from your rides. Your settings and routes are kept.`,
 		confirmText: "Continue",
 		cancelText: "Cancel",
 	});
@@ -68,12 +70,13 @@ export async function deleteAllRides() {
 	});
 	if (!second) return;
 
+	await clearPaceMap();
 	await clearAllSessions();
 	state.currentPostSession = null;
 	// The calendar's range is worked out from the rides, so let it start over.
 	state.calendarMonth = null;
 	await renderPastRides();
-	await showMessage("Rides Deleted", "All past rides have been deleted.");
+	await showMessage("Rides Deleted", "All past rides and the best pace map have been deleted.");
 }
 
 /**

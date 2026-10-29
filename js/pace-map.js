@@ -111,6 +111,19 @@ export async function rebuildPaceMap() {
 }
 
 /**
+ * Empties the map, for when every ride has been deleted: a best whose ride
+ * is gone would otherwise outlive all of them. Waits out a pass in
+ * progress, so it can't write sections back after the map is emptied.
+ *
+ * @returns {Promise<void>}
+ */
+export async function clearPaceMap() {
+	await syncing;
+	await clearPaceSections();
+	notify({ done: 0, total: 0, running: false });
+}
+
+/**
  * The map's sections for one activity.
  *
  * @param {string} activity - An ACTIVITIES key.
