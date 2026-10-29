@@ -17,6 +17,9 @@
  * The guidance both give is {steps, along, offRoute, target, following,
  * stopsLeft, canSkip}: steps (route-steps.js) each with `along`, the meters
  * along the route in the same reckoning as the rider's own `along`.
+ *
+ * Climbs on the line followed are spoken too, as grade-ahead.js finds them
+ * (`speakHills`), but only around the turns.
  */
 
 import {
@@ -37,12 +40,16 @@ import {
 	PLAN_ARRIVE_M,
 	METERS_PER_MILE,
 	FEET_PER_METER,
+	HILL_VOICE_ON_M,
+	HILL_VOICE_LONG_M,
+	HILL_VOICE_TOP_M,
+	HILL_VOICE_TURN_CLEAR_M,
 } from "./constants.js";
 import { state, el } from "./state.js";
 import { haversineMeters, bearingDegrees } from "./format.js";
 import { ridePlanGuidance, skipNextPoint, cancelRideRoute } from "./ride-plan.js";
 import { latestRouteHome } from "./route-home.js";
-import { say } from "./voice.js";
+import { say, isSpeaking } from "./voice.js";
 import { TURN_WORDS, turnInstruction } from "./route-steps.js";
 import { markAt, pointName, isStop } from "./point-marks.js";
 import { getElapsedMs } from "./live-session.js";
@@ -117,6 +124,36 @@ const HEADS_UP_ARRIVE = [
 	({ road, d, place }) => `continue on ${road} for ${d} to ${place}`,
 	({ d, place }) => `${d} to go to ${place}`,
 	({ d, minutes, place }) => (minutes ? `about ${minutes} minutes to ${place}` : `${d} to go to ${place}`),
+];
+
+// Ways to say a climb's coming up, gentle or steep: `d` is how far off it
+// starts, `length` how long it is and `gain` how much it climbs ("120 feet").
+// One running on past what's measured has no known length, so it's just long.
+const HILL_GENTLE = [
+	({ d, gain, length }) => `in ${d}, a gentle climb of ${gain} over ${length}`,
+	({ d, length }) => `gentle hill ahead in ${d}, ${length} long`,
+	({ d, length }) => `up ahead in ${d}, a gentle climb, ${length} long`,
+	({ d, gain }) => `gentle climb coming up in ${d}, ${gain} to the top`,
+];
+const HILL_STEEP = [
+	({ d, gain, length }) => `steep climb ahead in ${d}, ${gain} over ${length}`,
+	({ d, length }) => `heads up, steep hill in ${d}, ${length} long`,
+	({ d, gain, length }) => `get ready for a steep one in ${d}, ${gain} in ${length}`,
+	({ d, length }) => `up ahead in ${d}, a steep climb, ${length} long`,
+];
+const HILL_LONG = [
+	({ d, kind }) => `long ${kind} climb coming up in ${d}`,
+	({ d, kind }) => `in ${d}, a long ${kind} climb`,
+];
+// On a long climb, nearing its top (`d` the distance left), and reaching it.
+const HILL_NEAR_TOP = [
+	() => "almost at the top",
+	() => "top of the climb is just ahead",
+	({ d }) => `nearly there, ${d} to the top`,
+];
+const HILL_TOP = [
+	() => "you've made it to the top",
+	() => "that's the top of the climb",
 ];
 
 // Riding speeds to estimate time to the next stop with, in m/s, until the
@@ -205,6 +242,8 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 	listenForArrivals(session, source);
 	// Arriving at the start ends directions there.
 	if (source?.kind === "home" && !session.startDirections) source = activeGuidance(session);
+	memory.voiceView = null;
+	memory.voiceKind = null;
 	if (!source) {
 		el.navBanner.hidden = true;
 		el.navTurnFlash.hidden = true;
@@ -212,7 +251,11 @@ export function updateDirections(point = state.currentSession?.lastPoint) {
 	}
 
 	const view = describe(source, session, point);
-	if (source.voice) speakFor(source, view);
+	if (source.voice) {
+		speakFor(source, view);
+		memory.voiceView = view;
+		memory.voiceKind = source.kind;
+	}
 	el.navBanner.hidden = !source.visual;
 	if (source.visual) render(view);
 	renderTurnFlash(source.visual ? view : null);
@@ -253,6 +296,9 @@ function freshMemory(session) {
 		followedAlong: 0,
 		headsUp: new Set(),
 		lastPhrase: new Map(),
+		voiceView: null,
+		voiceKind: null,
+		hill: null,
 	};
 }
 
@@ -578,6 +624,83 @@ function speakHeadsUp(source, view) {
 	const bank = step.turn === "arrive" ? HEADS_UP_ARRIVE : HEADS_UP;
 	say(sentence(pickPhrase(step.turn === "arrive" ? "heads-up-arrive" : "heads-up", bank)(values)));
 	return true;
+}
+
+/**
+ * Speaks of the climbs ahead on the line followed, as grade-ahead.js finds
+ * them each time it measures: once as one comes up, and on a long one, near
+ * its top and at it. Only while that line's directions are spoken and Hill
+ * warnings are on, and never over a turn (see `turnsFirst`); a warning held
+ * back is said once the turn's done, if the climb's still ahead.
+ *
+ * @param {{line: "route"|"home", along: number, climb: ?{start: number, end: number, topKnown: boolean, gain: number, steep: boolean}}} report
+ *   `along` and the climb's `start` and `end` are meters along `line`.
+ */
+export function speakHills({ line, along, climb }) {
+	if (!memory || !state.prefs.navHillVoice || memory.voiceKind !== line) return;
+	let hill = memory.hill?.line === line ? memory.hill : null;
+	if (climb) {
+		// Measured again, the same climb starts and ends a little differently.
+		if (hill && climb.start <= hill.end + HILL_VOICE_ON_M && climb.end >= hill.start - HILL_VOICE_ON_M) {
+			hill.end = climb.end;
+			hill.topKnown = climb.topKnown;
+		} else if (!hill || along > hill.end) {
+			hill = { line, ...climb, warned: false, nearTop: false };
+		}
+	}
+	memory.hill = hill;
+	if (!hill) return;
+
+	const long = hill.topKnown && hill.end - hill.start >= HILL_VOICE_LONG_M;
+	if (!hill.warned) {
+		const off = hill.start - along;
+		// Already on it, or a turn's held it back till then: too late to warn.
+		if (off < HILL_VOICE_ON_M) hill.warned = true;
+		else if (turnsFirst()) return;
+		else {
+			hill.warned = true;
+			const values = {
+				d: spokenDistance(off),
+				length: spokenDistance(hill.end - hill.start),
+				gain: spokenHeight(hill.gain),
+				kind: hill.steep ? "steep" : "gentle",
+			};
+			const [name, bank] = !hill.topKnown ? ["hill-long", HILL_LONG] : hill.steep ? ["hill-steep", HILL_STEEP] : ["hill-gentle", HILL_GENTLE];
+			say(sentence(pickPhrase(name, bank)(values)), { minor: true });
+			return;
+		}
+	}
+	if (along >= hill.end) {
+		// Too far past the top to say so, or waiting for a turn.
+		if (long && along - hill.end <= HILL_VOICE_TOP_M) {
+			if (turnsFirst()) return;
+			say(sentence(pickPhrase("hill-top", HILL_TOP)({})), { minor: true });
+		}
+		memory.hill = null;
+		return;
+	}
+	if (long && !hill.nearTop && along > hill.start && hill.end - along <= HILL_VOICE_TOP_M && !turnsFirst()) {
+		hill.nearTop = true;
+		say(sentence(pickPhrase("hill-near-top", HILL_NEAR_TOP)({ d: spokenDistance(hill.end - along) })), { minor: true });
+	}
+}
+
+/**
+ * Whether a hill has to wait for the turns: something's being said, or a
+ * turn (or turning around, or rerouting) is close enough to be said soon.
+ */
+function turnsFirst() {
+	const view = memory?.voiceView;
+	if (isSpeaking() || !view) return true;
+	if (view.offRoute || view.turnAround) return true;
+	if (!view.step || view.step.turn === "arrive") return false;
+	return view.distance <= earlyMeters(state.currentSession) + HILL_VOICE_TURN_CLEAR_M;
+}
+
+/** A height as spoken, to the nearest 10 feet or 5 meters: "120 feet". */
+function spokenHeight(meters) {
+	if (state.prefs.unit === "imperial") return `${Math.max(10, Math.round((meters * FEET_PER_METER) / 10) * 10)} feet`;
+	return `${Math.max(5, Math.round(meters / 5) * 5)} meters`;
 }
 
 /** A phrase from `bank` at random, never the one picked from it last time. */

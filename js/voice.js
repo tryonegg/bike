@@ -26,6 +26,8 @@ const STALE_MS = 6000;
 let unlocked = false;
 const queue = [];
 let speaking = false;
+// The prompt being spoken, while one is.
+let current = null;
 
 document.addEventListener("pointerdown", unlockVoice, { once: true, capture: true });
 
@@ -41,13 +43,22 @@ export function unlockVoice() {
 }
 
 /**
- * Says a prompt, queued behind any prompt already being spoken.
+ * Says a prompt, queued behind any prompt already being spoken. A minor
+ * prompt (a hill warning) gives way to the rest: it's dropped rather than
+ * queued when anything's being spoken, and cut off by any other prompt.
  * @param {string} text
+ * @param {{minor?: boolean}} [options]
  */
-export function say(text) {
-	if (!text) return;
-	queue.push({ text, at: Date.now() });
+export function say(text, { minor = false } = {}) {
+	if (!text || (minor && speaking)) return;
+	queue.push({ text, at: Date.now(), minor });
+	if (!minor && current?.minor && speechSupported) window.speechSynthesis.cancel();
 	if (!speaking) speakNext();
+}
+
+/** Whether a prompt is being spoken (or waiting to be). */
+export function isSpeaking() {
+	return speaking;
 }
 
 /**
@@ -116,6 +127,7 @@ export function testVoice() {
 
 async function speakNext() {
 	const next = queue.shift();
+	current = next ?? null;
 	if (!next) {
 		speaking = false;
 		return;

@@ -44,6 +44,8 @@ export const state = {
 		navRouteVoice: false,
 		navHomeVisual: false,
 		navHomeVoice: false,
+		// Spoken warnings of climbs ahead, wherever directions are spoken.
+		navHillVoice: true,
 		// The device voice spoken directions use (a SpeechSynthesisVoice's URI,
 		// or "" for the device's default), and its speed and pitch.
 		voiceURI: "",
@@ -293,6 +295,7 @@ export const el = {
 	guideHideDistanceSelect: document.getElementById("guideHideDistanceSelect"),
 	backToStartToggle: document.getElementById("backToStartToggle"),
 	avoidRetraceRow: document.getElementById("avoidRetraceRow"),
+	hillVoiceRow: document.getElementById("hillVoiceRow"),
 	statsActivitySelect: document.getElementById("statsActivitySelect"),
 	exportDataBtn: document.getElementById("exportDataBtn"),
 	importDataBtn: document.getElementById("importDataBtn"),

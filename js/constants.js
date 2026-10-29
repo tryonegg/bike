@@ -234,6 +234,20 @@ export const GRADE_AHEAD_STEP_M = 20;
 export const GRADE_AHEAD_SHOW_M = 400;
 export const GRADE_AHEAD_MIN_RUN_M = 80;
 export const GRADE_AHEAD_REFRESH_M = 15;
+// Spoken hill warnings, with Hill warnings on and the line followed spoken: a
+// climb found as above (descents aren't spoken), at least HILL_VOICE_MIN_M
+// long (300 ft), is announced once as it comes within GRADE_AHEAD_SHOW_M,
+// unless the rider's already within HILL_VOICE_ON_M of it, and called steep
+// from GRADE_STEEP, gentle under it. A climb HILL_VOICE_LONG_M or longer, with
+// its top in sight, also gets "almost at the top" HILL_VOICE_TOP_M from it and
+// "made it" there. Turns come first: nothing's said about a hill while a turn
+// is within its own warning distance plus HILL_VOICE_TURN_CLEAR_M, or anything
+// else is being spoken.
+export const HILL_VOICE_MIN_M = 300 / 3.28084;
+export const HILL_VOICE_ON_M = 40;
+export const HILL_VOICE_LONG_M = 300;
+export const HILL_VOICE_TOP_M = 100;
+export const HILL_VOICE_TURN_CLEAR_M = 50;
 // The pace chevron beside the live speed: level within this much of the average
 // it's compared with (0.5 mph), and against the ride's own average only once
 // the ride has run this long, before which that average means little.

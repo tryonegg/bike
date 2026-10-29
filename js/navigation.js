@@ -496,6 +496,7 @@ export function syncToggles() {
 	// The voice picker matters once anything's spoken, and needs speech to pick from.
 	const speaking = state.prefs.navRouteVoice || (state.prefs.backToStart === "route" && state.prefs.navHomeVoice);
 	for (const block of el.voiceSettings) block.hidden = !speechSupported || !speaking;
+	el.hillVoiceRow.hidden = !speechSupported || !speaking;
 
 	// Option values are meters, fixed; only the displayed label follows the unit.
 	// Each card's subtitle counts the settings it shows, nested ones aside.

@@ -6,6 +6,8 @@
  * screen, colored by grade as the planner's Grades overlay colors roads
  * (grade-map.js), with how steep it is, how far off, and how long.
  *
+ * Climbs found ahead are passed on to be spoken (directions.js' `speakHills`).
+ *
  * Without a line to follow there's no knowing which way the rider will go,
  * so nothing's shown; the grade chip (grade.js) still gives the grade
  * underfoot.
@@ -19,6 +21,8 @@ import {
 	GRADE_AHEAD_REFRESH_M,
 	GRADE_SHOW,
 	GRADE_MODERATE,
+	GRADE_STEEP,
+	HILL_VOICE_MIN_M,
 	ROUTE_OFF_ROUTE_M,
 } from "./constants.js";
 import { state, el } from "./state.js";
@@ -26,7 +30,7 @@ import { haversineMeters } from "./format.js";
 import { heightAt } from "./terrain.js";
 import { createLineTracker } from "./route-follow.js";
 import { gradeColor } from "./grade-map.js";
-import { formatNavDistance } from "./directions.js";
+import { formatNavDistance, speakHills } from "./directions.js";
 
 // Each piece of the profile is colored by its grade over this many samples.
 const PIECE_STEPS = 2;
@@ -67,7 +71,8 @@ export async function updateGradeAhead(session) {
 	const request = ++latest;
 	const profile = await profileAhead(ahead.coords, point);
 	if (request !== latest) return;
-	render(profile);
+	render(profile?.heights ?? null);
+	if (profile) speakHills({ line: ahead.source === "home" ? "home" : "route", along: profile.along, climb: climbAhead(profile) });
 }
 
 /** Hides the strip, as when the ride pauses or ends, or there's nothing being followed. */
@@ -101,8 +106,9 @@ function lineAhead(session) {
  * The terrain heights every GRADE_AHEAD_STEP_M along `coords` from the
  * rider on, for GRADE_AHEAD_M or to the line's end.
  *
- * @returns {Promise<Array<number>|null>} Null when the rider's off the line,
- *   it's too short to say, or a terrain tile can't be had.
+ * @returns {Promise<{heights: Array<number>, along: number}|null>} `along`
+ *   is how far along the line the rider is; null when they're off it, it's
+ *   too short to say, or a terrain tile can't be had.
  */
 async function profileAhead(coords, point) {
 	if (!trackers.has(coords)) trackers.set(coords, createLineTracker(coords));
@@ -126,10 +132,33 @@ async function profileAhead(coords, point) {
 	if (heights.includes(null)) return null;
 	// Each height averaged with its neighbours, which irons out the meter or so
 	// of roughness in the terrain data itself.
-	return heights.map((_, i) => {
+	const smoothed = heights.map((_, i) => {
 		const near = heights.slice(Math.max(0, i - 1), i + 2);
 		return near.reduce((sum, height) => sum + height, 0) / near.length;
 	});
+	return { heights: smoothed, along };
+}
+
+/**
+ * The first climb ahead worth speaking of, HILL_VOICE_MIN_M or longer, in
+ * meters along the line: where it starts and ends, whether its top is in
+ * what's measured (or it runs on past it), how much it climbs, and whether
+ * it's steep.
+ *
+ * @returns {{start: number, end: number, topKnown: boolean, gain: number, steep: boolean}|null}
+ */
+function climbAhead({ heights, along }) {
+	const pieces = piecesOf(heights);
+	const climb = nextSlope(pieces, true);
+	if (!climb || climb.to - climb.from < HILL_VOICE_MIN_M) return null;
+	const heightAt = (meters) => heights[Math.round(meters / GRADE_AHEAD_STEP_M)];
+	return {
+		start: along + climb.from,
+		end: along + climb.to,
+		topKnown: climb.to < pieces.at(-1).to,
+		gain: heightAt(climb.to) - heightAt(climb.from),
+		steep: climb.grade >= GRADE_STEEP,
+	};
 }
 
 /**
@@ -153,11 +182,12 @@ function piecesOf(heights) {
  * way by GRADE_SHOW or more, at least GRADE_AHEAD_MIN_RUN_M long and
  * averaging GRADE_MODERATE, starting within GRADE_AHEAD_SHOW_M.
  *
+ * @param {boolean} [climbsOnly] - Passes over descents.
  * @returns {{from: number, to: number, grade: number}|null}
  */
-function nextSlope(pieces) {
+function nextSlope(pieces, climbsOnly = false) {
 	for (let i = 0; i < pieces.length && pieces[i].from <= GRADE_AHEAD_SHOW_M; i++) {
-		if (Math.abs(pieces[i].grade) < GRADE_MODERATE) continue;
+		if ((climbsOnly ? pieces[i].grade : Math.abs(pieces[i].grade)) < GRADE_MODERATE) continue;
 		const sign = Math.sign(pieces[i].grade);
 		let j = i;
 		while (j + 1 < pieces.length && pieces[j + 1].grade * sign >= GRADE_SHOW) j++;

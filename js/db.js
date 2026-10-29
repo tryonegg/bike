@@ -229,6 +229,7 @@ export async function loadPrefs() {
 	state.prefs.navRouteVoice = pref("navRouteVoice", false) === true;
 	state.prefs.navHomeVisual = pref("navHomeVisual", false) === true;
 	state.prefs.navHomeVoice = pref("navHomeVoice", false) === true;
+	state.prefs.navHillVoice = pref("navHillVoice", true) !== false;
 	const voiceURI = pref("voiceURI", "");
 	state.prefs.voiceURI = typeof voiceURI === "string" ? voiceURI : "";
 	const voiceVolume = pref("voiceVolume", 1);
