@@ -132,8 +132,8 @@ export function renderElevationChart(session) {
  * @param {Array<{distance: number, elevation: number}>} points - Meters.
  * @param {string} color - The line colour, e.g. "#6d4ad8".
  * @param {string} message - Shown when there are no points.
- * @returns {{distanceAt: (x: number) => number, xAt: (distance: number) => number}|null}
- *   Converts between CSS pixels across the canvas and meters along the
+ * @returns {{distanceAt: (x: number) => number, xAt: (distance: number) => number, yAt: (elevation: number) => number, width: number}|null}
+ *   Converts between CSS pixels on the canvas and meters along (and up) the
  *   route, for the caller's own pointer handling; null when nothing's drawn.
  */
 export function renderProfileChart(canvas, points, color, message) {
@@ -191,6 +191,8 @@ export function renderProfileChart(canvas, points, color, message) {
 	return {
 		distanceAt: (x) => Math.max(0, Math.min(1, x / width)) * totalDistance,
 		xAt,
+		yAt,
+		width,
 	};
 }
 

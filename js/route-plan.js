@@ -1417,8 +1417,8 @@ function renderProfile(route) {
 
 /**
  * Follows a finger (or cursor) along the planner's chart: a dot on the map
- * at that distance along the route, and a readout of the distance and
- * height there over the chart.
+ * at that distance along the route, and over the chart the same guide line,
+ * dot and readout of height and distance as the post-ride chart.
  */
 function handleChartPointer(event) {
 	const route = state.editingRoute;
@@ -1432,10 +1432,19 @@ function handleChartPointer(event) {
 	while (sample + 1 < profile.distances.length && profile.distances[sample + 1] <= distance) sample++;
 	if (sample + 1 < profile.distances.length && profile.distances[sample + 1] - distance < distance - profile.distances[sample]) sample++;
 
+	const x = chartGeometry.xAt(distance);
+	el.planChartCursor.style.left = `${x}px`;
+	el.planChartCursor.style.setProperty("--dot-y", `${chartGeometry.yAt(profile.heights[sample])}px`);
+	el.planChartCursor.hidden = false;
+
 	const unit = state.prefs.unit;
-	el.planChartReadout.textContent = `${formatDistance(distance, unit)} ${distanceUnitLabel(unit)} · ${formatElevation(profile.heights[sample], unit)}`;
-	el.planChartReadout.style.left = `${Math.min(Math.max(chartGeometry.xAt(distance), 50), rect.width - 50)}px`;
-	el.planChartReadout.hidden = false;
+	const readout = el.planChartReadout;
+	readout.innerHTML =
+		`<strong>${formatElevation(profile.heights[sample], unit)}</strong>` +
+		`<span>${formatDistance(distance, unit)} ${distanceUnitLabel(unit)}</span>`;
+	readout.hidden = false;
+	const half = readout.offsetWidth / 2;
+	readout.style.left = `${Math.min(Math.max(x, half), chartGeometry.width - half)}px`;
 
 	const lngLat = pointAlong(route.coords, distance);
 	if (!chartDot) {
@@ -1447,6 +1456,7 @@ function handleChartPointer(event) {
 }
 
 function clearChartPointer() {
+	el.planChartCursor.hidden = true;
 	el.planChartReadout.hidden = true;
 	chartDot?.remove();
 }

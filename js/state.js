@@ -217,6 +217,7 @@ export const el = {
 	planClimb: document.getElementById("planClimb"),
 	planDescent: document.getElementById("planDescent"),
 	planChart: document.getElementById("planChart"),
+	planChartCursor: document.getElementById("planChartCursor"),
 	planChartReadout: document.getElementById("planChartReadout"),
 	planBottomPanel: document.getElementById("planBottomPanel"),
 	planStatus: document.getElementById("planStatus"),

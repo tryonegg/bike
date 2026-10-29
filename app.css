@@ -2136,21 +2136,6 @@ button {
   touch-action: none;
 }
 
-/* The distance and height under the finger, pinned to the chart's top edge. */
-.plan-chart-readout {
-  position: absolute;
-  top: -2px;
-  transform: translateX(-50%);
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--text);
-  color: var(--bg);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
 /* A point being dragged out of the planned line, before it's placed. */
 .plan-waypoint-new span {
   background: #fff;

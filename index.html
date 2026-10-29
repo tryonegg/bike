@@ -288,7 +288,9 @@
             </dl>
             <div class="plan-chart-wrap">
               <canvas id="planChart" role="img" aria-label="Elevation along the planned route"></canvas>
-              <span id="planChartReadout" class="plan-chart-readout" hidden></span>
+              <!-- The point under the cursor or finger, as on the post-ride chart. -->
+              <span id="planChartCursor" class="chart-cursor" aria-hidden="true" hidden><i></i></span>
+              <div id="planChartReadout" class="chart-readout" aria-live="polite" hidden></div>
             </div>
           </div>
           <p id="planStatus" class="setting-note plan-status" aria-live="polite"></p>
