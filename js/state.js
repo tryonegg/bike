@@ -51,6 +51,8 @@ export const state = {
 		voiceURI: "",
 		voiceVolume: 1,
 		ridesView: "list",
+		// How the post-ride charts draw: "smooth" or "full".
+		chartDetail: "smooth",
 		// Which activity the home screen's month and week totals count, or "all".
 		statsActivity: "all",
 		// What the calendar's top rule colours by: "distance", "time" or "pace".
@@ -377,6 +379,7 @@ export const el = {
 	postGainUnit: document.getElementById("postGainUnit"),
 	postDrop: document.getElementById("postDrop"),
 	postDropUnit: document.getElementById("postDropUnit"),
+	chartDetailToggle: document.getElementById("chartDetailToggle"),
 	elevationChart: document.getElementById("elevationChart"),
 	chartCursor: document.getElementById("chartCursor"),
 	chartReadout: document.getElementById("chartReadout"),

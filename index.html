@@ -375,6 +375,13 @@
 
       <div id="postMap" class="map post-map"></div>
 
+      <div class="chart-detail-row">
+        <div class="toggle-pill" id="chartDetailToggle" role="group" aria-label="Chart detail">
+          <button data-chart-detail="smooth" class="toggle-option">Smooth</button>
+          <button data-chart-detail="full" class="toggle-option">Full Detail</button>
+        </div>
+      </div>
+
       <section class="detail-section chart-section">
         <div class="section-head">
           <h3 class="label">Elevation</h3>
@@ -403,7 +410,7 @@
           </div>
         </div>
         <div class="chart-wrap">
-          <canvas id="speedChart" aria-label="Speed over moving time, smoothed" role="img"></canvas>
+          <canvas id="speedChart" aria-label="Speed over moving time" role="img"></canvas>
           <span id="speedChartCursor" class="chart-cursor" aria-hidden="true" hidden><i></i></span>
           <div id="speedChartReadout" class="chart-readout" aria-live="polite" hidden></div>
         </div>

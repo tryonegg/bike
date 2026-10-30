@@ -94,6 +94,15 @@ export function wireEvents() {
 		await renderPastRides();
 	});
 
+	el.chartDetailToggle.addEventListener("click", async (event) => {
+		const btn = event.target.closest("button[data-chart-detail]");
+		if (!btn) return;
+		state.prefs.chartDetail = btn.dataset.chartDetail;
+		await setPref("chartDetail", state.prefs.chartDetail);
+		syncToggles();
+		if (state.currentPostSession) renderRideCharts(state.currentPostSession);
+	});
+
 	el.calPrevBtn.addEventListener("click", () => shiftCalendarMonth(-1));
 	el.calNextBtn.addEventListener("click", () => shiftCalendarMonth(1));
 
@@ -471,6 +480,9 @@ export function syncToggles() {
 
 	// Clipping the warm-up only changes the accuracy overlay.
 	el.clipWarmupRow.hidden = !state.prefs.debugGpsAccuracy;
+
+	const detailButtons = el.chartDetailToggle.querySelectorAll("button");
+	detailButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.chartDetail === state.prefs.chartDetail));
 
 	const viewButtons = el.ridesViewToggle.querySelectorAll("button");
 	viewButtons.forEach((btn) => {

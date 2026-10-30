@@ -236,6 +236,7 @@ export async function loadPrefs() {
 	state.prefs.voiceVolume = Number.isFinite(voiceVolume) && voiceVolume >= 0 && voiceVolume <= 1 ? voiceVolume : 1;
 	await migratePlannedRoute(pref("plannedRoute", null));
 	state.prefs.ridesView = pref("ridesView", "list");
+	state.prefs.chartDetail = pref("chartDetail", "smooth");
 	const statsActivity = pref("statsActivity", "all");
 	state.prefs.statsActivity = statsActivity === "all" || ACTIVITIES[statsActivity] ? statsActivity : "all";
 	const calendarColor = pref("calendarColor", "distance");

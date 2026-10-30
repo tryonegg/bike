@@ -14,10 +14,12 @@ import { speedUnitLabel, distanceUnitLabel } from "./map-visuals.js";
 import { speedBand, speedBandColor } from "./colors.js";
 import { rideAvgSpeed } from "./history-view.js";
 
-// GPS speed jumps around from fix to fix, so the speed chart draws a rolling
-// average: a 240th of the ride's moving time, between these bounds.
-const SPEED_SMOOTHING_MIN_MS = 5000;
-const SPEED_SMOOTHING_MAX_MS = 60000;
+// Smooth mode draws both charts as a rolling average over this share of their
+// X axis, so a long ride's line stays readable at phone width, and never over
+// less than these spans, so a short ride isn't flattened by GPS noise alone.
+const SMOOTHING_AXIS_SHARE = 1 / 80;
+const SMOOTHING_MIN_METERS = 100;
+const SMOOTHING_MIN_MS = 10000;
 
 /**
  * Draws both post-ride charts for a session.
@@ -80,10 +82,16 @@ function renderElevationChart(session) {
 	const chartHeight = cssHeight - padding.top - padding.bottom;
 	const displayUnit = state.prefs.unit;
 	const totalDistance = Math.max(points[points.length - 1].distance, 1);
+	// Coloured against the raw top speed, so a stretch matches the route line.
+	const maxSpeed = Math.max(maxOf(points, (point) => point.speed), 0.0001);
+
+	if (state.prefs.chartDetail === "smooth") {
+		const windowMeters = Math.max(SMOOTHING_MIN_METERS, totalDistance * SMOOTHING_AXIS_SHARE);
+		smoothPoints(points, (point) => point.distance, windowMeters, ["elevation", "speed"]);
+	}
 
 	const minElevation = minOf(points, (point) => point.elevation);
 	const maxElevation = maxOf(points, (point) => point.elevation);
-	const maxSpeed = Math.max(maxOf(points, (point) => point.speed), 0.0001);
 
 	const xFor = (distance) => padding.left + (distance / totalDistance) * chartWidth;
 	const yFor = (elevation) => {
@@ -121,8 +129,8 @@ function renderElevationChart(session) {
 /**
  * Draws the speed-vs-moving-time chart for a session onto `el.speedChart`,
  * or an empty-state message when the ride has no usable speeds or times. The
- * line is smoothed, from zero up to its own fastest stretch, with the ride's
- * average dashed across it. Time spent paused isn't on the axis, so a merged
+ * line runs from zero up to its own fastest stretch, with the ride's average
+ * dashed across it. Time spent paused isn't on the axis, so a merged
  * ride's long break leaves no flat gap, while a stop without a pause still
  * shows as a dip.
  *
@@ -160,17 +168,23 @@ function renderSpeedChart(session) {
 	const chartHeight = cssHeight - padding.top - padding.bottom;
 	const unit = state.prefs.unit;
 	const totalTime = points[points.length - 1].time;
-	const topSpeed = maxOf(points, (point) => point.smoothed);
 	// Coloured against the raw top speed, so a stretch matches the route line.
 	const maxSpeed = Math.max(maxOf(points, (point) => point.speed), 0.0001);
 
+	if (state.prefs.chartDetail === "smooth") {
+		const windowMs = Math.max(SMOOTHING_MIN_MS, totalTime * SMOOTHING_AXIS_SHARE);
+		smoothPoints(points, (point) => point.time, windowMs, ["speed"]);
+	}
+
+	const topSpeed = maxOf(points, (point) => point.speed);
+
 	const pointX = (point) => (point.time / totalTime) * cssWidth;
 	const yForSpeed = (speed) => padding.top + chartHeight - (speed / topSpeed) * chartHeight;
-	const pointY = (point) => yForSpeed(point.smoothed);
+	const pointY = (point) => yForSpeed(point.speed);
 
 	drawChartBackground(ctx, cssWidth, cssHeight, padding);
 	drawFadedFill(ctx, points, pointX, pointY, padding.top, cssHeight - padding.bottom);
-	drawBandedLine(ctx, points, pointX, pointY, maxSpeed, (point) => point.smoothed);
+	drawBandedLine(ctx, points, pointX, pointY, maxSpeed);
 
 	const averageY = Math.round(yForSpeed(rideAvgSpeed(session))) + 0.5;
 	ctx.save();
@@ -197,7 +211,7 @@ function renderSpeedChart(session) {
 		cursor: el.speedChartCursor,
 		readout: el.speedChartReadout,
 		readoutHtml: (point, displayUnit) =>
-			`<strong>${formatSpeed(point.smoothed, displayUnit)} ${speedUnitLabel(displayUnit)}</strong>` +
+			`<strong>${formatSpeed(point.speed, displayUnit)} ${speedUnitLabel(displayUnit)}</strong>` +
 			`<span>${formatDuration(point.time)}</span>` +
 			`<span>${formatDistance(summaryDistance(session, point, points[points.length - 1].distance), displayUnit)} ${distanceUnitLabel(displayUnit)}</span>`,
 	});
@@ -235,10 +249,8 @@ function drawFadedFill(ctx, points, pointX, pointY, top, floor) {
  * @param {(point: Object) => number} pointX
  * @param {(point: Object) => number} pointY
  * @param {number} maxSpeed - The speed at the top of the color scale.
- * @param {(point: Object) => number} [pointSpeed] - The speed that picks a
- *   point's color.
  */
-function drawBandedLine(ctx, points, pointX, pointY, maxSpeed, pointSpeed = (point) => point.speed) {
+function drawBandedLine(ctx, points, pointX, pointY, maxSpeed) {
 	ctx.lineWidth = 2.5;
 	ctx.lineCap = "round";
 	// Batched paths have joins where per-segment paths had none, and the canvas
@@ -250,7 +262,7 @@ function drawBandedLine(ctx, points, pointX, pointY, maxSpeed, pointSpeed = (poi
 	for (let index = 1; index < points.length; index += 1) {
 		const previous = points[index - 1];
 		const current = points[index];
-		const midSpeed = (pointSpeed(previous) + pointSpeed(current)) / 2;
+		const midSpeed = (previous.speed + current.speed) / 2;
 		const band = speedBand(midSpeed, maxSpeed);
 
 		if (band !== currentBand) {
@@ -592,11 +604,10 @@ function buildChartPoints(session) {
 
 /**
  * Converts a session's raw GPS points into the speed chart's points: moving
- * time so far, cumulative distance, and speed both raw and as a rolling
- * average over the time around it.
+ * time so far, cumulative distance, and speed.
  *
  * @param {Object} session
- * @returns {Array<{time: number, distance: number, speed: number, smoothed: number}>|null}
+ * @returns {Array<{time: number, distance: number, speed: number}>|null}
  *   Null when there's nothing to draw: no moving time, or no speed readings.
  */
 function buildSpeedPoints(session) {
@@ -613,22 +624,39 @@ function buildSpeedPoints(session) {
 			if (Number.isFinite(span)) time += span;
 			distance += haversineMeters(previous.lat, previous.lng, point.lat, point.lng);
 		}
-		return { time, distance, speed: Number.isFinite(point.speed) ? point.speed : 0, smoothed: 0 };
+		return { time, distance, speed: Number.isFinite(point.speed) ? point.speed : 0 };
 	});
 
 	const totalTime = points[points.length - 1].time;
 	if (totalTime <= 0 || maxOf(points, (point) => point.speed) <= 0) return null;
-
-	const windowMs = Math.min(SPEED_SMOOTHING_MAX_MS, Math.max(SPEED_SMOOTHING_MIN_MS, totalTime / 240));
-	let start = 0;
-	let end = 0;
-	let sum = 0;
-	for (const point of points) {
-		while (end < points.length && points[end].time <= point.time + windowMs / 2) sum += points[end++].speed;
-		while (points[start].time < point.time - windowMs / 2) sum -= points[start++].speed;
-		point.smoothed = Math.max(0, sum / (end - start));
-	}
 	return points;
+}
+
+/**
+ * Replaces each of a point's named values with its rolling average over the
+ * window centred on that point, which is narrower at the ride's two ends.
+ *
+ * @param {Array<Object>} points - Modified in place.
+ * @param {(point: Object) => number} axisValue - A point's place along the X
+ *   axis; must not decrease from one point to the next.
+ * @param {number} windowSize - In the axis's own units.
+ * @param {Array<string>} keys - The values to smooth.
+ */
+function smoothPoints(points, axisValue, windowSize, keys) {
+	for (const key of keys) {
+		// Running totals, so a window of all zeros still averages to exactly zero.
+		const totals = [0];
+		for (const point of points) totals.push(totals[totals.length - 1] + point[key]);
+
+		let start = 0;
+		let end = 0;
+		points.forEach((point, index) => {
+			const axis = axisValue(point);
+			while (end < points.length && axisValue(points[end]) <= axis + windowSize / 2) end += 1;
+			while (axisValue(points[start]) < axis - windowSize / 2) start += 1;
+			point[key] = (totals[end] - totals[start]) / (end - start);
+		});
+	}
 }
 
 /**

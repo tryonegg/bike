@@ -2999,6 +2999,16 @@ button {
   align-items: baseline;
 }
 
+.chart-detail-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 22px 0;
+}
+
+.chart-detail-row + .chart-section {
+  padding-top: 12px;
+}
+
 .chart-legend {
   display: flex;
   align-items: center;
