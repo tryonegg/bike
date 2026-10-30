@@ -21,8 +21,8 @@ import { resetRouteHome } from "./route-home.js";
 import { updateDirections, wireDirections } from "./directions.js";
 import { unlockVoice, voiceChoices, onVoicesChanged, testVoice, speechSupported } from "./voice.js";
 import { openPlanner, openRoutes, wirePlanner } from "./route-plan.js";
-import { renderPostSummary, openPostSession } from "./post-session.js";
-import { renderElevationChart, clearChartHighlight } from "./chart.js";
+import { renderPostSummary, openPostSession, toggleSegmentRows } from "./post-session.js";
+import { renderRideCharts, clearChartHighlight } from "./chart.js";
 import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abortRideSetup } from "./ride-setup.js";
 import { exportAllData, importAllData, deleteAllRides, deleteCurrentRide } from "./data-io.js";
 import { mergeCurrentRide } from "./ride-merge.js";
@@ -56,7 +56,7 @@ export function wireEvents() {
 		refreshTopoLayers();
 		if (state.currentPostSession) {
 			renderPostSummary(state.currentPostSession);
-			renderElevationChart(state.currentPostSession);
+			renderRideCharts(state.currentPostSession);
 		}
 	});
 
@@ -165,6 +165,7 @@ export function wireEvents() {
 	el.recenterBtn.addEventListener("click", recenterLiveMap);
 
 	el.exportGpxBtn.addEventListener("click", exportCurrentGpx);
+	el.segmentsToggle.addEventListener("click", toggleSegmentRows);
 	el.mergeRideBtn.addEventListener("click", mergeCurrentRide);
 	el.deleteRideBtn.addEventListener("click", deleteCurrentRide);
 	el.backHomeBtn.addEventListener("click", leavePostSession);
@@ -200,9 +201,9 @@ export function wireEvents() {
 		el.installBanner.classList.add("hidden");
 	});
 
-	// Both maps watch their own containers; only the chart needs redrawing.
+	// Both maps watch their own containers; only the charts need redrawing.
 	window.addEventListener("resize", () => {
-		if (state.currentPostSession) renderElevationChart(state.currentPostSession);
+		if (state.currentPostSession) renderRideCharts(state.currentPostSession);
 	});
 
 	document.addEventListener("visibilitychange", async () => {
@@ -270,8 +271,8 @@ async function handleThemeClick(event) {
 	syncToggles();
 	rebuildMapStyles();
 	restartMapPreviews();
-	// The chart reads its colours from the theme when it draws.
-	if (state.currentPostSession) renderElevationChart(state.currentPostSession);
+	// The charts read their colours from the theme when they draw.
+	if (state.currentPostSession) renderRideCharts(state.currentPostSession);
 }
 
 /**

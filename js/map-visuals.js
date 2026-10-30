@@ -9,7 +9,7 @@ import { METERS_PER_MILE, METERS_PER_KM } from "./constants.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { applyLiveGuideStyle, styleGuideLabel, updateGuideLabel } from "./live-map.js";
-import { recalculateSegmentMarkers } from "./post-session.js";
+import { renderPostSegmentMarkers } from "./post-session.js";
 
 /**
  * The distance covered by one segment/mile-marker, in meters.
@@ -210,6 +210,37 @@ export function renderSegmentMarkers(layer, markers, markerSizeValue = state.pre
 }
 
 /**
+ * Adds only the distance-marker flags that fit at the map's current zoom, so
+ * a long ride doesn't bury its own route. Round numbers claim their space
+ * first (every 10th, then every 5th, then the rest), and any flag that would
+ * overlap one already placed is left out; zooming in spreads the route out
+ * and lets more through. Call again after the zoom changes.
+ *
+ * @param {maplibregl.Map} map
+ * @param {{add: Function}} layer
+ * @param {Array<{lat: number, lng: number, segmentNumber: number}>} markers
+ * @param {Array<{lat: number, lng: number}>} [reserved] - Points the flags
+ *   must keep clear of, such as the start and finish dots.
+ * @param {"small"|"medium"|"large"} [markerSizeValue]
+ */
+export function renderFittedSegmentMarkers(map, layer, markers, reserved = [], markerSizeValue = state.prefs.markerSize) {
+	// The flag's pill is narrower than the box around it, and that's what shows.
+	const [boxWidth, boxHeight] = getMarkerSizeConfig(markerSizeValue).iconSize;
+	const width = boxWidth * 0.85;
+	const height = boxHeight * 0.85;
+	const taken = reserved.map(({ lat, lng }) => map.project([lng, lat]));
+	const tier = ({ segmentNumber }) => (segmentNumber % 10 === 0 ? 0 : segmentNumber % 5 === 0 ? 1 : 2);
+	const byPriority = [...markers].sort((a, b) => tier(a) - tier(b) || a.segmentNumber - b.segmentNumber);
+
+	for (const marker of byPriority) {
+		const spot = map.project([marker.lng, marker.lat]);
+		if (taken.some((other) => Math.abs(other.x - spot.x) < width && Math.abs(other.y - spot.y) < height)) continue;
+		taken.push(spot);
+		addSegmentMarkerToLayer(layer, marker.lat, marker.lng, segmentDistanceLabel(marker.segmentNumber, state.prefs.unit), markerSizeValue);
+	}
+}
+
+/**
  * Re-applies the guide-line-contrast and marker-size prefs to whatever maps/
  * layers currently exist: the live map's guide line and label, the live
  * ride's distance markers, and the post-ride map's distance markers (which
@@ -233,11 +264,5 @@ export function applyMapVisualPrefs() {
 		renderSegmentMarkers(state.markerLayer, state.currentSession?.segmentMarkers || [], markerSize);
 	}
 
-	if (state.postMarkerLayer) {
-		state.postMarkerLayer.clearLayers();
-		if (state.currentPostSession) {
-			const segmentMarkers = recalculateSegmentMarkers(state.currentPostSession);
-			renderSegmentMarkers(state.postMarkerLayer, segmentMarkers, markerSize);
-		}
-	}
+	renderPostSegmentMarkers(markerSize);
 }

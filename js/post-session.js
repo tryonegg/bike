@@ -9,19 +9,26 @@
 import { ACCURACY_UNKNOWN_COLOR } from "./constants.js";
 import { state, el } from "./state.js";
 import { createVectorMap, createMarkerLayer, createPointMarker, addAccuracyExtremeMarkers } from "./live-map.js";
-import { findStableStartIndex, maxOf, minOf, haversineMeters, formatDistance, formatSpeed, formatElevationValue, formatDuration } from "./format.js";
+import { findStableStartIndex, maxOf, minOf, haversineMeters, movingMsBetween, formatDistance, formatSpeed, formatElevationValue, formatDuration } from "./format.js";
 import { speedBand, speedBandColor, accuracyBand, accuracyBandColor, paceColor } from "./colors.js";
-import { getSegmentLengthMeters, renderSegmentMarkers, distanceUnitLabel, speedUnitLabel, segmentLabel } from "./map-visuals.js";
+import { getSegmentLengthMeters, renderFittedSegmentMarkers, distanceUnitLabel, speedUnitLabel, segmentLabel } from "./map-visuals.js";
 import { getSessionById } from "./db.js";
 import { rideAvgSpeed, sessionTimeTitle } from "./history-view.js";
 import { showScreen } from "./navigation.js";
-import { renderElevationChart } from "./chart.js";
+import { renderRideCharts } from "./chart.js";
+
+// Past this many rows the segment table starts as just its fastest and slowest.
+const SEGMENT_ROWS_BEFORE_COLLAPSE = 12;
+
+// Whether the reader has opened the long table, for the ride on screen.
+let segmentsExpanded = false;
 
 /**
  * Creates (replacing any existing one) the post-ride MapLibre map: the
  * route line (colored by speed band, or by GPS accuracy when the debug
  * overlay is on), start/finish markers, optional accuracy best/worst
- * markers, and recalculated distance-marker flags.
+ * markers, and recalculated distance-marker flags, which are placed afresh
+ * after each zoom so only the ones with room show.
  *
  * @param {Object} session - A saved ride with a `points` array.
  */
@@ -60,9 +67,26 @@ export function initPostMap(session) {
 	}
 	if (showAccuracy) addAccuracyExtremeMarkers(state.postMap, points, clipIndex);
 
-	// Recalculate segment markers based on current unit settings
-	const segmentMarkers = recalculateSegmentMarkers(session);
-	renderSegmentMarkers(state.postMarkerLayer, segmentMarkers);
+	renderPostSegmentMarkers();
+	state.postMap.on("zoomend", () => renderPostSegmentMarkers());
+	state.postMap.on("resize", () => renderPostSegmentMarkers());
+}
+
+/**
+ * Redraws the post-ride map's distance-marker flags for the ride on screen,
+ * recalculated for the current unit and fitted to the current zoom, keeping
+ * clear of the start and finish dots.
+ *
+ * @param {"small"|"medium"|"large"} [markerSizeValue]
+ */
+export function renderPostSegmentMarkers(markerSizeValue = state.prefs.markerSize) {
+	const session = state.currentPostSession;
+	if (!state.postMap || !state.postMarkerLayer) return;
+	state.postMarkerLayer.clearLayers();
+	const points = session?.points;
+	if (!points?.length) return;
+	const ends = [points[0], points[points.length - 1]];
+	renderFittedSegmentMarkers(state.postMap, state.postMarkerLayer, recalculateSegmentMarkers(session), ends, markerSizeValue);
 }
 
 // One feature per speed band, not one per point pair. A two-hour ride is
@@ -238,7 +262,10 @@ function buildAccuracyPointsData(points, clipIndex = 0) {
  * @param {Object} routeData - From `buildSpeedBandRoute` or `buildAccuracyBandRoute`.
  */
 function addPostRouteLayer(map, routeData) {
-	map.addSource("post-route", { type: "geojson", data: routeData });
+	// No simplification: speed noise cuts the route into runs a few meters long,
+	// and at a long ride's zoom the default tolerance drops each one as too small
+	// to draw, which leaves the line in pieces or missing altogether.
+	map.addSource("post-route", { type: "geojson", data: routeData, tolerance: 0 });
 	// A casing under the coloured line lifts it off busy tiles.
 	const dark = state.prefs.theme === "dark";
 	map.addLayer({
@@ -384,30 +411,6 @@ export function recalculateSegmentMarkers(session) {
 	return segmentMarkers;
 }
 
-// Wall-clock span between two point timestamps with any paused portion removed.
-// getElapsedMs() already defines the headline moving time this way, so segment
-// durations have to be measured the same way or the table will not sum to it.
-/**
- * Wall-clock span between two point timestamps with any paused portion
- * removed. `getElapsedMs()` in live-session.js already defines the headline
- * moving time this way, so segment durations have to be measured the same
- * way or the segment table wouldn't sum back up to it.
- *
- * @param {number} startMs
- * @param {number} endMs
- * @param {Array<{start: number, end?: number}>} pauses
- * @returns {number} Milliseconds.
- */
-function movingMsBetween(startMs, endMs, pauses) {
-	let pausedMs = 0;
-	for (const pause of pauses) {
-		const overlapStart = Math.max(startMs, pause.start);
-		const overlapEnd = Math.min(endMs, pause.end ?? endMs);
-		if (overlapEnd > overlapStart) pausedMs += overlapEnd - overlapStart;
-	}
-	return Math.max(0, endMs - startMs - pausedMs);
-}
-
 /**
  * Recomputes the segment table's rows (duration + average speed per
  * segment) from a saved ride's raw points, in the current display unit.
@@ -504,6 +507,7 @@ export async function openPostSession(sessionId, sessionData = null, mode = "pus
 	if (!session) return;
 
 	state.currentPostSession = session;
+	segmentsExpanded = false;
 	renderPostSummary(session);
 	showScreen("post");
 	if (mode === "replace") {
@@ -512,7 +516,7 @@ export async function openPostSession(sessionId, sessionData = null, mode = "pus
 		history.pushState({ screen: "post", sessionId: session.id }, "");
 	}
 	initPostMap(session);
-	renderElevationChart(session);
+	renderRideCharts(session);
 }
 
 /**
@@ -546,6 +550,9 @@ export function renderPostSummary(session) {
 
 	el.chartStartLabel.textContent = `0 ${distanceUnitLabel(unit)}`;
 	el.chartEndLabel.textContent = `${formatDistance(session.totalDistance || 0, unit)} ${distanceUnitLabel(unit)}`;
+	el.speedChartStartLabel.textContent = formatDuration(0);
+	el.speedChartEndLabel.textContent = formatDuration(session.movingTime || 0);
+	el.speedAvgLabel.textContent = `${formatSpeed(rideAvgSpeed(session), unit)} ${speedUnitLabel(unit)} avg`;
 
 	renderSegmentRows(recalculateSegments(session));
 }
@@ -553,7 +560,16 @@ export function renderPostSummary(session) {
 // Bar length is the segment's speed against the fastest one; its colour places
 // it between the ride's slowest and fastest segments.
 /**
- * Renders the segment table's rows. Each row's bar length is that segment's
+ * Flips the long segment table between its summary and every row.
+ */
+export function toggleSegmentRows() {
+	segmentsExpanded = !segmentsExpanded;
+	renderSegmentRows(recalculateSegments(state.currentPostSession));
+}
+
+/**
+ * Renders the segment table's rows, or on a long ride just its fastest and
+ * slowest full segments and a button for the rest. Each row's bar length is that segment's
  * speed against the fastest segment; its color places it between the ride's
  * slowest and fastest segments (the same red-to-green pace scale used
  * elsewhere in the app).
@@ -569,7 +585,14 @@ function renderSegmentRows(segments) {
 	const fastest = Math.max(...speeds, 0.0001);
 	const slowest = Math.min(...speeds);
 
-	for (const seg of segments) {
+	const collapsible = segments.length > SEGMENT_ROWS_BEFORE_COLLAPSE;
+	const collapsed = collapsible && !segmentsExpanded;
+	el.segmentsToggle.hidden = !collapsible;
+	el.segmentsToggle.textContent = segmentsExpanded ? "Show less" : `Show all ${segments.length} ${unit === "imperial" ? "miles" : "km"}`;
+
+	const rows = collapsed ? extremeSegments(segments) : segments.map((seg) => ({ seg }));
+
+	for (const { seg, note } of rows) {
 		const tr = document.createElement("tr");
 
 		const name = document.createElement("td");
@@ -577,6 +600,12 @@ function renderSegmentRows(segments) {
 		name.textContent = seg.partial
 			? `${formatDistance(seg.distance, unit)} ${distanceUnitLabel(unit)}`
 			: segmentLabel(seg.segmentNumber, unit);
+		if (note) {
+			const noteEl = document.createElement("small");
+			noteEl.className = "seg-note";
+			noteEl.textContent = note;
+			name.appendChild(noteEl);
+		}
 
 		const pace = document.createElement("td");
 		const track = document.createElement("div");
@@ -599,4 +628,21 @@ function renderSegmentRows(segments) {
 		tr.append(name, pace, time, speed);
 		el.segmentsBody.appendChild(tr);
 	}
+}
+
+/**
+ * The ride's fastest and slowest full segments, for the collapsed table. The
+ * trailing partial segment is left out: a short stretch isn't a fair match.
+ *
+ * @param {Array<Object>} segments - From `recalculateSegments`.
+ * @returns {Array<{seg: Object, note: string}>}
+ */
+function extremeSegments(segments) {
+	const full = segments.filter((seg) => !seg.partial);
+	const fastest = full.reduce((best, seg) => (seg.avgSpeed > best.avgSpeed ? seg : best));
+	const slowest = full.reduce((worst, seg) => (seg.avgSpeed < worst.avgSpeed ? seg : worst));
+	return [
+		{ seg: fastest, note: "Fastest" },
+		{ seg: slowest, note: "Slowest" },
+	];
 }

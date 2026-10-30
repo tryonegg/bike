@@ -3032,6 +3032,12 @@ button {
   background: #9aa39a;
 }
 
+/* The speed chart's average line, as drawn. */
+.swatch-dash {
+  width: 14px;
+  border-top: 2px dashed var(--muted);
+}
+
 .accuracy-legend {
   margin-top: 10px;
   flex-wrap: wrap;
@@ -3175,6 +3181,13 @@ button {
   color: var(--muted);
 }
 
+.seg-note {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 .seg-time {
   font-size: 14px;
   font-weight: 600;
@@ -3196,6 +3209,11 @@ button {
   display: block;
   height: 6px;
   border-radius: 3px;
+}
+
+.segments-toggle {
+  width: 100%;
+  margin-top: 14px;
 }
 
 .delete-wrap {

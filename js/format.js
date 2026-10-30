@@ -216,3 +216,27 @@ export function findStableStartIndex(points) {
 	}
 	return 0;
 }
+
+// Wall-clock span between two point timestamps with any paused portion removed.
+// getElapsedMs() already defines the headline moving time this way, so segment
+// durations have to be measured the same way or the table will not sum to it.
+/**
+ * Wall-clock span between two point timestamps with any paused portion
+ * removed. `getElapsedMs()` in live-session.js already defines the headline
+ * moving time this way, so segment durations have to be measured the same
+ * way or the segment table wouldn't sum back up to it.
+ *
+ * @param {number} startMs
+ * @param {number} endMs
+ * @param {Array<{start: number, end?: number}>} pauses
+ * @returns {number} Milliseconds.
+ */
+export function movingMsBetween(startMs, endMs, pauses) {
+	let pausedMs = 0;
+	for (const pause of pauses) {
+		const overlapStart = Math.max(startMs, pause.start);
+		const overlapEnd = Math.min(endMs, pause.end ?? endMs);
+		if (overlapEnd > overlapStart) pausedMs += overlapEnd - overlapStart;
+	}
+	return Math.max(0, endMs - startMs - pausedMs);
+}

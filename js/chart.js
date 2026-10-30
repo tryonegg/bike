@@ -1,16 +1,33 @@
 /**
- * Elevation charts. Mostly the post-ride one: drawing it onto a `<canvas>`
- * (elevation line colored by speed band, gridlines, min/max labels) and the
- * mouse/touch interaction that, as the cursor hovers or a finger slides
- * along the chart, marks that point on the chart and the post-ride map and
- * reads out its elevation, speed and distance. Also the route planner's
- * simpler profile (`renderProfileChart`), which shares the grid and labels.
+ * Ride charts. Mostly the post-ride pair: elevation over distance and speed
+ * over moving time, each drawn onto a `<canvas>` (line colored by speed band,
+ * gridlines, min/max labels), and the mouse/touch interaction that, as the
+ * cursor hovers or a finger slides along a chart, marks that point on the
+ * chart and the post-ride map and reads out its numbers. Also the route
+ * planner's simpler profile (`renderProfileChart`), which shares the grid and
+ * labels.
  */
 
 import { state, el } from "./state.js";
-import { minOf, maxOf, haversineMeters, formatElevation, formatSpeed, formatDistance } from "./format.js";
+import { minOf, maxOf, haversineMeters, movingMsBetween, formatElevation, formatSpeed, formatDistance, formatDuration } from "./format.js";
 import { speedUnitLabel, distanceUnitLabel } from "./map-visuals.js";
 import { speedBand, speedBandColor } from "./colors.js";
+import { rideAvgSpeed } from "./history-view.js";
+
+// GPS speed jumps around from fix to fix, so the speed chart draws a rolling
+// average: a 240th of the ride's moving time, between these bounds.
+const SPEED_SMOOTHING_MIN_MS = 5000;
+const SPEED_SMOOTHING_MAX_MS = 60000;
+
+/**
+ * Draws both post-ride charts for a session.
+ *
+ * @param {Object} session
+ */
+export function renderRideCharts(session) {
+	renderElevationChart(session);
+	renderSpeedChart(session);
+}
 
 /**
  * Draws the elevation-vs-distance chart for a session onto `el.elevationChart`,
@@ -20,7 +37,7 @@ import { speedBand, speedBandColor } from "./colors.js";
  *
  * @param {Object} session - A saved (or live) ride session with a `points` array.
  */
-export function renderElevationChart(session) {
+function renderElevationChart(session) {
 	const canvas = el.elevationChart;
 	if (!canvas) return;
 
@@ -74,21 +91,154 @@ export function renderElevationChart(session) {
 		return padding.top + chartHeight - ((elevation - minElevation) / (maxElevation - minElevation)) * chartHeight;
 	};
 
-	drawChartBackground(ctx, cssWidth, cssHeight, padding);
+	const pointX = (point) => xFor(point.distance);
+	const pointY = (point) => yFor(point.elevation);
 
-	// A soft fill under the line, fading to nothing at the floor.
-	const floor = cssHeight - padding.bottom;
-	const fill = ctx.createLinearGradient(0, padding.top, 0, floor);
+	drawChartBackground(ctx, cssWidth, cssHeight, padding);
+	drawFadedFill(ctx, points, pointX, pointY, padding.top, cssHeight - padding.bottom);
+	drawBandedLine(ctx, points, pointX, pointY, maxSpeed);
+	drawElevationLabels(ctx, cssHeight, padding, minElevation, maxElevation, displayUnit);
+
+	// Add event listeners for chart interaction
+	setupChartInteraction(canvas, {
+		session,
+		points,
+		padding,
+		cssWidth,
+		axisValue: (point) => point.distance,
+		axisEnd: totalDistance,
+		pointX,
+		pointY,
+		cursor: el.chartCursor,
+		readout: el.chartReadout,
+		readoutHtml: (point, unit) =>
+			`<strong>${formatElevation(point.elevation, unit)}</strong>` +
+			`<strong>${formatSpeed(point.speed, unit)} ${speedUnitLabel(unit)}</strong>` +
+			`<span>${formatDistance(summaryDistance(session, point, totalDistance), unit)} ${distanceUnitLabel(unit)}</span>`,
+	});
+}
+
+/**
+ * Draws the speed-vs-moving-time chart for a session onto `el.speedChart`,
+ * or an empty-state message when the ride has no usable speeds or times. The
+ * line is smoothed, from zero up to its own fastest stretch, with the ride's
+ * average dashed across it. Time spent paused isn't on the axis, so a merged
+ * ride's long break leaves no flat gap, while a stop without a pause still
+ * shows as a dip.
+ *
+ * @param {Object} session
+ */
+function renderSpeedChart(session) {
+	const canvas = el.speedChart;
+	if (!canvas) return;
+
+	const points = buildSpeedPoints(session);
+	if (!points) {
+		canvas.chartContext = null;
+		drawEmptyChart(canvas, "No speed data available");
+		return;
+	}
+
+	const ctx = canvas.getContext("2d");
+	if (!ctx) return;
+
+	const rect = canvas.getBoundingClientRect();
+	const dpr = window.devicePixelRatio || 1;
+	const width = Math.max(1, Math.floor(rect.width * dpr));
+	const height = Math.max(1, Math.floor(rect.height * dpr));
+	if (canvas.width !== width || canvas.height !== height) {
+		canvas.width = width;
+		canvas.height = height;
+	}
+	ctx.setTransform(1, 0, 0, 1, 0, 0);
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.scale(dpr, dpr);
+
+	const cssWidth = rect.width;
+	const cssHeight = rect.height;
+	const padding = { top: 4, right: 0, bottom: 4, left: 0 };
+	const chartHeight = cssHeight - padding.top - padding.bottom;
+	const unit = state.prefs.unit;
+	const totalTime = points[points.length - 1].time;
+	const topSpeed = maxOf(points, (point) => point.smoothed);
+	// Coloured against the raw top speed, so a stretch matches the route line.
+	const maxSpeed = Math.max(maxOf(points, (point) => point.speed), 0.0001);
+
+	const pointX = (point) => (point.time / totalTime) * cssWidth;
+	const yForSpeed = (speed) => padding.top + chartHeight - (speed / topSpeed) * chartHeight;
+	const pointY = (point) => yForSpeed(point.smoothed);
+
+	drawChartBackground(ctx, cssWidth, cssHeight, padding);
+	drawFadedFill(ctx, points, pointX, pointY, padding.top, cssHeight - padding.bottom);
+	drawBandedLine(ctx, points, pointX, pointY, maxSpeed, (point) => point.smoothed);
+
+	const averageY = Math.round(yForSpeed(rideAvgSpeed(session))) + 0.5;
+	ctx.save();
+	ctx.lineWidth = 1;
+	ctx.setLineDash([5, 5]);
+	ctx.strokeStyle = themeColor("--muted", "#6b7472");
+	ctx.beginPath();
+	ctx.moveTo(0, averageY);
+	ctx.lineTo(cssWidth, averageY);
+	ctx.stroke();
+	ctx.restore();
+
+	drawRangeLabels(ctx, cssHeight, padding, `${formatSpeed(topSpeed, unit)} ${speedUnitLabel(unit)}`, "0");
+
+	setupChartInteraction(canvas, {
+		session,
+		points,
+		padding,
+		cssWidth,
+		axisValue: (point) => point.time,
+		axisEnd: totalTime,
+		pointX,
+		pointY,
+		cursor: el.speedChartCursor,
+		readout: el.speedChartReadout,
+		readoutHtml: (point, displayUnit) =>
+			`<strong>${formatSpeed(point.smoothed, displayUnit)} ${speedUnitLabel(displayUnit)}</strong>` +
+			`<span>${formatDuration(point.time)}</span>` +
+			`<span>${formatDistance(summaryDistance(session, point, points[points.length - 1].distance), displayUnit)} ${distanceUnitLabel(displayUnit)}</span>`,
+	});
+}
+
+/**
+ * A soft fill under a chart's line, fading to nothing at the floor.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<Object>} points
+ * @param {(point: Object) => number} pointX
+ * @param {(point: Object) => number} pointY
+ * @param {number} top - CSS pixels down to the chart's top.
+ * @param {number} floor - CSS pixels down to the chart's floor.
+ */
+function drawFadedFill(ctx, points, pointX, pointY, top, floor) {
+	const fill = ctx.createLinearGradient(0, top, 0, floor);
 	fill.addColorStop(0, "rgba(143, 201, 58, 0.22)");
 	fill.addColorStop(1, "rgba(143, 201, 58, 0)");
 	ctx.beginPath();
-	ctx.moveTo(xFor(points[0].distance), floor);
-	for (const point of points) ctx.lineTo(xFor(point.distance), yFor(point.elevation));
-	ctx.lineTo(xFor(points[points.length - 1].distance), floor);
+	ctx.moveTo(pointX(points[0]), floor);
+	for (const point of points) ctx.lineTo(pointX(point), pointY(point));
+	ctx.lineTo(pointX(points[points.length - 1]), floor);
 	ctx.closePath();
 	ctx.fillStyle = fill;
 	ctx.fill();
+}
 
+/**
+ * Strokes a chart's line in speed-band colors: one path per contiguous run
+ * of the same band, instead of one path per point pair.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<Object>} points
+ * @param {(point: Object) => number} pointX
+ * @param {(point: Object) => number} pointY
+ * @param {number} maxSpeed - The speed at the top of the color scale.
+ * @param {(point: Object) => number} [pointSpeed] - The speed that picks a
+ *   point's color.
+ */
+function drawBandedLine(ctx, points, pointX, pointY, maxSpeed, pointSpeed = (point) => point.speed) {
 	ctx.lineWidth = 2.5;
 	ctx.lineCap = "round";
 	// Batched paths have joins where per-segment paths had none, and the canvas
@@ -96,31 +246,39 @@ export function renderElevationChart(session) {
 	// back on itself. Round joins match how the per-segment version looked.
 	ctx.lineJoin = "round";
 
-	// Stroke one path per contiguous run of the same speed band instead of one
-	// path per point pair.
 	let currentBand = -1;
 	for (let index = 1; index < points.length; index += 1) {
 		const previous = points[index - 1];
 		const current = points[index];
-		const midSpeed = (previous.speed + current.speed) / 2;
+		const midSpeed = (pointSpeed(previous) + pointSpeed(current)) / 2;
 		const band = speedBand(midSpeed, maxSpeed);
 
 		if (band !== currentBand) {
 			if (currentBand !== -1) ctx.stroke();
 			ctx.beginPath();
 			ctx.strokeStyle = speedBandColor(band);
-			ctx.moveTo(xFor(previous.distance), yFor(previous.elevation));
+			ctx.moveTo(pointX(previous), pointY(previous));
 			currentBand = band;
 		}
 
-		ctx.lineTo(xFor(current.distance), yFor(current.elevation));
+		ctx.lineTo(pointX(current), pointY(current));
 	}
 	if (currentBand !== -1) ctx.stroke();
+}
 
-	drawElevationLabels(ctx, cssHeight, padding, minElevation, maxElevation, displayUnit);
-
-	// Add event listeners for chart interaction
-	setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor);
+/**
+ * A chart point's distance as the ride's summary counts it, which leaves out
+ * GPS jitter and pause gaps that the charts' own, point-to-point distance
+ * includes.
+ *
+ * @param {Object} session
+ * @param {{distance: number}} point
+ * @param {number} chartDistance - The chart's own total distance.
+ * @returns {number} Meters.
+ */
+function summaryDistance(session, point, chartDistance) {
+	const recorded = session.totalDistance;
+	return recorded > 0 ? (point.distance / chartDistance) * recorded : point.distance;
 }
 
 /**
@@ -197,27 +355,31 @@ export function renderProfileChart(canvas, points, color, message) {
 }
 
 /**
- * Wires (or re-wires) the chart canvas's mouse/touch listeners and stashes
- * the current render's geometry on the canvas element so the shared handlers
+ * Wires (or re-wires) a chart canvas's mouse/touch listeners and stashes the
+ * current render's geometry on the canvas element so the shared handlers
  * below can map a pointer position back to a chart point without needing
  * their own closures per render. Old listeners are removed first so redrawing
  * the chart (e.g. after a unit change) doesn't stack up duplicate handlers.
  *
  * @param {HTMLCanvasElement} canvas
- * @param {Object} session
- * @param {Array<{distance: number, elevation: number, speed: number}>} points
- * @param {{top: number, right: number, bottom: number, left: number}} padding
- * @param {number} cssWidth
- * @param {number} cssHeight
- * @param {number} minElevation
- * @param {number} maxElevation
- * @param {number} totalDistance
- * @param {(distance: number) => number} xFor - CSS pixels across the
- *   chart for a distance, to place the readout.
- * @param {(elevation: number) => number} yFor - CSS pixels down the chart
- *   for an elevation, to place the dot on the line.
+ * @param {Object} context
+ * @param {Object} context.session
+ * @param {Array<Object>} context.points - One per `session.points` entry, in
+ *   the same order, so an index marks the same spot on the map.
+ * @param {{top: number, right: number, bottom: number, left: number}} context.padding
+ * @param {number} context.cssWidth
+ * @param {(point: Object) => number} context.axisValue - A point's place along
+ *   the chart's X axis, in that axis's own units.
+ * @param {number} context.axisEnd - The X axis's full length, in those units.
+ * @param {(point: Object) => number} context.pointX - CSS pixels across the
+ *   chart for a point, to place the readout.
+ * @param {(point: Object) => number} context.pointY - CSS pixels down the
+ *   chart for a point, to place the dot on the line.
+ * @param {HTMLElement} context.cursor - This chart's guide line and dot.
+ * @param {HTMLElement} context.readout - This chart's readout.
+ * @param {(point: Object, unit: string) => string} context.readoutHtml
  */
-function setupChartInteraction(canvas, session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor) {
+function setupChartInteraction(canvas, context) {
 	// Remove old listeners if any
 	canvas.removeEventListener("mousemove", handleChartMouseMove);
 	canvas.removeEventListener("mouseleave", handleChartMouseLeave);
@@ -228,7 +390,7 @@ function setupChartInteraction(canvas, session, points, padding, cssWidth, cssHe
 	canvas.removeEventListener("touchend", handleChartTouchEnd);
 
 	// Store context for event handlers
-	canvas.chartContext = { session, points, padding, cssWidth, cssHeight, minElevation, maxElevation, totalDistance, xFor, yFor };
+	canvas.chartContext = context;
 
 	canvas.addEventListener("mousemove", handleChartMouseMove);
 	canvas.addEventListener("mouseleave", handleChartMouseLeave);
@@ -281,7 +443,7 @@ function handleChartTouchEnd() {
 }
 
 /**
- * Maps a pointer's X position to the nearest chart point by distance, and if
+ * Maps a pointer's X position to the nearest chart point along its axis, and if
  * that point differs from the currently-highlighted one, marks it on the
  * chart and the map and reads it out.
  *
@@ -299,7 +461,6 @@ function updateChartHighlight(event, canvas) {
 	// Calculate which point in the chart
 	const padding = context.padding;
 	const chartWidth = context.cssWidth - padding.left - padding.right;
-	const totalDistance = context.totalDistance;
 	const points = context.points;
 
 	if (x < padding.left || x > context.cssWidth - padding.right) {
@@ -307,17 +468,16 @@ function updateChartHighlight(event, canvas) {
 		return;
 	}
 
-	// Map X position to distance
+	// Map X position to a place along the axis
 	const relativeX = x - padding.left;
-	const distanceRatio = relativeX / chartWidth;
-	const targetDistance = distanceRatio * totalDistance;
+	const target = (relativeX / chartWidth) * context.axisEnd;
 
-	// Find the closest point with distance <= targetDistance
+	// Find the closest point to it
 	let closestIndex = 0;
-	let closestDelta = Math.abs(points[0].distance - targetDistance);
+	let closestDelta = Math.abs(context.axisValue(points[0]) - target);
 
 	for (let i = 1; i < points.length; i++) {
-		const delta = Math.abs(points[i].distance - targetDistance);
+		const delta = Math.abs(context.axisValue(points[i]) - target);
 		if (delta < closestDelta) {
 			closestDelta = delta;
 			closestIndex = i;
@@ -333,29 +493,20 @@ function updateChartHighlight(event, canvas) {
 
 /**
  * Marks a chart point: a guide line down the chart and a dot on the line
- * there, and its elevation, speed and distance in a readout along the
- * chart's top, kept inside the chart's edges.
+ * there, and its numbers in a readout along the chart's top, kept inside the
+ * chart's edges.
  *
  * @param {Object} context - The render's `chartContext`.
- * @param {{distance: number, elevation: number, speed: number}} point
+ * @param {Object} point
  */
 function showChartReadout(context, point) {
-	const unit = state.prefs.unit;
-	const x = context.xFor(point.distance);
-	el.chartCursor.style.left = `${x}px`;
-	el.chartCursor.style.setProperty("--dot-y", `${context.yFor(point.elevation)}px`);
-	el.chartCursor.hidden = false;
+	const x = context.pointX(point);
+	context.cursor.style.left = `${x}px`;
+	context.cursor.style.setProperty("--dot-y", `${context.pointY(point)}px`);
+	context.cursor.hidden = false;
 
-	// Distance as the ride's summary (and the chart's end label) counts it,
-	// which leaves out GPS jitter and pause gaps that the chart's own,
-	// point-to-point distance includes.
-	const recorded = context.session.totalDistance;
-	const distance = recorded > 0 ? (point.distance / context.totalDistance) * recorded : point.distance;
-	const readout = el.chartReadout;
-	readout.innerHTML =
-		`<strong>${formatElevation(point.elevation, unit)}</strong>` +
-		`<strong>${formatSpeed(point.speed, unit)} ${speedUnitLabel(unit)}</strong>` +
-		`<span>${formatDistance(distance, unit)} ${distanceUnitLabel(unit)}</span>`;
+	const readout = context.readout;
+	readout.innerHTML = context.readoutHtml(point, state.prefs.unit);
 	readout.hidden = false;
 	const half = readout.offsetWidth / 2;
 	readout.style.left = `${Math.min(Math.max(x, half), context.cssWidth - half)}px`;
@@ -391,6 +542,8 @@ function highlightPointOnMap(session, pointIndex) {
 export function clearChartHighlight() {
 	if (el.chartCursor) el.chartCursor.hidden = true;
 	if (el.chartReadout) el.chartReadout.hidden = true;
+	if (el.speedChartCursor) el.speedChartCursor.hidden = true;
+	if (el.speedChartReadout) el.speedChartReadout.hidden = true;
 	if (state.chartHighlightMarker) {
 		state.chartHighlightMarker.remove();
 		state.chartHighlightMarker = null;
@@ -435,6 +588,47 @@ function buildChartPoints(session) {
 	}
 
 	return chartPoints;
+}
+
+/**
+ * Converts a session's raw GPS points into the speed chart's points: moving
+ * time so far, cumulative distance, and speed both raw and as a rolling
+ * average over the time around it.
+ *
+ * @param {Object} session
+ * @returns {Array<{time: number, distance: number, speed: number, smoothed: number}>|null}
+ *   Null when there's nothing to draw: no moving time, or no speed readings.
+ */
+function buildSpeedPoints(session) {
+	const raw = session.points || [];
+	if (raw.length < 2) return null;
+
+	const pauses = Array.isArray(session.pauses) ? session.pauses : [];
+	let time = 0;
+	let distance = 0;
+	const points = raw.map((point, index) => {
+		if (index > 0) {
+			const previous = raw[index - 1];
+			const span = movingMsBetween(previous.timestamp, point.timestamp, pauses);
+			if (Number.isFinite(span)) time += span;
+			distance += haversineMeters(previous.lat, previous.lng, point.lat, point.lng);
+		}
+		return { time, distance, speed: Number.isFinite(point.speed) ? point.speed : 0, smoothed: 0 };
+	});
+
+	const totalTime = points[points.length - 1].time;
+	if (totalTime <= 0 || maxOf(points, (point) => point.speed) <= 0) return null;
+
+	const windowMs = Math.min(SPEED_SMOOTHING_MAX_MS, Math.max(SPEED_SMOOTHING_MIN_MS, totalTime / 240));
+	let start = 0;
+	let end = 0;
+	let sum = 0;
+	for (const point of points) {
+		while (end < points.length && points[end].time <= point.time + windowMs / 2) sum += points[end++].speed;
+		while (points[start].time < point.time - windowMs / 2) sum -= points[start++].speed;
+		point.smoothed = Math.max(0, sum / (end - start));
+	}
+	return points;
 }
 
 /**
@@ -521,7 +715,23 @@ function drawChartBackground(ctx, width, height, padding) {
  * @param {string} [background] - What's behind the chart, for the patch
  *   under each label; the page background by default.
  */
-function drawElevationLabels(ctx, height, padding, minElevation, maxElevation, unit, background = themeColor("--bg", "#fcfcfa")) {
+function drawElevationLabels(ctx, height, padding, minElevation, maxElevation, unit, background) {
+	drawRangeLabels(ctx, height, padding, formatElevation(maxElevation, unit), formatElevation(minElevation, unit), background);
+}
+
+/**
+ * Draws a chart's top and floor readouts, sat on those gridlines over a patch
+ * of page background so the line does not run through the text.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} height
+ * @param {{top: number, bottom: number}} padding
+ * @param {string} topText
+ * @param {string} floorText
+ * @param {string} [background] - What's behind the chart, for the patch
+ *   under each label; the page background by default.
+ */
+function drawRangeLabels(ctx, height, padding, topText, floorText, background = themeColor("--bg", "#fcfcfa")) {
 	const muted = themeColor("--muted", "#6b7472");
 
 	ctx.save();
@@ -529,8 +739,8 @@ function drawElevationLabels(ctx, height, padding, minElevation, maxElevation, u
 	ctx.textAlign = "left";
 	ctx.textBaseline = "middle";
 	for (const [text, y] of [
-		[formatElevation(maxElevation, unit), padding.top],
-		[formatElevation(minElevation, unit), height - padding.bottom],
+		[topText, padding.top],
+		[floorText, height - padding.bottom],
 	]) {
 		const width = ctx.measureText(text).width + 6;
 		ctx.fillStyle = background;

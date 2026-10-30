@@ -395,6 +395,24 @@
         </div>
       </section>
 
+      <section class="detail-section chart-section">
+        <div class="section-head">
+          <h3 class="label">Speed</h3>
+          <div class="chart-legend">
+            <span><i class="swatch-dash"></i><span id="speedAvgLabel">-</span></span>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="speedChart" aria-label="Speed over moving time, smoothed" role="img"></canvas>
+          <span id="speedChartCursor" class="chart-cursor" aria-hidden="true" hidden><i></i></span>
+          <div id="speedChartReadout" class="chart-readout" aria-live="polite" hidden></div>
+        </div>
+        <div class="chart-x-labels">
+          <span id="speedChartStartLabel">-</span>
+          <span id="speedChartEndLabel">-</span>
+        </div>
+      </section>
+
       <section class="detail-section segments-section">
         <h3 class="label ruled">Segments</h3>
         <table class="segments-table">
@@ -408,6 +426,7 @@
           </thead>
           <tbody id="segmentsBody"></tbody>
         </table>
+        <button id="segmentsToggle" class="btn segments-toggle" hidden></button>
         <div class="delete-wrap">
           <button id="mergeRideBtn" class="text-action">Merge rides</button>
           <button id="deleteRideBtn" class="text-danger">Delete ride</button>
