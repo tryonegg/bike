@@ -51,7 +51,7 @@ export const state = {
 		voiceURI: "",
 		voiceVolume: 1,
 		ridesView: "list",
-		// How the post-ride charts draw: "smooth" or "full".
+		// How the post-ride charts draw: "smooth", or "full" for the Rough setting.
 		chartDetail: "smooth",
 		// Which activity the home screen's month and week totals count, or "all".
 		statsActivity: "all",

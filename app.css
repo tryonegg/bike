@@ -3048,6 +3048,11 @@ button {
   border-top: 2px dashed var(--muted);
 }
 
+.swatch-line {
+  width: 14px;
+  border-top: 2px solid var(--text);
+}
+
 .accuracy-legend {
   margin-top: 10px;
   flex-wrap: wrap;

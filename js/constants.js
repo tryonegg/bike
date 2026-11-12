@@ -33,6 +33,8 @@ export const MPS_TO_KPH = 3.6;
 export const GPS_OUTAGE_THRESHOLD_MS = 3500;
 export const DEAD_RECKONING_STEP_MS = 250;
 export const MAX_DEAD_RECKONING_DRIFT_METERS = 50;
+// How long an outage is bridged for. Past this no more points are estimated.
+export const MAX_DEAD_RECKONING_MS = 60000;
 
 // An in-progress ride lives in memory, so it is checkpointed to IndexedDB and
 // recovered on the next launch if the tab is evicted or the app is reloaded.

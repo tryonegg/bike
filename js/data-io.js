@@ -118,7 +118,8 @@ export async function exportAllData() {
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
+		// Not at once: some browsers (Safari) cancel a download whose URL is gone.
+		setTimeout(() => URL.revokeObjectURL(url), 10000);
 		await showMessage("Export Success", "Your data has been exported successfully.");
 	} catch (error) {
 		await showMessage("Export Error", `Failed to export data: ${error.message}`);

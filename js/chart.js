@@ -21,6 +21,11 @@ const SMOOTHING_AXIS_SHARE = 1 / 80;
 const SMOOTHING_MIN_METERS = 100;
 const SMOOTHING_MIN_MS = 10000;
 
+// GPS speed jumps around from fix to fix, so even rough mode averages the speed
+// chart: a 240th of the ride's moving time, between these bounds.
+const ROUGH_SPEED_WINDOW_MIN_MS = 5000;
+const ROUGH_SPEED_WINDOW_MAX_MS = 60000;
+
 /**
  * Draws both post-ride charts for a session.
  *
@@ -130,7 +135,7 @@ function renderElevationChart(session) {
  * Draws the speed-vs-moving-time chart for a session onto `el.speedChart`,
  * or an empty-state message when the ride has no usable speeds or times. The
  * line runs from zero up to its own fastest stretch, with the ride's average
- * dashed across it. Time spent paused isn't on the axis, so a merged
+ * dashed across it and a straight trend line through it. Time spent paused isn't on the axis, so a merged
  * ride's long break leaves no flat gap, while a stop without a pause still
  * shows as a dip.
  *
@@ -170,11 +175,14 @@ function renderSpeedChart(session) {
 	const totalTime = points[points.length - 1].time;
 	// Coloured against the raw top speed, so a stretch matches the route line.
 	const maxSpeed = Math.max(maxOf(points, (point) => point.speed), 0.0001);
+	// Fitted before smoothing, so it doesn't move with the chart's mode.
+	const trend = speedTrend(points);
 
-	if (state.prefs.chartDetail === "smooth") {
-		const windowMs = Math.max(SMOOTHING_MIN_MS, totalTime * SMOOTHING_AXIS_SHARE);
-		smoothPoints(points, (point) => point.time, windowMs, ["speed"]);
-	}
+	const windowMs =
+		state.prefs.chartDetail === "smooth"
+			? Math.max(SMOOTHING_MIN_MS, totalTime * SMOOTHING_AXIS_SHARE)
+			: Math.min(ROUGH_SPEED_WINDOW_MAX_MS, Math.max(ROUGH_SPEED_WINDOW_MIN_MS, totalTime / 240));
+	smoothPoints(points, (point) => point.time, windowMs, ["speed"]);
 
 	const topSpeed = maxOf(points, (point) => point.speed);
 
@@ -194,6 +202,15 @@ function renderSpeedChart(session) {
 	ctx.beginPath();
 	ctx.moveTo(0, averageY);
 	ctx.lineTo(cssWidth, averageY);
+	ctx.stroke();
+	ctx.restore();
+
+	ctx.save();
+	ctx.lineWidth = 1.5;
+	ctx.strokeStyle = themeColor("--text", "#14181a");
+	ctx.beginPath();
+	ctx.moveTo(0, yForSpeed(trend.start));
+	ctx.lineTo(cssWidth, yForSpeed(trend.end));
 	ctx.stroke();
 	ctx.restore();
 
@@ -630,6 +647,30 @@ function buildSpeedPoints(session) {
 	const totalTime = points[points.length - 1].time;
 	if (totalTime <= 0 || maxOf(points, (point) => point.speed) <= 0) return null;
 	return points;
+}
+
+/**
+ * Fits a straight line through a ride's speeds against its moving time, by
+ * least squares, to show whether it sped up or faded.
+ *
+ * @param {Array<{time: number, speed: number}>} points - Their last `time`
+ *   must be above zero.
+ * @returns {{start: number, end: number}} The line's speed at each end of the ride.
+ */
+function speedTrend(points) {
+	const meanTime = points.reduce((sum, point) => sum + point.time, 0) / points.length;
+	const meanSpeed = points.reduce((sum, point) => sum + point.speed, 0) / points.length;
+	let covariance = 0;
+	let variance = 0;
+	for (const point of points) {
+		covariance += (point.time - meanTime) * (point.speed - meanSpeed);
+		variance += (point.time - meanTime) ** 2;
+	}
+	const slope = covariance / variance;
+	return {
+		start: meanSpeed - slope * meanTime,
+		end: meanSpeed + slope * (points[points.length - 1].time - meanTime),
+	};
 }
 
 /**

@@ -142,7 +142,8 @@ function downloadGpx(gpx, filename) {
 	a.download = filename;
 	a.click();
 
-	URL.revokeObjectURL(url);
+	// Not at once: some browsers (Safari) cancel a download whose URL is gone.
+	setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 /**

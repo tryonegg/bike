@@ -9,6 +9,7 @@ import {
 	GPS_OUTAGE_THRESHOLD_MS,
 	DEAD_RECKONING_STEP_MS,
 	MAX_DEAD_RECKONING_DRIFT_METERS,
+	MAX_DEAD_RECKONING_MS,
 	ACTIVE_SESSION_KEY,
 	CHECKPOINT_INTERVAL_MS,
 	POINT_REJECTION_THRESHOLD,
@@ -176,6 +177,9 @@ export function initMotionSensors() {
 
 			const heading = getDeadReckoningHeading();
 			if (heading == null) return;
+			// A long outage (the phone carried indoors, say) stops being estimated,
+			// rather than piling up points that would only be thrown away.
+			if (state.estimatedPointsDuringGap.length >= MAX_DEAD_RECKONING_MS / DEAD_RECKONING_STEP_MS) return;
 
 			// Chain each step off the previous estimate. Measuring every step from
 			// the last real fix instead would stack them all in one spot.
@@ -434,7 +438,7 @@ function determinePointRejection(point) {
 	var centerLng = (point.lng + state.currentSession.points[l-1].lng + state.currentSession.points[l-2].lng)/3.0;
 
 	if (haversineMeters(centerLat, centerLng, point.lat, point.lng)<=POINT_REJECTION_THRESHOLD &&
-		haversineMeters(centerLat, centerLng, state.currentSession.points[l-1].lat, state.currentSession.points[l-2]) <= POINT_REJECTION_THRESHOLD &&
+		haversineMeters(centerLat, centerLng, state.currentSession.points[l-1].lat, state.currentSession.points[l-1].lng) <= POINT_REJECTION_THRESHOLD &&
 		haversineMeters(centerLat, centerLng, state.currentSession.points[l-2].lat, state.currentSession.points[l-2].lng) <= POINT_REJECTION_THRESHOLD) {
 		// console.log("rejecting point: within rejection radius");
 		return true;
@@ -453,6 +457,10 @@ function determinePointRejection(point) {
 	var a = state.currentSession.points[l-2];
 	var b = state.currentSession.points[l-1];
 	var t = -((d.lat*(a.lat - b.lat) + d.lng*(a.lng-b.lng))/(d.lng*d.lng + d.lat*d.lat));
+	// The previous point only adds nothing when it lies between the other two. Past
+	// either end it's where the rider turned around, and dropping it would cut the
+	// tip off an out-and-back.
+	if (t < 0 || t > 1) return false;
 	var nearestPoint = {
 		lat: a.lat + d.lat*t,
 		lng: a.lng + d.lng*t

@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.30.0";
+const CACHE_VERSION = "v1.31.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -173,9 +173,8 @@ self.addEventListener("activate", (event) => {
           .concat(keys.filter((key) => key.startsWith("bike-tracker-mapstyle-") && key !== MAP_STYLE_CACHE))
           .map((key) => caches.delete(key)),
       ),
-    ),
+    ).then(() => self.clients.claim()),
   );
-  self.clients.claim();
 });
 
 /**
