@@ -45,7 +45,7 @@ export function openDB() {
 	const pending = new Promise((resolve, reject) => {
 		const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-		request.onupgradeneeded = () => {
+		request.onupgradeneeded = (event) => {
 			const db = request.result;
 			if (!db.objectStoreNames.contains(SESSION_STORE)) {
 				db.createObjectStore(SESSION_STORE, { keyPath: "id", autoIncrement: true });
@@ -69,6 +69,20 @@ export function openDB() {
 					const cursor = event.target.result;
 					if (!cursor) return;
 					summaries.put(summarizeSession(cursor.value));
+					cursor.continue();
+				};
+			} else if (event.oldVersion < 5) {
+				// Summaries gained each ride's climb and top speed: written again
+				// from the rides, keeping their place in the best pace map.
+				const summaries = request.transaction.objectStore(SUMMARY_STORE);
+				request.transaction.objectStore(SESSION_STORE).openCursor().onsuccess = (cursorEvent) => {
+					const cursor = cursorEvent.target.result;
+					if (!cursor) return;
+					const fresh = summarizeSession(cursor.value);
+					const existing = summaries.get(cursor.key);
+					existing.onsuccess = () => {
+						summaries.put(existing.result?.paceMapped ? { ...fresh, paceMapped: true } : fresh);
+					};
 					cursor.continue();
 				};
 			}
@@ -234,6 +248,8 @@ export async function loadPrefs() {
 	state.prefs.voiceURI = typeof voiceURI === "string" ? voiceURI : "";
 	const voiceVolume = pref("voiceVolume", 1);
 	state.prefs.voiceVolume = Number.isFinite(voiceVolume) && voiceVolume >= 0 && voiceVolume <= 1 ? voiceVolume : 1;
+	state.prefs.autoPause = pref("autoPause", true) !== false;
+	state.prefs.splitVoice = pref("splitVoice", false) === true;
 	await migratePlannedRoute(pref("plannedRoute", null));
 	state.prefs.ridesView = pref("ridesView", "list");
 	state.prefs.chartDetail = pref("chartDetail", "smooth");
@@ -376,8 +392,8 @@ function addSessionIn(tx, session) {
 }
 
 /**
- * The summary record kept for a ride: what the rides list, calendar, totals
- * and merge picker need, with the first and last fix times standing in for
+ * The summary record kept for a ride: what the rides list, calendar, totals,
+ * records and merge picker need, with the first and last fix times standing in for
  * the points themselves.
  *
  * @param {Object} session - A saved ride, with its id.
@@ -394,6 +410,8 @@ export function summarizeSession(session) {
 		totalDistance: session.totalDistance,
 		movingTime: session.movingTime,
 		avgSpeed: session.avgSpeed,
+		elevationGain: Number.isFinite(session.elevationGain) ? session.elevationGain : 0,
+		maxSpeed: Number.isFinite(session.maxSpeed) ? session.maxSpeed : 0,
 		routeId: session.routeId ?? null,
 		startTime: Number.isFinite(first) ? first : null,
 		endTime: Number.isFinite(last) ? last : null,

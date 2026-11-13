@@ -32,6 +32,9 @@ import { openPaceMap, wirePaceMap } from "./pace-map-view.js";
 import { wireDestination } from "./destination.js";
 import { confirmWithModal, closeModal } from "./modal.js";
 import { requestWakeLock, releaseWakeLock, maybeShowInstallBanner, renderStorageStatus } from "./pwa.js";
+import { openRecords, wireRecords } from "./records.js";
+import { shareCurrentRide } from "./ride-share.js";
+import { renderOfflineAreas } from "./offline-maps.js";
 
 /**
  * Wires up every DOM event listener the app uses: every settings toggle
@@ -138,6 +141,7 @@ export function wireEvents() {
 	el.rideSettingsBtn.addEventListener("click", openSettings);
 	wirePathLab();
 	wirePaceMap();
+	wireRecords();
 
 	el.guideContrastToggle.addEventListener("click", (event) => handleGuideContrastClick(event));
 
@@ -174,6 +178,7 @@ export function wireEvents() {
 	el.recenterBtn.addEventListener("click", recenterLiveMap);
 
 	el.exportGpxBtn.addEventListener("click", exportCurrentGpx);
+	el.shareRideBtn.addEventListener("click", shareCurrentRide);
 	el.segmentsToggle.addEventListener("click", toggleSegmentRows);
 	el.mergeRideBtn.addEventListener("click", mergeCurrentRide);
 	el.deleteRideBtn.addEventListener("click", deleteCurrentRide);
@@ -331,6 +336,10 @@ const SWITCH_EFFECTS = {
 	navRouteVoice: applyNavPref,
 	navHomeVisual: applyNavPref,
 	navHomeVoice: applyNavPref,
+	// Turning it on is a tap, which is what lets the voice play.
+	splitVoice: (on) => {
+		if (on) unlockVoice();
+	},
 };
 
 /** Flips the preference a settings switch names, saves it, and applies it. */
@@ -508,12 +517,15 @@ export function syncToggles() {
 	for (const row of el.navHomeRows) row.hidden = state.prefs.backToStart !== "route";
 	// The voice picker matters once anything's spoken, and needs speech to pick from.
 	const speaking = state.prefs.navRouteVoice || (state.prefs.backToStart === "route" && state.prefs.navHomeVoice);
-	for (const block of el.voiceSettings) block.hidden = !speechSupported || !speaking;
+	for (const block of el.voiceSettings) block.hidden = !speechSupported || !(speaking || state.prefs.splitVoice);
 	el.hillVoiceRow.hidden = !speechSupported || !speaking;
+	el.splitVoiceRow.hidden = !speechSupported;
 
 	// Option values are meters, fixed; only the displayed label follows the unit.
 	// Each card's subtitle counts the settings it shows, nested ones aside.
 	for (const card of el.settingsCards) {
+		// The offline maps card counts its saved areas instead (offline-maps.js).
+		if (card.id === "offlineMapsCard") continue;
 		const count = card.querySelectorAll(":scope > .setting-row:not(.nested):not(.info-row):not([hidden]), :scope > div:not([hidden]) > .setting-row").length;
 		card.querySelector(".settings-card-count").textContent = count === 1 ? "1 setting" : `${count} settings`;
 	}
@@ -577,6 +589,7 @@ export function fillSettingsForm() {
 	el.dataActions.hidden = riding;
 	el.dataActionsRideNote.hidden = !riding;
 	renderStorageStatus();
+	renderOfflineAreas();
 }
 
 /** Opens the settings screen, from home or from a live ride. */
@@ -693,6 +706,11 @@ export async function applyHistoryState(targetState, mode = "none", savedSession
 
 		if (targetState.screen === "pacemap") {
 			await openPaceMap(mode);
+			return;
+		}
+
+		if (targetState.screen === "records") {
+			await openRecords(mode);
 			return;
 		}
 

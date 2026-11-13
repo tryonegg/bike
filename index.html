@@ -57,6 +57,11 @@
         </span>
       </div>
 
+      <button id="openRecordsBtn" class="records-link">
+        <span class="label">Records &amp; trends</span>
+        <span class="chevron" aria-hidden="true">›</span>
+      </button>
+
       <section class="past-rides">
         <ul id="sessionsList" class="sessions-list"></ul>
         <div id="ridesCalendar" class="rides-calendar hidden">
@@ -300,6 +305,7 @@
             <button id="planImportBtn" class="btn plan-icon-btn" aria-label="Import GPX" title="Import GPX"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></button>
             <button id="planExportBtn" class="btn plan-icon-btn" aria-label="Export GPX" title="Export GPX"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg></button>
             <button id="planShareBtn" class="btn plan-icon-btn" aria-label="Share route link" title="Share route link"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg></button>
+            <button id="planOfflineBtn" class="btn plan-icon-btn" aria-label="Save this map area offline" title="Save this map area offline"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5 9 4l6 2.5L21 4v8"/><path d="M3 6.5V20l6-2.5 3 1.25"/><path d="M9 4v13.5"/><path d="M18 14v7"/><path d="m15 18 3 3 3-3"/></svg></button>
             <input id="planGpxInput" type="file" accept=".gpx,application/gpx+xml" hidden>
           </div>
           <div class="setup-start-wrap">
@@ -338,6 +344,7 @@
           <div class="label" id="postDate">-</div>
           <h2 id="postTitle">Ride Summary</h2>
         </div>
+        <button id="shareRideBtn" class="round-btn app-bar-action" aria-label="Share this ride as a picture" title="Share as a picture"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></button>
       </header>
 
       <section class="detail-hero">
@@ -547,6 +554,13 @@
           </summary>
           <div class="setting-row stacked">
             <div class="setting-row-main">
+              <span id="autoPauseLabel">Auto-pause</span>
+              <button class="switch" role="switch" data-switch="autoPause" aria-labelledby="autoPauseLabel"></button>
+            </div>
+            <p class="setting-note">Stops the clock while you're stopped, at a light say, and starts it again when you move off. Your moving time and average speed leave the wait out.</p>
+          </div>
+          <div class="setting-row stacked">
+            <div class="setting-row-main">
               <span id="navRouteVisualLabel">Route directions</span>
               <button class="switch" role="switch" data-switch="navRouteVisual" aria-labelledby="navRouteVisualLabel"></button>
             </div>
@@ -598,6 +612,13 @@
             </div>
             <p class="setting-note">Says when a climb is coming up on the route being spoken, whether it's gentle or steep, and on long ones when you're nearly at the top. Turns always come first.</p>
           </div>
+          <div class="setting-row stacked" id="splitVoiceRow">
+            <div class="setting-row-main">
+              <span id="splitVoiceLabel">Split announcements</span>
+              <button class="switch" role="switch" data-switch="splitVoice" aria-labelledby="splitVoiceLabel"></button>
+            </div>
+            <p class="setting-note">Says your distance and time at each mile or kilometer, and how long the last one took.</p>
+          </div>
           <div class="setting-row stacked voice-settings" data-voice-settings role="group" aria-label="Voice">
             <div class="setting-row-main">
               <label for="voiceSelect">Voice</label>
@@ -613,7 +634,7 @@
               <output class="voice-volume-value" for="voiceVolume">100%</output>
             </div>
             <button class="btn voice-test" type="button">Test voice</button>
-            <p class="setting-note">The voice that speaks directions, street names included. Voices come from your device, so the list differs between phones and browsers.</p>
+            <p class="setting-note">The voice that speaks directions and split announcements, street names included. Voices come from your device, so the list differs between phones and browsers.</p>
           </div>
           <div class="setting-row stacked">
             <div class="setting-row-main">
@@ -699,6 +720,21 @@
           </div>
         </details>
 
+        <details class="settings-card" id="offlineMapsCard">
+          <summary class="settings-card-head">
+            <span class="settings-card-titles">
+              <span class="settings-card-title">Offline maps</span>
+              <span class="settings-card-count" id="offlineAreasCount"></span>
+            </span>
+            <span class="settings-card-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="setting-row stacked">
+            <ul id="offlineAreasList" class="offline-areas"></ul>
+            <p class="setting-note" id="offlineAreasEmpty">No areas saved yet.</p>
+            <p class="setting-note">A saved area's map works with no signal, along with routing and grades there. To save one, open Routes, open or start a route, move the map to the area you want, and tap the map-with-arrow button. Saved areas use the Road, Topo and Bright styles.</p>
+          </div>
+        </details>
+
         <details class="settings-card">
           <summary class="settings-card-head">
             <span class="settings-card-titles">
@@ -744,6 +780,48 @@
             <p class="setting-note">Sacrifices some accuracy, but removes redundant data.</p>
           </div>
         </details>
+      </div>
+    </section>
+
+    <section id="recordsScreen" class="screen hidden">
+      <header class="app-bar">
+        <button id="recordsBackBtn" class="round-btn" aria-label="Back">←</button>
+        <h2>Records &amp; trends</h2>
+        <span class="select-wrap app-bar-action">
+          <select id="recordsActivitySelect" aria-label="Activity"></select>
+        </span>
+      </header>
+
+      <p id="recordsEmpty" class="empty records-empty" hidden>Nothing recorded yet. Your totals, trends and records show here after your first ride.</p>
+
+      <div id="recordsBody">
+        <section class="detail-section records-totals">
+          <h3 class="label">All time</h3>
+          <dl class="header-stats" id="recordsAllTime"></dl>
+          <h3 class="label">This year</h3>
+          <dl class="header-stats" id="recordsThisYear"></dl>
+        </section>
+
+        <section class="detail-section">
+          <div class="trend-controls">
+            <div class="toggle-pill" id="recordsPeriodToggle" role="group" aria-label="Trend period">
+              <button data-trend-period="week" class="toggle-option">Weeks</button>
+              <button data-trend-period="month" class="toggle-option">Months</button>
+            </div>
+            <div class="toggle-pill" id="recordsMetricToggle" role="group" aria-label="Trend measure">
+              <button data-trend-metric="distance" class="toggle-option">Distance</button>
+              <button data-trend-metric="time" class="toggle-option">Time</button>
+            </div>
+          </div>
+          <div class="label trend-unit">Last 12, in <span id="recordsChartUnit">mi</span></div>
+          <div id="recordsChart" class="trend-chart"></div>
+          <p id="recordsChartReadout" class="setting-note trend-readout" aria-live="polite"></p>
+        </section>
+
+        <section class="records-section">
+          <h3 class="label records-heading">Records</h3>
+          <ul id="recordsList" class="sessions-list"></ul>
+        </section>
       </div>
     </section>
 

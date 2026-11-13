@@ -1065,7 +1065,8 @@ button {
   transition: opacity 2s ease, transform 2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.ride-strip.is-paused #speedLabel {
+.ride-strip.is-paused #speedLabel,
+.ride-strip.is-auto-paused #speedLabel {
   color: #d08a2a;
 }
 
@@ -2058,7 +2059,7 @@ button {
 
 .plan-actions {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
 }
 
@@ -3851,4 +3852,184 @@ button {
     background: #111413;
     color: #eef1ef;
   }
+}
+
+/* ---- Records & trends ---- */
+
+/* The home screen's way in, a row under the week band. */
+.records-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 22px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+/* Something at the far end of a screen's title bar. */
+.app-bar-action {
+  margin-left: auto;
+  flex: none;
+}
+
+.app-bar-action svg {
+  width: 20px;
+  height: 20px;
+}
+
+.records-empty {
+  padding-top: 24px;
+}
+
+.records-totals .label {
+  margin-bottom: 10px;
+}
+
+.records-totals .header-stats {
+  margin: 0 0 22px;
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+.records-totals .header-stats:last-child {
+  margin-bottom: 0;
+}
+
+.trend-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.trend-unit {
+  margin-top: 18px;
+}
+
+.trend-unit span {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* One column per week or month: its figure, its bar, its label. */
+.trend-chart {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  height: 190px;
+  margin-top: 8px;
+}
+
+.trend-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.trend-value {
+  height: 12px;
+  line-height: 12px;
+}
+
+.trend-track {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--rule);
+}
+
+.trend-fill {
+  width: 100%;
+  min-height: 0;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+.trend-bar.is-picked {
+  color: var(--text);
+}
+
+.trend-bar.is-picked .trend-fill {
+  opacity: 1;
+}
+
+.trend-bar:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.trend-tick {
+  height: 12px;
+  line-height: 12px;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.trend-readout {
+  margin-top: 12px;
+}
+
+.records-heading {
+  padding: 6px 22px 10px;
+}
+
+.records-section {
+  padding-bottom: 32px;
+}
+
+div.session-row {
+  cursor: default;
+}
+
+/* ---- Offline maps (settings) ---- */
+
+.offline-areas {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.offline-area {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.offline-area-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.offline-area-text strong {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-area .text-danger {
+  padding-right: 0;
 }

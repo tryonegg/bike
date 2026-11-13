@@ -13,6 +13,7 @@ import { protectStoredData } from "./pwa.js";
 import { navigateToScreen, applyRideLayout } from "./navigation.js";
 import { renderPastRides } from "./history-view.js";
 import { clearPaceMap } from "./pace-map.js";
+import { OFFLINE_AREAS_KEY } from "./offline-maps.js";
 
 /**
  * The post-ride summary screen's "Delete" button handler: confirms, then
@@ -98,6 +99,8 @@ export async function exportAllData() {
 			// An API key is a secret tied to the rider's Stadia account; a backup
 			// file gets copied and shared too freely to carry it.
 			if (pref.key === "stadiaKey") return;
+			// Saved map areas are this device's downloads; another device has none of them.
+			if (pref.key === OFFLINE_AREAS_KEY) return;
 			prefsObj[pref.key] = pref.value;
 		});
 
@@ -212,7 +215,7 @@ export async function importAllData(event) {
 
 		const prefs = [];
 		for (const [key, value] of Object.entries(data.preferences)) {
-			if (key === ACTIVE_SESSION_KEY) continue;
+			if (key === ACTIVE_SESSION_KEY || key === OFFLINE_AREAS_KEY) continue;
 			// Backups no longer carry the Stadia key, but older ones did. Restore it
 			// only onto a device without one, never over a key already entered here.
 			if (key === "stadiaKey" && (state.prefs.stadiaKey || typeof value !== "string")) continue;

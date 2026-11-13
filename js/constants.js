@@ -6,14 +6,15 @@
  */
 
 export const DB_NAME = "bike-tracker-db";
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 export const SESSION_STORE = "sessions";
 export const PREF_STORE = "preferences";
 // Saved planned routes (see route-plan.js). Added in DB_VERSION 2.
 export const ROUTE_STORE = "routes";
 // One small record per saved ride, keyed by the ride's id, holding just what
 // the rides list, calendar and totals show, so those never read GPS points.
-// Added in DB_VERSION 3.
+// Added in DB_VERSION 3. DB_VERSION 5 added each ride's climb and top speed
+// to it, for the records screen.
 export const SUMMARY_STORE = "summaries";
 // The in-progress ride's points, in chunks appended at each checkpoint; the
 // rest of the checkpoint stays small, under ACTIVE_SESSION_KEY in the
@@ -40,6 +41,16 @@ export const MAX_DEAD_RECKONING_MS = 60000;
 // recovered on the next launch if the tab is evicted or the app is reloaded.
 export const ACTIVE_SESSION_KEY = "activeSession";
 export const CHECKPOINT_INTERVAL_MS = 10000;
+
+// Auto-pause (live-session.js): the ride's clock stops once the rider has been
+// under their activity's stopped speed for AUTO_PAUSE_DELAY_MS, and starts
+// again when the phone reports a speed AUTO_PAUSE_RESUME_MARGIN_MPS above it,
+// or a fix lands AUTO_PAUSE_RESUME_MOVE_M from where they stopped. A phone at
+// rest still reports a little speed, more so the slower the activity.
+export const AUTO_PAUSE_DELAY_MS = 5000;
+export const AUTO_PAUSE_SPEED_MPS = { bike: 0.9, walk: 0.3, hike: 0.3, kayak: 0.3 };
+export const AUTO_PAUSE_RESUME_MARGIN_MPS = 0.4;
+export const AUTO_PAUSE_RESUME_MOVE_M = 12;
 
 // Number of discrete colors in the speed ramp used by the route line and chart.
 export const SPEED_BANDS = 16;

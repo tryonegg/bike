@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.31.0";
+const CACHE_VERSION = "v1.32.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -21,6 +21,9 @@ const MAP_DATA_CACHE_MAX = 1500;
 // Styles, fonts and sprites are few but the map is blank or unlabelled without
 // them, so they live apart from the tiles where eviction cannot reach them.
 const MAP_STYLE_CACHE = "bike-tracker-mapstyle-v1";
+// Map areas saved for offline use (js/offline-maps.js). Nothing here is ever
+// evicted, and the name matches none of the prefixes cleared on activate.
+const OFFLINE_CACHE = "bike-tracker-offline-v1";
 const MAP_DATA_HOSTS = ["tiles.openfreemap.org", "elevation-tiles-prod.s3.amazonaws.com"];
 
 // The app's logic, split across js/*.js ES modules and imported from app.js.
@@ -70,6 +73,9 @@ const APP_MODULES = [
   "./js/route-graph.js",
   "./js/pace-sections.js",
   "./js/mvt.js",
+  "./js/records.js",
+  "./js/ride-share.js",
+  "./js/offline-maps.js",
 ];
 
 // Precached on install, and served cache-first (revalidated in the background) below.
@@ -128,6 +134,12 @@ const tilesSinceTrim = new Map();
 // worker started. A tile is moved once per worker lifetime: enough to keep the
 // tiles in use from aging out, without a cache write on every map redraw.
 const refreshedTiles = new Set();
+
+// The saved-area tiles, as host and "z/x/y" → the URL each is cached under;
+// built on first use, and again after the page reports a change. OpenFreeMap
+// moves its tiles to a new versioned path with each data release, so a saved
+// tile is found by which tile it is, not by the exact URL asked for.
+let offlineIndex = null;
 
 // Set once an update notification has been sent, so a burst of changed shell
 // files (a whole new deploy) only prompts the rider once, not per file.
@@ -195,6 +207,9 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") {
     self.skipWaiting();
   }
+  if (event.data?.type === "OFFLINE_TILES_CHANGED") {
+    offlineIndex = null;
+  }
 });
 
 /**
@@ -225,7 +240,9 @@ self.addEventListener("fetch", (event) => {
       } else if (pathname.startsWith("/fonts/") || pathname.startsWith("/sprites/")) {
         event.respondWith(cacheFirst(request, MAP_STYLE_CACHE));
       } else {
-        event.respondWith(tileFirst(event, request, MAP_DATA_CACHE, MAP_DATA_CACHE_MAX));
+        // An offline-area download stores its tiles itself (js/offline-maps.js).
+        if (request.cache === "no-store") return;
+        event.respondWith(tileFirst(event, request, MAP_DATA_CACHE, MAP_DATA_CACHE_MAX, true));
       }
       return;
     }
@@ -397,10 +414,12 @@ async function cacheFirstWithRevalidate(event, request, cacheName) {
  * @param {Request} request
  * @param {string} cacheName
  * @param {number} maxEntries
+ * @param {boolean} [useOffline] - Also serve from the saved offline areas,
+ *   ahead of the network, so a saved area draws at once on a weak signal.
  * @returns {Promise<Response>}
  * @throws {Error} If the network fails and nothing is cached.
  */
-async function tileFirst(event, request, cacheName, maxEntries) {
+async function tileFirst(event, request, cacheName, maxEntries, useOffline = false) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) {
@@ -410,6 +429,11 @@ async function tileFirst(event, request, cacheName, maxEntries) {
       event.waitUntil(cache.delete(request).then(() => cache.put(request, copy)).catch(() => {}));
     }
     return cached;
+  }
+
+  if (useOffline) {
+    const saved = await offlineTile(request.url);
+    if (saved) return saved;
   }
 
   let response;
@@ -429,6 +453,38 @@ async function tileFirst(event, request, cacheName, maxEntries) {
     );
   }
   return response;
+}
+
+/**
+ * A tile from the saved offline areas, whichever data release it was saved
+ * from, or null when no saved area holds it.
+ *
+ * @param {string} url
+ * @returns {Promise<Response|null>}
+ */
+async function offlineTile(url) {
+  const key = tileIdentity(url);
+  if (!key) return null;
+  offlineIndex ??= (async () => {
+    const index = new Map();
+    // Not opened unless it exists: opening would create it on every device.
+    if (!(await caches.has(OFFLINE_CACHE))) return index;
+    const cache = await caches.open(OFFLINE_CACHE);
+    for (const request of await cache.keys()) {
+      const identity = tileIdentity(request.url);
+      if (identity) index.set(identity, request.url);
+    }
+    return index;
+  })();
+  const stored = (await offlineIndex).get(key);
+  if (!stored) return null;
+  return (await (await caches.open(OFFLINE_CACHE)).match(stored)) ?? null;
+}
+
+/** A tile URL's host and "z/x/y", whatever versioned path it sits under, or null for anything else. */
+function tileIdentity(url) {
+  const match = /^https:\/\/([^/]+)\/(?:.*\/)?(\d+)\/(\d+)\/(\d+)\.(?:pbf|png)$/.exec(url);
+  return match ? `${match[1]}/${match[2]}/${match[3]}/${match[4]}` : null;
 }
 
 /**

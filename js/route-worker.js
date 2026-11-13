@@ -40,7 +40,7 @@ import { rideSections } from "./pace-sections.js";
 
 // The service worker's tile caches, matched by prefix so a version bump there
 // doesn't need a matching change here.
-const TILE_CACHE_PREFIXES = ["bike-tracker-mapdata-", "bike-tracker-stadia-"];
+const TILE_CACHE_PREFIXES = ["bike-tracker-mapdata-", "bike-tracker-stadia-", "bike-tracker-offline-"];
 // Vector tiles only, at the zoom that carries every road and path. Raster
 // (satellite) and elevation tiles share these caches and are skipped.
 const TILE_PATH = new RegExp(`/${TILE_ZOOM}/(\\d+)/(\\d+)\\.(?:pbf|mvt)$`);

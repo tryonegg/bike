@@ -25,6 +25,7 @@
  * the line it was measured on, so a stale one is measured again.
  */
 
+import { saveOfflineArea } from "./offline-maps.js";
 import { PLAN_ROUTE_SOURCE, PLAN_SIMPLIFY_M } from "./constants.js";
 import { state, el } from "./state.js";
 import { putRoute, getRoute, getAllRoutes, deleteRoute, setPref } from "./db.js";
@@ -416,6 +417,7 @@ export function wirePlanner() {
 	wireGradeToggle();
 	el.planDoneBtn.addEventListener("click", saveSharedRoute);
 	el.planShareBtn.addEventListener("click", shareRoute);
+	el.planOfflineBtn.addEventListener("click", () => saveOfflineArea(state.planMap, state.editingRoute?.autoNamed ? "" : (state.editingRoute?.name ?? "")));
 	window.addEventListener("hashchange", openSharedRouteFromHash);
 	el.planDeleteBtn.addEventListener("click", deleteEditingRoute);
 	el.planUndoBtn.addEventListener("click", () => queueEdit(undo));

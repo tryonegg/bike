@@ -16,6 +16,10 @@ import {
 	LIVE_ROUTE_SOURCE,
 	PACE_TREND_EVEN_MPS,
 	PACE_TREND_MIN_MS,
+	AUTO_PAUSE_DELAY_MS,
+	AUTO_PAUSE_SPEED_MPS,
+	AUTO_PAUSE_RESUME_MARGIN_MPS,
+	AUTO_PAUSE_RESUME_MOVE_M,
 } from "./constants.js";
 import { state, el } from "./state.js";
 import { haversineMeters, bearingDegrees, formatDistance, formatSpeed, formatDuration } from "./format.js";
@@ -29,6 +33,7 @@ import { updateGradeAhead, hideGradeAhead } from "./grade-ahead.js";
 import { resetRouteHome } from "./route-home.js";
 import { canFollowPoints, resetRidePlan, destinationRoute } from "./ride-plan.js";
 import { hideDirections } from "./directions.js";
+import { say } from "./voice.js";
 import { navigateToScreen } from "./navigation.js";
 import { requestWakeLock, releaseWakeLock, protectStoredData } from "./pwa.js";
 import { confirmWithModal } from "./modal.js";
@@ -82,6 +87,10 @@ export async function startSession(initialPosition, initialHeading = null) {
 		// stopped have to be recorded to be subtracted back out afterwards.
 		pauses: [],
 		pauseStartedAt: null,
+		// Auto-pause: whether the clock is stopped because the rider is, and
+		// since when the rider has been under the stopped speed (see autoPauseCheck).
+		autoPaused: false,
+		slowSince: null,
 		watchId: null,
 		lastPoint: null,
 		elapsedIntervalId: null,
@@ -173,7 +182,7 @@ export function initMotionSensors() {
 	if (!state.currentSession.deadReckoningIntervalId) {
 		state.currentSession.deadReckoningIntervalId = setInterval(() => {
 			const session = state.currentSession;
-			if (!state.gpsOutageDetected || !session || session.paused || !session.lastPoint) return;
+			if (!state.gpsOutageDetected || !session || session.paused || session.autoPaused || !session.lastPoint) return;
 
 			const heading = getDeadReckoningHeading();
 			if (heading == null) return;
@@ -309,7 +318,7 @@ function updateGPSOutageDetection(timestamp) {
 	state.lastGPSTimestamp = timestamp;
 
 	state.gpsOutageTimeout = setTimeout(() => {
-		if (!state.gpsOutageDetected && state.currentSession && !state.currentSession.paused) {
+		if (!state.gpsOutageDetected && state.currentSession && !state.currentSession.paused && !state.currentSession.autoPaused) {
 			state.gpsOutageDetected = true;
 			state.estimatedPointsDuringGap = [];
 			beginDeadReckoning();
@@ -522,6 +531,14 @@ function processPosition(position, forceAdd = false) {
 	// Update velocity estimate for dead reckoning
 	state.velocityEstimate = safeSpeed;
 
+	// Auto-paused: the clock is stopped and nothing's recorded until the rider
+	// moves off again, so GPS wander at a stop adds no distance.
+	const stopSpeed = stopDetectionSpeed(session, point, speed);
+	if (session.autoPaused) {
+		if (!shouldAutoResume(session, point, speed)) return;
+		endAutoPause(session);
+	}
+
 	if (session.lastPoint) {
 		session.totalDistance += haversineMeters(session.lastPoint.lat, session.lastPoint.lng, point.lat, point.lng);
 	}
@@ -543,11 +560,94 @@ function processPosition(position, forceAdd = false) {
 	updateLiveStats();
 	updateGrade(session);
 	updateGradeAhead(session);
+	autoPauseCheck(session, stopSpeed);
 
 	if (Date.now() - state.lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
 		state.lastCheckpointAt = Date.now();
 		saveActiveSessionCheckpoint();
 	}
+}
+
+/**
+ * The speed a fix is judged stopped or moving by: the phone's own GPS speed
+ * where it gives one, otherwise the pace from the last recorded point to
+ * this one. Infinity for a ride's first fix, which has nothing to compare.
+ *
+ * @param {Object} session
+ * @param {{lat: number, lng: number, timestamp: number}} point
+ * @param {number|null} gpsSpeed - `coords.speed`, as the phone reported it.
+ * @returns {number} Meters/second.
+ */
+function stopDetectionSpeed(session, point, gpsSpeed) {
+	if (Number.isFinite(gpsSpeed) && gpsSpeed >= 0) return gpsSpeed;
+	const last = session.lastPoint;
+	if (!last) return Infinity;
+	const seconds = (point.timestamp - last.timestamp) / 1000;
+	if (!(seconds > 0)) return Infinity;
+	return haversineMeters(last.lat, last.lng, point.lat, point.lng) / seconds;
+}
+
+/** The speed under which this ride's activity counts as stopped, in meters/second. */
+function autoPauseSpeed(session) {
+	return AUTO_PAUSE_SPEED_MPS[session.activityType] ?? AUTO_PAUSE_SPEED_MPS.bike;
+}
+
+/**
+ * Auto-pause: stops the ride's clock once the rider has been under the
+ * stopped speed for AUTO_PAUSE_DELAY_MS, so a wait at a light doesn't drag
+ * the average down. The stop is recorded as a pause, like one made with the
+ * button, but the GPS watch stays on to see the rider move off again.
+ * Called after each recorded fix; does nothing with Auto-pause switched off.
+ *
+ * @param {Object} session
+ * @param {number} stopSpeed - From `stopDetectionSpeed`.
+ */
+function autoPauseCheck(session, stopSpeed) {
+	if (!state.prefs.autoPause || stopSpeed >= autoPauseSpeed(session)) {
+		session.slowSince = null;
+		return;
+	}
+	const now = Date.now();
+	session.slowSince ??= now;
+	if (now - session.slowSince < AUTO_PAUSE_DELAY_MS) return;
+
+	session.movingTime = getElapsedMs();
+	session.autoPaused = true;
+	session.pauseStartedAt = now;
+	session.slowSince = null;
+	setAutoPaused(true);
+	updateLiveStats();
+}
+
+/**
+ * Whether a fix shows an auto-paused rider moving again: the phone reports a
+ * speed clear of the stopped one, or the fix is AUTO_PAUSE_RESUME_MOVE_M from
+ * where they stopped. Also true once Auto-pause is switched off mid-stop.
+ *
+ * @param {Object} session
+ * @param {{lat: number, lng: number}} point
+ * @param {number|null} gpsSpeed
+ * @returns {boolean}
+ */
+function shouldAutoResume(session, point, gpsSpeed) {
+	if (!state.prefs.autoPause) return true;
+	if (Number.isFinite(gpsSpeed) && gpsSpeed >= autoPauseSpeed(session) + AUTO_PAUSE_RESUME_MARGIN_MPS) return true;
+	const anchor = session.lastPoint;
+	return !anchor || haversineMeters(anchor.lat, anchor.lng, point.lat, point.lng) >= AUTO_PAUSE_RESUME_MOVE_M;
+}
+
+/** Restarts the clock after an auto-pause, closing the pause it recorded. */
+function endAutoPause(session) {
+	session.autoPaused = false;
+	closeOpenPause(session);
+	session.resumeTimestamp = Date.now();
+	setAutoPaused(false);
+}
+
+/** Marks the ride strip as auto-paused (or not): its speed label says so. */
+function setAutoPaused(on) {
+	el.rideStrip.classList.toggle("is-auto-paused", on);
+	el.speedLabel.textContent = on ? "Auto-paused" : "Speed";
 }
 
 /**
@@ -593,6 +693,7 @@ function updateSegments(point) {
 	if (!session) return;
 
 	const stepDistance = getSegmentLengthMeters(state.prefs.unit);
+	let crossed = null;
 	while (session.totalDistance >= session.nextSegmentDistance) {
 		const elapsed = getElapsedMs();
 		const segmentNumber = session.segments.length + 1;
@@ -619,7 +720,39 @@ function updateSegments(point) {
 
 		session.segmentStartElapsed = elapsed;
 		session.nextSegmentDistance += stepDistance;
+		crossed = { segmentNumber, duration, elapsed };
 	}
+	// Only the last, when one fix crossed several boundaries at once.
+	if (crossed && state.prefs.splitVoice) say(splitAnnouncement(crossed, state.prefs.unit));
+}
+
+/**
+ * What's spoken as a mile or kilometer is completed: how far and how long
+ * the ride has run, and how long the last one took.
+ *
+ * @param {{segmentNumber: number, duration: number, elapsed: number}} split
+ * @param {"imperial"|"metric"} unit
+ * @returns {string}
+ */
+function splitAnnouncement({ segmentNumber, duration, elapsed }, unit) {
+	const one = unit === "imperial" ? "mile" : "kilometer";
+	const distance = `${segmentNumber} ${segmentNumber === 1 ? one : `${one}s`}`;
+	if (segmentNumber === 1) return `${distance} in ${spokenDuration(duration)}.`;
+	return `${distance} in ${spokenDuration(elapsed)}. Last ${one}, ${spokenDuration(duration)}.`;
+}
+
+/** A duration as it's said aloud: "1 hour 4 minutes", "4 minutes 12 seconds". Seconds are dropped past an hour. */
+function spokenDuration(ms) {
+	const total = Math.max(0, Math.round(ms / 1000));
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total % 3600) / 60);
+	const seconds = total % 60;
+	const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+	const parts = [];
+	if (hours) parts.push(count(hours, "hour"));
+	if (minutes) parts.push(count(minutes, "minute"));
+	if (!hours && (seconds || !minutes)) parts.push(count(seconds, "second"));
+	return parts.join(" ");
 }
 
 /**
@@ -635,7 +768,7 @@ export function updateLiveStats() {
 	if (!session) return;
 
 	const elapsed = getElapsedMs();
-	const currentSpeed = session.lastPoint ? session.lastPoint.speed : 0;
+	const currentSpeed = session.lastPoint && !session.autoPaused ? session.lastPoint.speed : 0;
 
 	// Distance over moving time - the same definition the saved ride summary uses.
 	// An unweighted mean of instantaneous fixes disagreed with the post-ride figure.
@@ -662,7 +795,7 @@ export function updateLiveStats() {
 function updatePaceTrend(session, elapsed) {
 	const pastAvg = state.routePastAvg;
 	const average = pastAvg ?? (elapsed >= PACE_TREND_MIN_MS ? session.avgSpeed : null);
-	if (session.paused || !session.lastPoint || !(average > 0)) {
+	if (session.paused || session.autoPaused || !session.lastPoint || !(average > 0)) {
 		el.paceTrend.hidden = true;
 		return;
 	}
@@ -698,7 +831,7 @@ export function setPauseButton(paused) {
 export function getElapsedMs() {
 	const session = state.currentSession;
 	if (!session) return 0;
-	if (session.paused) return session.movingTime;
+	if (session.paused || session.autoPaused) return session.movingTime;
 	return session.movingTime + (Date.now() - session.resumeTimestamp);
 }
 
@@ -718,7 +851,11 @@ export async function togglePauseSession() {
 	if (!session.paused) {
 		session.movingTime = getElapsedMs();
 		session.paused = true;
-		session.pauseStartedAt = Date.now();
+		// An auto-pause under way carries on as this one, from when it began.
+		session.pauseStartedAt ??= Date.now();
+		session.autoPaused = false;
+		session.slowSince = null;
+		el.rideStrip.classList.remove("is-auto-paused");
 		stopWatch();
 		setPauseButton(true);
 		hideBestPace();
@@ -797,6 +934,8 @@ export async function finalizeSession() {
 
 	session.movingTime = getElapsedMs();
 	session.paused = true;
+	session.autoPaused = false;
+	el.rideStrip.classList.remove("is-auto-paused");
 	closeOpenPause(session);
 
 	stopWatch();
@@ -969,6 +1108,8 @@ function restoreSessionFromCheckpoint(checkpoint) {
 		paused: false,
 		pauses,
 		pauseStartedAt: null,
+		autoPaused: false,
+		slowSince: null,
 		watchId: null,
 		lastPoint: points.length ? points[points.length - 1] : null,
 		elapsedIntervalId: null,
