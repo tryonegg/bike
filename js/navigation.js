@@ -515,21 +515,20 @@ export function syncToggles() {
 	el.avoidRetraceRow.hidden = state.prefs.backToStart !== "route";
 	// Directions to the start need Back to Start's Route to follow.
 	for (const row of el.navHomeRows) row.hidden = state.prefs.backToStart !== "route";
+	// The line back to the start has nothing to style or hide when there is none.
+	el.guideContrastRow.hidden = state.prefs.backToStart === "none";
+	el.guideHideDistanceRow.hidden = state.prefs.backToStart === "none";
+	// A planned route is only spoken while its directions are on, and hill
+	// warnings only come with that voice (see directions.js).
+	const routeVoice = state.prefs.navRouteVisual && state.prefs.navRouteVoice;
+	const homeVoice = state.prefs.backToStart === "route" && state.prefs.navHomeVoice;
+	el.navRouteVoiceRow.hidden = !state.prefs.navRouteVisual;
+	el.hillVoiceRow.hidden = !speechSupported || !routeVoice;
 	// The voice picker matters once anything's spoken, and needs speech to pick from.
-	const speaking = state.prefs.navRouteVoice || (state.prefs.backToStart === "route" && state.prefs.navHomeVoice);
-	for (const block of el.voiceSettings) block.hidden = !speechSupported || !(speaking || state.prefs.splitVoice);
-	el.hillVoiceRow.hidden = !speechSupported || !speaking;
+	for (const block of el.voiceSettings) block.hidden = !speechSupported || !(routeVoice || homeVoice || state.prefs.splitVoice);
 	el.splitVoiceRow.hidden = !speechSupported;
 
 	// Option values are meters, fixed; only the displayed label follows the unit.
-	// Each card's subtitle counts the settings it shows, nested ones aside.
-	for (const card of el.settingsCards) {
-		// The offline maps card counts its saved areas instead (offline-maps.js).
-		if (card.id === "offlineMapsCard") continue;
-		const count = card.querySelectorAll(":scope > .setting-row:not(.nested):not(.info-row):not([hidden]), :scope > div:not([hidden]) > .setting-row").length;
-		card.querySelector(".settings-card-count").textContent = count === 1 ? "1 setting" : `${count} settings`;
-	}
-
 	el.guideHideDistanceSelect.value = String(state.prefs.guideHideDistance);
 	for (const option of el.guideHideDistanceSelect.options) {
 		const meters = Number(option.value);

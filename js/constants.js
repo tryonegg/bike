@@ -247,7 +247,7 @@ export const GRADE_AHEAD_STEP_M = 20;
 export const GRADE_AHEAD_SHOW_M = 400;
 export const GRADE_AHEAD_MIN_RUN_M = 80;
 export const GRADE_AHEAD_REFRESH_M = 15;
-// Spoken hill warnings, with Hill warnings on and the line followed spoken: a
+// Spoken hill warnings, with Hill warnings on and a planned route spoken: a
 // climb found as above (descents aren't spoken), at least HILL_VOICE_MIN_M
 // long (300 ft), is announced once as it comes within GRADE_AHEAD_SHOW_M,
 // unless the rider's already within HILL_VOICE_ON_M of it, and called steep

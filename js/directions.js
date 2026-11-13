@@ -346,8 +346,9 @@ function activeGuidance(session) {
 	}
 
 	const plan = ridePlanGuidance();
-	if (plan && !plan.finished && (prefs.navRouteVisual || prefs.navRouteVoice)) {
-		return { kind: "route", guidance: plan, visual: prefs.navRouteVisual, voice: prefs.navRouteVoice, live: plan.canSkip };
+	// Route voice is part of Route directions: with those off, nothing's spoken either.
+	if (plan && !plan.finished && prefs.navRouteVisual) {
+		return { kind: "route", guidance: plan, visual: true, voice: prefs.navRouteVoice, live: plan.canSkip };
 	}
 	return null;
 }
@@ -637,7 +638,8 @@ function speakHeadsUp(source, view) {
  *   `along` and the climb's `start` and `end` are meters along `line`.
  */
 export function speakHills({ line, along, climb }) {
-	if (!memory || !state.prefs.navHillVoice || memory.voiceKind !== line) return;
+	// Hill warnings belong to a planned route's voice, not the way back to the start.
+	if (!memory || !state.prefs.navHillVoice || line !== "route" || memory.voiceKind !== line) return;
 	let hill = memory.hill?.line === line ? memory.hill : null;
 	if (climb) {
 		// Measured again, the same climb starts and ends a little differently.
@@ -755,7 +757,7 @@ function sentence(text) {
  * directions there.
  */
 function listenForArrivals(session, source) {
-	const voiceRoute = state.prefs.navRouteVoice;
+	const voiceRoute = state.prefs.navRouteVisual && state.prefs.navRouteVoice;
 	const plan = ridePlanGuidance();
 	const next = session.nextWaypoint ?? 0;
 	// A stop skipped from the sheet wasn't reached, and skipping the last one

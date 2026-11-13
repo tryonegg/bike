@@ -44,7 +44,7 @@ export const state = {
 		navRouteVoice: false,
 		navHomeVisual: false,
 		navHomeVoice: false,
-		// Spoken warnings of climbs ahead, wherever directions are spoken.
+		// Spoken warnings of climbs ahead on a planned route, while it's spoken.
 		navHillVoice: true,
 		// The device voice spoken directions use (a SpeechSynthesisVoice's URI,
 		// or "" for the device's default), and its speed and pitch.
@@ -292,7 +292,6 @@ export const el = {
 	navKeepBtn: document.getElementById("navKeepBtn"),
 	// Settings' on/off switches: each names the preference it flips in data-switch.
 	settingSwitches: document.querySelectorAll(".switch[data-switch]"),
-	settingsCards: document.querySelectorAll("details.settings-card"),
 	navHomeRows: document.querySelectorAll("[data-nav-home]"),
 	// The voice picker: a block with a .voice-select, .voice-volume and
 	// .voice-test.
@@ -321,6 +320,9 @@ export const el = {
 	backToStartToggle: document.getElementById("backToStartToggle"),
 	avoidRetraceRow: document.getElementById("avoidRetraceRow"),
 	hillVoiceRow: document.getElementById("hillVoiceRow"),
+	navRouteVoiceRow: document.getElementById("navRouteVoiceRow"),
+	guideContrastRow: document.getElementById("guideContrastRow"),
+	guideHideDistanceRow: document.getElementById("guideHideDistanceRow"),
 	splitVoiceRow: document.getElementById("splitVoiceRow"),
 	statsActivitySelect: document.getElementById("statsActivitySelect"),
 	exportDataBtn: document.getElementById("exportDataBtn"),
