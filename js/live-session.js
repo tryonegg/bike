@@ -22,7 +22,7 @@ import {
 	AUTO_PAUSE_RESUME_MOVE_M,
 } from "./constants.js";
 import { state, el } from "./state.js";
-import { haversineMeters, bearingDegrees, formatDistance, formatSpeed, formatDuration } from "./format.js";
+import { haversineMeters, bearingDegrees, formatDistance, formatSpeed, formatDuration, addAltitudeReading, steadySpeed } from "./format.js";
 import { getSegmentLengthMeters, segmentDistanceLabel, addSegmentMarkerToLayer, renderSegmentMarkers, distanceUnitLabel, speedUnitLabel } from "./map-visuals.js";
 import { updateLiveMap, initLiveMap, setLiveLineData } from "./live-map.js";
 import { loadPaceIndex, hideBestPace } from "./pace.js";
@@ -552,7 +552,10 @@ function processPosition(position, forceAdd = false) {
 	session.lastPoint = point;
 	updateTravelHeading(session);
 
-	session.maxSpeed = Math.max(session.maxSpeed, safeSpeed);
+	// The middle of the last three speeds, so one wild reading isn't the top speed.
+	session.recentSpeeds ??= [];
+	session.recentSpeeds.push(safeSpeed);
+	session.maxSpeed = Math.max(session.maxSpeed, steadySpeed(session.recentSpeeds) ?? 0);
 
 	updateElevationTotals(point.altitude);
 	updateSegments(point);
@@ -652,29 +655,14 @@ function setAutoPaused(on) {
 
 /**
  * Folds a new raw altitude reading into the session's elevation gain/drop
- * totals. Smooths over a trailing window of up to 5 samples before
- * comparing to the previous smoothed value, so GPS altitude jitter doesn't
- * get double-counted as repeated small climbs and drops.
+ * totals; see `addAltitudeReading` in format.js for how GPS altitude jitter
+ * is kept out of them.
  *
  * @param {number} rawAltitude - Meters; ignored if non-finite (no altitude
  *   reading on this fix).
  */
 function updateElevationTotals(rawAltitude) {
-	const session = state.currentSession;
-	if (!session || !Number.isFinite(rawAltitude)) return;
-
-	session.altitudeSamples.push(rawAltitude);
-	if (session.altitudeSamples.length > 5) session.altitudeSamples.shift();
-
-	const smooth = session.altitudeSamples.reduce((sum, v) => sum + v, 0) / session.altitudeSamples.length;
-
-	if (session.smoothAltitudePrev != null) {
-		const delta = smooth - session.smoothAltitudePrev;
-		if (delta > 0) session.elevationGain += delta;
-		if (delta < 0) session.elevationDrop += Math.abs(delta);
-	}
-
-	session.smoothAltitudePrev = smooth;
+	if (state.currentSession) addAltitudeReading(state.currentSession, rawAltitude);
 }
 
 /**

@@ -128,6 +128,51 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
 	return R * c;
 }
 
+// Climb and descent: altitude is averaged over this many readings, and a change
+// only counts once the average has moved this far from where it last counted.
+// GPS altitude wanders by a few meters even on flat ground, and adding up every
+// wobble made a flat ride look hilly.
+const ELEVATION_SMOOTHING_SAMPLES = 5;
+export const ELEVATION_MIN_CHANGE_M = 3;
+
+/**
+ * Folds one altitude reading into a running climb and descent. Shared by the
+ * live ride and GPX import so both count the same way.
+ *
+ * @param {{altitudeSamples: number[], smoothAltitudePrev: number|null, elevationGain: number, elevationDrop: number}} totals -
+ *   Updated in place. `smoothAltitudePrev` is the altitude the totals last counted from.
+ * @param {number|null} rawAltitude - Meters; ignored when not a number.
+ */
+export function addAltitudeReading(totals, rawAltitude) {
+	if (!Number.isFinite(rawAltitude)) return;
+	totals.altitudeSamples.push(rawAltitude);
+	if (totals.altitudeSamples.length > ELEVATION_SMOOTHING_SAMPLES) totals.altitudeSamples.shift();
+	const smooth = totals.altitudeSamples.reduce((sum, value) => sum + value, 0) / totals.altitudeSamples.length;
+
+	if (totals.smoothAltitudePrev == null) {
+		totals.smoothAltitudePrev = smooth;
+		return;
+	}
+	const delta = smooth - totals.smoothAltitudePrev;
+	if (Math.abs(delta) < ELEVATION_MIN_CHANGE_M) return;
+	if (delta > 0) totals.elevationGain += delta;
+	else totals.elevationDrop -= delta;
+	totals.smoothAltitudePrev = smooth;
+}
+
+/**
+ * The middle of the last few speeds, so one wild GPS reading can't stand as a
+ * ride's top speed: a speed only counts once two of three fixes in a row reach it.
+ *
+ * @param {number[]} recent - The latest speeds, newest last. Trimmed in place to three.
+ * @returns {number|null} Null until there are three.
+ */
+export function steadySpeed(recent) {
+	while (recent.length > 3) recent.shift();
+	if (recent.length < 3) return null;
+	return [...recent].sort((a, b) => a - b)[1];
+}
+
 /**
  * Initial compass bearing from one lat/lng point to another.
  *

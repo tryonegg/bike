@@ -8,7 +8,7 @@
 import { ACTIVITIES } from "./constants.js";
 import { state, el } from "./state.js";
 import { confirmWithModal, showMessage } from "./modal.js";
-import { haversineMeters, escapeHtml, formatDistance } from "./format.js";
+import { haversineMeters, escapeHtml, formatDistance, addAltitudeReading } from "./format.js";
 import { turnInstruction } from "./route-steps.js";
 import { POINT_ICONS, markAt, isStop, pointName, placesOf, placeName } from "./point-marks.js";
 
@@ -206,22 +206,9 @@ export async function importGpxSession(event) {
 		const movingTime = Math.max(0, points[points.length - 1].timestamp - points[0].timestamp);
 		const maxSpeed = points.reduce((max, p) => Math.max(max, p.speed), 0);
 
-		let elevationGain = 0;
-		let elevationDrop = 0;
-		const altitudeSamples = [];
-		let smoothAltitudePrev = null;
-		for (const p of points) {
-			if (!Number.isFinite(p.altitude)) continue;
-			altitudeSamples.push(p.altitude);
-			if (altitudeSamples.length > 5) altitudeSamples.shift();
-			const smooth = altitudeSamples.reduce((sum, v) => sum + v, 0) / altitudeSamples.length;
-			if (smoothAltitudePrev != null) {
-				const delta = smooth - smoothAltitudePrev;
-				if (delta > 0) elevationGain += delta;
-				if (delta < 0) elevationDrop += Math.abs(delta);
-			}
-			smoothAltitudePrev = smooth;
-		}
+		const climb = { altitudeSamples: [], smoothAltitudePrev: null, elevationGain: 0, elevationDrop: 0 };
+		for (const p of points) addAltitudeReading(climb, p.altitude);
+		const { elevationGain, elevationDrop } = climb;
 
 		const session = {
 			date: new Date(points[0].timestamp).toISOString(),
