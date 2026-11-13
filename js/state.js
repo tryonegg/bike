@@ -322,6 +322,8 @@ export const el = {
 	hillVoiceRow: document.getElementById("hillVoiceRow"),
 	navRouteVoiceRow: document.getElementById("navRouteVoiceRow"),
 	guideContrastRow: document.getElementById("guideContrastRow"),
+	guideContrastPreview: document.getElementById("guideContrastPreview"),
+	markerSizePreview: document.getElementById("markerSizePreview"),
 	guideHideDistanceRow: document.getElementById("guideHideDistanceRow"),
 	splitVoiceRow: document.getElementById("splitVoiceRow"),
 	statsActivitySelect: document.getElementById("statsActivitySelect"),

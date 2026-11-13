@@ -14,7 +14,7 @@ import { setPref } from "./db.js";
 import { formatElevation } from "./format.js";
 import { renderPastRides, shiftCalendarMonth } from "./history-view.js";
 import { updateLiveStats, togglePauseSession, endSessionWithConfirm, saveActiveSessionCheckpoint, finalizeSession } from "./live-session.js";
-import { applyMapVisualPrefs } from "./map-visuals.js";
+import { applyMapVisualPrefs, renderSettingPreviews } from "./map-visuals.js";
 import { refreshTopoLayers, rebuildMapStyles, recenterLiveMap, rebuildTerrain, updateGuideLine } from "./live-map.js";
 import { wireMapPreviews, syncMapPreviewSelection, startMapPreviews, stopMapPreviews, restartMapPreviews } from "./map-previews.js";
 import { resetRouteHome } from "./route-home.js";
@@ -527,6 +527,9 @@ export function syncToggles() {
 	// The voice picker matters once anything's spoken, and needs speech to pick from.
 	for (const block of el.voiceSettings) block.hidden = !speechSupported || !(routeVoice || homeVoice || state.prefs.splitVoice);
 	el.splitVoiceRow.hidden = !speechSupported;
+
+	// The marker and guide line previews follow the size, contrast, map style, theme and units.
+	renderSettingPreviews();
 
 	// Option values are meters, fixed; only the displayed label follows the unit.
 	el.guideHideDistanceSelect.value = String(state.prefs.guideHideDistance);

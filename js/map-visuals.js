@@ -5,10 +5,10 @@
  * settings change.
  */
 
-import { METERS_PER_MILE, METERS_PER_KM } from "./constants.js";
-import { state } from "./state.js";
-import { escapeHtml } from "./format.js";
-import { applyLiveGuideStyle, styleGuideLabel, updateGuideLabel } from "./live-map.js";
+import { METERS_PER_MILE, METERS_PER_KM, MAP_STYLE_NAMES } from "./constants.js";
+import { state, el } from "./state.js";
+import { escapeHtml, formatDistance } from "./format.js";
+import { applyLiveGuideStyle, styleGuideLabel, updateGuideLabel, rideLineStyle } from "./live-map.js";
 import { renderPostSegmentMarkers } from "./post-session.js";
 
 /**
@@ -265,4 +265,82 @@ export function applyMapVisualPrefs() {
 	}
 
 	renderPostSegmentMarkers(markerSize);
+}
+
+// Roughly what each map style's ground and roads look like, for the settings
+// previews below: a patch of colour to judge a marker or line against, not a map.
+const PREVIEW_GROUND = {
+	road: { ground: "#ecebe6", road: "#ffffff" },
+	roadDark: { ground: "#1f2422", road: "#3b423f" },
+	topo: { ground: "#e3ead8", road: "#ffffff" },
+	bright: { ground: "#f2efe9", road: "#ffd98a" },
+	fiord: { ground: "#2e3b4e", road: "#4b5c74" },
+	classic: { ground: "#f2efe9", road: "#ffffff" },
+	toner: { ground: "#ffffff", road: "#111111" },
+	terrain: { ground: "#dde5cd", road: "#ffffff" },
+};
+
+/** The map style the previews imitate: the picked one, or Road where it needs a Stadia key that isn't set. */
+function previewMapType() {
+	const type = state.prefs.mapType;
+	return MAP_STYLE_NAMES[type]?.free === null && !state.prefs.stadiaKey ? "road" : type;
+}
+
+/**
+ * Draws the settings screen's two small previews: the distance marker at the
+ * picked size, and the line back to the start at the picked contrast, each on
+ * a patch coloured like the picked map style. They're built from the same
+ * elements and paint values the maps use, so they change exactly as the maps
+ * will. Called whenever a setting changes (navigation.js's `syncToggles`).
+ */
+export function renderSettingPreviews() {
+	const type = previewMapType();
+	const ground = PREVIEW_GROUND[type === "road" && state.prefs.theme === "dark" ? "roadDark" : type] ?? PREVIEW_GROUND.road;
+	const ride = rideLineStyle(type);
+	const unit = state.prefs.unit;
+	const size = state.prefs.markerSize;
+	const roads = `
+		<path d="M-10 60 H330" stroke="${ground.road}" stroke-width="12"/>
+		<path d="M96 -10 V100" stroke="${ground.road}" stroke-width="9"/>
+		<path d="M236 -10 V100" stroke="${ground.road}" stroke-width="9"/>`;
+	const svg = (body) => `<svg viewBox="0 0 320 88" preserveAspectRatio="none" fill="none" stroke-linecap="round" stroke-linejoin="round">${roads}${body}</svg>`;
+	const rideLine = (d) => `${ride.casingWidth ? `<path d="${d}" stroke="#ffffff" stroke-width="${ride.casingWidth}"/>` : ""}<path d="${d}" stroke="${ride.color}" stroke-width="${ride.width}"/>`;
+	// Placed by its middle, as a map marker is.
+	const place = (element, left, top) => {
+		const holder = document.createElement("div");
+		holder.className = "setting-preview-item";
+		holder.style.left = left;
+		holder.style.top = top;
+		holder.append(element);
+		return holder;
+	};
+
+	// Distance markers: two flags along a stretch of ride.
+	el.markerSizePreview.style.background = ground.ground;
+	el.markerSizePreview.innerHTML = svg(rideLine("M-10 60 H330"));
+	el.markerSizePreview.append(
+		place(createSegmentMarkerElement(segmentDistanceLabel(1, unit), size), "30%", "68%"),
+		place(createSegmentMarkerElement(segmentDistanceLabel(2, unit), size), "74%", "68%"),
+	);
+
+	// Guide line: the ride so far, the rider, and the dashed line back to the start with its distance chip.
+	const guide = getGuideLineStyle(state.prefs.guideContrast, type);
+	const guidePath = "M236 60 L60 22";
+	el.guideContrastPreview.style.background = ground.ground;
+	el.guideContrastPreview.innerHTML = svg(`
+		${rideLine("M60 22 V60 H236")}
+		<path d="${guidePath}" stroke="${guide.haloColor}" stroke-width="${guide.haloWeight}" stroke-opacity="${guide.haloOpacity}" stroke-dasharray="${guide.dashArray}"/>
+		<path d="${guidePath}" stroke="${guide.lineColor}" stroke-width="${guide.lineWeight}" stroke-opacity="${guide.lineOpacity}" stroke-dasharray="${guide.dashArray}"/>`);
+	const chip = document.createElement("div");
+	chip.className = "guide-distance-label";
+	const chipText = document.createElement("span");
+	chipText.textContent = `${formatDistance(240, unit)} ${distanceUnitLabel(unit)}`;
+	chip.append(chipText);
+	styleGuideLabel(chip, state.prefs.guideContrast, size, type);
+	const dot = (className) => {
+		const element = document.createElement("div");
+		element.className = className;
+		return element;
+	};
+	el.guideContrastPreview.append(place(dot("route-start"), "18.75%", "25%"), place(dot("rider-dot"), "73.75%", "68.2%"), place(chip, "46.25%", "46.6%"));
 }

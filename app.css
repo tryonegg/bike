@@ -4033,3 +4033,32 @@ div.session-row {
 .offline-area .text-danger {
   padding-right: 0;
 }
+
+/* ---- Setting previews: a patch of map showing what a setting changes ---- */
+
+.setting-preview {
+  position: relative;
+  height: 88px;
+  /* Drawn for about this width; much wider and its lines would stretch. */
+  max-width: 360px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
+
+.setting-preview svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Centred on its point, as a map marker is. */
+.setting-preview-item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

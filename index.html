@@ -505,12 +505,16 @@
             </div>
             <p class="setting-note">Gives the live map real elevation instead of flat ground. Not shown on the ride summary, and costs some battery.</p>
           </div>
-          <div class="setting-row" role="group" aria-label="Distance marker size">
-            <span>Distance marker size</span>
-            <div class="toggle-pill" id="markerSizeToggle">
-              <button data-marker-size="medium" class="toggle-option">Normal</button>
-              <button data-marker-size="large" class="toggle-option">Large</button>
+          <div class="setting-row stacked" role="group" aria-label="Distance marker size">
+            <div class="setting-row-main">
+              <span>Distance marker size</span>
+              <div class="toggle-pill" id="markerSizeToggle">
+                <button data-marker-size="medium" class="toggle-option">Normal</button>
+                <button data-marker-size="large" class="toggle-option">Large</button>
+              </div>
             </div>
+            <div id="markerSizePreview" class="setting-preview" aria-hidden="true"></div>
+            <p class="setting-note">The mile or kilometer flags along your ride, and the distance-to-start chip.</p>
           </div>
           <div class="setting-row stacked">
             <label for="stadiaKeyInput">Stadia Maps API key <span class="muted">(optional)</span></label>
@@ -576,6 +580,7 @@
                 <button data-guide-contrast="high" class="toggle-option">High</button>
               </div>
             </div>
+            <div id="guideContrastPreview" class="setting-preview" aria-hidden="true"></div>
             <p class="setting-note">How strongly the line back to the start stands out from the map.</p>
           </div>
           <div class="setting-row stacked nested" id="guideHideDistanceRow">
