@@ -1435,9 +1435,10 @@ function boundsOf(coords) {
 }
 
 /**
- * The planner map's route layers, over the grade overlay: a pale casing, then the legs, solid where
- * they follow roads and dashed where they couldn't (or haven't yet). Re-run
- * after every style swap by `createVectorMap`.
+ * The planner map's route layers, over the grade overlay and under the
+ * map's labels: a pale casing, then the legs, solid where they follow roads
+ * and dashed where they couldn't (or haven't yet). Re-run after every style
+ * swap by `createVectorMap`.
  */
 function addPlanLayers(map) {
 	addGradeLayers(map);
@@ -1475,6 +1476,23 @@ function addPlanLayers(map) {
 		layout: round,
 		paint: { "line-color": ROUTE_COLOR, "line-width": 3, "line-dasharray": [1, 1.5], "line-opacity": 0.7 },
 	});
+	raiseLabels(map);
+}
+
+/**
+ * Lifts every label and icon layer (street and path names, place names,
+ * shields, one-way arrows, contour labels, points of interest) above the
+ * planner's lines, which were just added on top of everything, so a route
+ * never hides the name of the road it runs along. Their order among
+ * themselves is kept. Some styles slip a few labels in under their last
+ * roads or boundaries, which is why a single insertion point won't do.
+ *
+ * @param {maplibregl.Map} map
+ */
+function raiseLabels(map) {
+	for (const layer of map.getStyle().layers) {
+		if (layer.type === "symbol") map.moveLayer(layer.id);
+	}
 }
 
 /** One feature per leg, flagged by whether it follows roads. */
