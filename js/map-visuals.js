@@ -5,7 +5,7 @@
  * settings change.
  */
 
-import { METERS_PER_MILE, METERS_PER_KM, MAP_STYLE_NAMES } from "./constants.js";
+import { METERS_PER_MILE, METERS_PER_KM, MAP_STYLE_NAMES, BLACK_ROAD_MAP_TYPES } from "./constants.js";
 import { state, el } from "./state.js";
 import { escapeHtml, formatDistance } from "./format.js";
 import { applyLiveGuideStyle, styleGuideLabel, updateGuideLabel, rideLineStyle } from "./live-map.js";
@@ -119,7 +119,7 @@ export function getMarkerSizeConfig(size) {
  *   line-width-relative units.
  */
 export function getGuideLineStyle(contrast, mapType = state.prefs.mapType) {
-	if (mapType === "toner") {
+	if (BLACK_ROAD_MAP_TYPES.includes(mapType)) {
 		return {
 			lineColor: "#ff1f8f",
 			lineWeight: 3.5,
@@ -273,6 +273,7 @@ const PREVIEW_GROUND = {
 	road: { ground: "#ecebe6", road: "#ffffff" },
 	roadDark: { ground: "#1f2422", road: "#3b423f" },
 	topo: { ground: "#e3ead8", road: "#ffffff" },
+	bike: { ground: "#e3ead8", road: "#111111" },
 	bright: { ground: "#f2efe9", road: "#ffd98a" },
 	fiord: { ground: "#2e3b4e", road: "#4b5c74" },
 	classic: { ground: "#f2efe9", road: "#ffffff" },

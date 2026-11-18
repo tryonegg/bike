@@ -12,12 +12,14 @@
 import { LIVE_MAP_PITCH, MAP_STYLE_NAMES } from "./constants.js";
 import { state, el } from "./state.js";
 import { mapStyleUrl, addTopoLayers, mapTypeNeedsStadiaKey, createPointMarker, lineData, styleGuideLabel, planLineStyle, rideLineStyle, addBuildings3d } from "./live-map.js";
+import { applyBikeStyle } from "./bike-style.js";
 import { getGuideLineStyle, distanceUnitLabel } from "./map-visuals.js";
 import { haversineMeters, formatDistance } from "./format.js";
 
 const MAP_TYPES = [
 	["road", "Road"],
 	["topo", "Topo"],
+	["bike", "Bike"],
 	["bright", "Bright"],
 	["fiord", "Fiord"],
 	["classic", "Classic"],
@@ -171,6 +173,7 @@ function createPreview(type, container, useStadia) {
 	const chip = new maplibregl.Marker({ element: chipElement }).setLngLat([center.lng, center.lat]).addTo(map);
 
 	map.on("style.load", () => {
+		applyBikeStyle(map, type);
 		addTopoLayers(map, type);
 		if (state.prefs.buildings3d) addBuildings3d(map, type);
 		const round = { "line-cap": "round", "line-join": "round" };

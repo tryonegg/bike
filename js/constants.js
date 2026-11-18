@@ -186,9 +186,12 @@ export const NAV_HOME_AWAY_M = 200;
 // equivalent, e.g. Toner); `stadia` is the Stadia Maps style name,
 // used once state.prefs.stadiaKey is set. "road" isn't listed here: it's the
 // default, and the only style that also switches with the light/dark theme
-// (see mapStyleUrl in live-map.js).
+// (see mapStyleUrl in live-map.js). `stadia: null` marks a style that is always
+// drawn from OpenFreeMap, key or no key: Bike recolours Liberty's own layers
+// (see applyBikeStyle in live-map.js), which Stadia's styles don't share.
 export const MAP_STYLE_NAMES = {
 	topo: { free: "liberty", stadia: "outdoors" },
+	bike: { free: "liberty", stadia: null },
 	bright: { free: "bright", stadia: "alidade_bright" },
 	fiord: { free: "fiord", stadia: "alidade_smooth_dark" },
 	classic: { free: null, stadia: "osm_bright" },
@@ -207,6 +210,11 @@ export const DEM_ATTRIBUTION = '<a href="https://github.com/tilezen/joerd/blob/m
 export const MAP_DATA_CACHE_PREFIX = "bike-tracker-mapdata-";
 export const MAP_DATA_CACHE_FALLBACK = "bike-tracker-mapdata-v1";
 export const FEET_PER_METER = 3.28084;
+// Map styles that get the hillshade and contour layers.
+export const TOPO_MAP_TYPES = ["topo", "bike"];
+// Map styles with black roads, where the usual route, ride and guide line
+// colours vanish and brighter cased ones are used instead.
+export const BLACK_ROAD_MAP_TYPES = ["toner", "bike"];
 export const TOPO_LAYER_IDS = ["topo-hillshade", "topo-contour-lines", "topo-contour-labels"];
 export const TOPO_SOURCE_IDS = ["topo-dem", "topo-contours"];
 

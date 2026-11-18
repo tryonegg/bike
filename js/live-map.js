@@ -22,11 +22,15 @@ import {
 	DEM_ATTRIBUTION,
 	FEET_PER_METER,
 	TOPO_LAYER_IDS,
+	TOPO_MAP_TYPES,
+	BLACK_ROAD_MAP_TYPES,
 	TOPO_SOURCE_IDS,
 	BEST_PACE_LAYER,
 	MAP_STYLE_NAMES,
 	TERRAIN_EXAGGERATION,
 } from "./constants.js";
+import { applyBikeStyle } from "./bike-style.js";
+import { wireFarBikePaths } from "./bike-far-paths.js";
 import { state, el } from "./state.js";
 import { haversineMeters, bearingDegrees, formatDistance, escapeHtml, formatElevation } from "./format.js";
 import { getGuideLineStyle, getMarkerSizeConfig, distanceUnitLabel } from "./map-visuals.js";
@@ -369,7 +373,7 @@ export function setLiveZoomAnchor(map, aroundRider) {
  * @returns {maplibregl.Map}
  */
 export function createVectorMap(options, addOverlays, { terrainCapable = false } = {}) {
-	const usesStadia = Boolean(state.prefs.stadiaKey);
+	const usesStadia = styleUsesStadia();
 	const map = new maplibregl.Map({
 		...options,
 		style: mapStyleUrl(usesStadia),
@@ -389,6 +393,7 @@ export function createVectorMap(options, addOverlays, { terrainCapable = false }
 	// the overlays (and terrain) along with the old style.
 	map.on("style.load", () => {
 		state.mapStatus.get(map).styleReady = true;
+		applyBikeStyle(map);
 		addTopoLayers(map);
 		if (terrainCapable) {
 			updateTerrain(map, state.prefs.terrain3d);
@@ -397,6 +402,7 @@ export function createVectorMap(options, addOverlays, { terrainCapable = false }
 		addOverlays(map);
 	});
 	map.on("error", (event) => handleMapError(map, event));
+	wireFarBikePaths(map);
 	return map;
 }
 
@@ -428,13 +434,23 @@ export function mapStyleUrl(useStadia, mapType = state.prefs.mapType) {
 	const dark = state.prefs.theme === "dark";
 	const names = MAP_STYLE_NAMES[mapType];
 
-	if (useStadia) {
+	if (useStadia && names?.stadia !== null) {
 		const styleName = names?.stadia ?? (dark ? "alidade_smooth_dark" : "alidade_smooth");
 		return `https://tiles.stadiamaps.com/styles/${styleName}.json?api_key=${encodeURIComponent(state.prefs.stadiaKey)}`;
 	}
 
 	const styleName = names?.free ?? (dark ? "dark" : "positron");
 	return `https://tiles.openfreemap.org/styles/${styleName}`;
+}
+
+/**
+ * Whether the saved map style is drawn by Stadia right now: a key is saved
+ * and the style has a Stadia rendition (Bike never does).
+ *
+ * @returns {boolean}
+ */
+function styleUsesStadia() {
+	return Boolean(state.prefs.stadiaKey) && MAP_STYLE_NAMES[state.prefs.mapType]?.stadia !== null;
 }
 
 /**
@@ -471,7 +487,7 @@ function setMapStyle(map, useStadia) {
  */
 export function rebuildMapStyles() {
 	for (const map of [state.liveMap, state.postMap, state.planMap, state.paceMap]) {
-		if (map) setMapStyle(map, Boolean(state.prefs.stadiaKey));
+		if (map) setMapStyle(map, styleUsesStadia());
 	}
 }
 
@@ -627,26 +643,26 @@ function addLiveOverlayLayers(map) {
 }
 
 /**
- * How the planned (turn-by-turn) route is drawn. Toner's black roads swallow
+ * How the planned (turn-by-turn) route is drawn. Toner's and Bike's black roads swallow
  * the usual purple, so there it is a bright orange on a wider white casing.
  *
  * @param {string} mapType
  * @returns {{color: string, width: number, casingWidth: number, opacity: number}}
  */
 export function planLineStyle(mapType) {
-	if (mapType === "toner") return { color: "#ff6a00", width: 7, casingWidth: 13, opacity: 1 };
+	if (BLACK_ROAD_MAP_TYPES.includes(mapType)) return { color: "#ff6a00", width: 7, casingWidth: 13, opacity: 1 };
 	return { color: "#6d4ad8", width: 6, casingWidth: 10, opacity: 0.85 };
 }
 
 /**
- * How the line of where the rider has been is drawn. On Toner it is a bright
+ * How the line of where the rider has been is drawn. On Toner and Bike it is a bright
  * blue on a white casing, since dark green vanishes into the black roads.
  *
  * @param {string} mapType
  * @returns {{color: string, width: number, casingWidth: number}}
  */
 export function rideLineStyle(mapType) {
-	if (mapType === "toner") return { color: "#0a6cff", width: 5, casingWidth: 9 };
+	if (BLACK_ROAD_MAP_TYPES.includes(mapType)) return { color: "#0a6cff", width: 5, casingWidth: 9 };
 	// No casing: a zero-width one draws nothing.
 	return { color: "#0b5d3b", width: 5, casingWidth: 0 };
 }
@@ -847,7 +863,7 @@ export function addBuildings3d(map, mapType = state.prefs.mapType) {
  * @param {maplibregl.Map} map
  */
 export function addTopoLayers(map, mapType = state.prefs.mapType) {
-	if (mapType !== "topo") return;
+	if (!TOPO_MAP_TYPES.includes(mapType)) return;
 	// The map-level raster-dem source is shared with 3D terrain (ensureDemSource
 	// skips re-adding it if terrain already did); the contour lines below still
 	// need the demSource object itself, for its contourProtocolUrl.

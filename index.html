@@ -302,6 +302,7 @@
           <div class="plan-actions">
             <button id="planUndoBtn" class="btn plan-icon-btn" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
             <button id="planRedoBtn" class="btn plan-icon-btn" aria-label="Redo" title="Redo"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+            <button id="planReverseBtn" class="btn plan-icon-btn" aria-label="Reverse route" title="Reverse route"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></button>
             <button id="planImportBtn" class="btn plan-icon-btn" aria-label="Import GPX" title="Import GPX"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></button>
             <button id="planExportBtn" class="btn plan-icon-btn" aria-label="Export GPX" title="Export GPX"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg></button>
             <button id="planShareBtn" class="btn plan-icon-btn" aria-label="Share route link" title="Share route link"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg></button>
@@ -489,7 +490,7 @@
             <span class="setting-row-main" id="mapStyleLabel">Map style</span>
             <div class="map-style-grid" id="mapStyleGrid" role="radiogroup" aria-labelledby="mapStyleLabel"></div>
             <p class="setting-note setting-warning" id="mapStyleFallbackNote" hidden></p>
-            <p class="setting-note">Topo adds hill shading and contour lines. Classic, Toner, and Terrain need the Stadia Maps API key below.</p>
+            <p class="setting-note">Topo adds hill shading and contour lines. Bike is Topo for riding: black roads, green bike paths, green dashes on streets signed for bikes, brown for unpaved, and grey where bikes are kept off. Classic, Toner, and Terrain need the Stadia Maps API key below.</p>
           </div>
           <div class="setting-row stacked">
             <div class="setting-row-main">
@@ -522,7 +523,7 @@
               <input id="stadiaKeyInput" type="text" placeholder="Paste API key" autocomplete="off" spellcheck="false">
               <button id="saveStadiaKeyBtn" class="btn">Save</button>
             </div>
-            <p class="setting-note">Without a key, Map style is limited to Road, Topo, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
+            <p class="setting-note">Without a key, Map style is limited to Road, Topo, Bike, and Bright, drawn from free OpenFreeMap tiles. With a key, those switch to Stadia Maps' versions and unlock Classic, Toner, and Terrain too. <a href="https://stadiamaps.com/">Get an API key here.</a></p>
           </div>
         </details>
 
@@ -735,7 +736,7 @@
           <div class="setting-row stacked">
             <ul id="offlineAreasList" class="offline-areas"></ul>
             <p class="setting-note" id="offlineAreasEmpty">No areas saved yet.</p>
-            <p class="setting-note">A saved area's map works with no signal, along with routing and grades there. To save one, open Routes, open or start a route, move the map to the area you want, and tap the map-with-arrow button. Saved areas use the Road, Topo and Bright styles.</p>
+            <p class="setting-note">A saved area's map works with no signal, along with routing and grades there. To save one, open Routes, open or start a route, move the map to the area you want, and tap the map-with-arrow button. Saved areas use the Road, Topo, Bike and Bright styles.</p>
           </div>
         </details>
 

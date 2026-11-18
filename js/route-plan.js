@@ -155,7 +155,7 @@ async function renderRoutesList() {
  */
 export function describeRoute(route) {
 	const parts = [`${formatDistance(route.meters, state.prefs.unit)} ${distanceUnitLabel(state.prefs.unit)}`];
-	if (route.elevation?.key === elevationKey(route)) parts.push(`${formatElevation(route.elevation.climb, state.prefs.unit)} climb`);
+	if (elevationFits(route)) parts.push(`${formatElevation(route.elevation.climb, state.prefs.unit)} climb`);
 	if (route.source === "gpx") {
 		parts.push("imported, as drawn");
 	} else {
@@ -422,6 +422,7 @@ export function wirePlanner() {
 	el.planDeleteBtn.addEventListener("click", deleteEditingRoute);
 	el.planUndoBtn.addEventListener("click", () => queueEdit(undo));
 	el.planRedoBtn.addEventListener("click", () => queueEdit(redo));
+	el.planReverseBtn.addEventListener("click", () => queueEdit(reverseRoute));
 	el.planImportBtn.addEventListener("click", () => el.planGpxInput.click());
 	el.planGpxInput.addEventListener("change", importPlanGpx);
 	el.planExportBtn.addEventListener("click", exportPlan);
@@ -638,6 +639,91 @@ function removeWaypointNow(index) {
 }
 
 /**
+ * Turns the route around: its waypoints and their marks in the opposite
+ * order, each leg routed again the other way (one-way streets can make it
+ * differ), and its elevation profile flipped until it's measured again. A
+ * line imported as drawn is simply followed backwards.
+ */
+function reverseRoute() {
+	const route = state.editingRoute;
+	if (!route || route.coords?.length < 2) return;
+	remember();
+	const before = route.elevation;
+	if (route.source === "gpx") {
+		route.legs = route.legs.map((leg) => ({ ...leg, coords: [...leg.coords].reverse() })).reverse();
+	} else {
+		ensureMarks(route);
+		const oldLegs = [...route.legs].reverse();
+		route.waypoints = [...route.waypoints].reverse();
+		route.marks = swapStartEnd([...route.marks].reverse());
+		route.legs = oldLegs.map((old, i) => reverseLeg(route, i, old));
+	}
+	routeChanged(route);
+	if (before && !route.legs.some((leg) => leg.pending)) {
+		const total = before.distances[before.distances.length - 1];
+		route.elevation = {
+			key: elevationKey(route),
+			distances: before.distances.map((d) => total - d).reverse(),
+			heights: [...before.heights].reverse(),
+			climb: before.descent,
+			descent: before.climb,
+		};
+		saveRoute(route);
+		renderPlan();
+	}
+}
+
+// Titles that name a route's start or its end, by word (lower case), and
+// whether each is a start word.
+const START_END_WORDS = { start: true, begin: true, end: false, finish: false };
+
+/**
+ * A reversed route's marks with its start and end turned around too: the
+ * Start icon becomes the End icon and back, and a title that just says
+ * "Start" (or "Begin") or "End" (or "Finish") becomes the other, using the
+ * route's own word for it when it has one and keeping the title's case.
+ */
+function swapStartEnd(marks) {
+	const wordOf = (mark) => {
+		const word = mark?.title?.trim().toLowerCase();
+		return word && Object.hasOwn(START_END_WORDS, word) ? word : null;
+	};
+	const used = marks.map(wordOf).filter(Boolean);
+	const counterpart = (word) => (START_END_WORDS[word] ? (used.find((w) => !START_END_WORDS[w]) ?? "end") : (used.find((w) => START_END_WORDS[w]) ?? "start"));
+	const inCase = (word, like) =>
+		like === like.toUpperCase() ? word.toUpperCase() : like[0] === like[0].toUpperCase() ? word[0].toUpperCase() + word.slice(1) : word;
+	return marks.map((mark) => {
+		if (!mark) return mark;
+		const icon = mark.icon === "start" ? "end" : mark.icon === "end" ? "start" : mark.icon;
+		const word = wordOf(mark);
+		const title = word ? inCase(counterpart(word), mark.title.trim()) : mark.title;
+		return { ...mark, icon, title };
+	});
+}
+
+/**
+ * Leg `index` of a reversed route: the old leg's line backwards while it's
+ * routed again in this direction (see `routeLeg`), kept as it was if that fails.
+ */
+function reverseLeg(route, index, old) {
+	const leg = { coords: [...old.coords].reverse(), meters: old.meters, routed: old.routed, pending: true };
+	request({ type: "leg", from: route.waypoints[index], to: route.waypoints[index + 1], profile: route.profile })
+		.then((answer) => {
+			if (answer.route) {
+				leg.coords = answer.route.coords;
+				leg.meters = answer.route.meters;
+				leg.routed = true;
+			}
+		})
+		.catch((error) => console.warn("Planning a leg failed", error))
+		.finally(() => {
+			leg.pending = false;
+			if (route.legs.includes(leg)) routeChanged(route);
+		});
+	return leg;
+}
+
+/**
  * Puts down a place where the map was held, just where it was put (it's
  * beside the route, so not snapped to a way).
  * @returns {Promise<number|null>} Its index among the route's places, or
@@ -742,10 +828,23 @@ function routeChanged(route) {
 
 /**
  * Which version of a route's line an elevation profile belongs to. Any edit
- * that moves the line changes its length or its point count.
+ * that moves the line changes its length or its point count; reversing it
+ * changes where it starts.
  */
 function elevationKey(route) {
-	return `${route.coords.length}:${Math.round(route.meters)}`;
+	const [lng, lat] = route.coords[0] ?? [0, 0];
+	return `${route.coords.length}:${Math.round(route.meters)}:${lng.toFixed(5)},${lat.toFixed(5)}`;
+}
+
+/**
+ * Whether the route's saved profile belongs to its line as it is now.
+ * Profiles saved before keys carried a start (just "count:meters") still
+ * fit: those routes were never reversed, which writes a key with a start.
+ */
+function elevationFits(route) {
+	const key = route.elevation?.key;
+	if (!key || !route.coords?.length) return false;
+	return key === elevationKey(route) || key === `${route.coords.length}:${Math.round(route.meters)}`;
 }
 
 /**
@@ -756,7 +855,7 @@ function elevationKey(route) {
 function measureElevation(route) {
 	if (route.coords.length < 2 || route.legs.some((leg) => leg.pending)) return;
 	const key = elevationKey(route);
-	if (route.elevation?.key === key || route.elevationPending === key) return;
+	if (elevationFits(route) || route.elevationPending === key) return;
 	route.elevationPending = key;
 	route.elevationFailed = false;
 	if (route === state.editingRoute) renderPlan();
@@ -1384,6 +1483,7 @@ function renderPlan() {
 	renderProfile(route);
 	el.planUndoBtn.disabled = !undoStack.length;
 	el.planRedoBtn.disabled = !redoStack.length;
+	el.planReverseBtn.disabled = !hasRoute;
 	// Not while legs are still straight placeholders.
 	el.planExportBtn.disabled = !hasRoute || pending;
 	el.planShareBtn.disabled = route?.source === "gpx" || (route?.waypoints.length ?? 0) < 2;
@@ -1401,7 +1501,7 @@ function renderProfile(route) {
 
 	const unit = state.prefs.unit;
 	el.planDistance.innerHTML = `${formatDistance(route.meters, unit)} <span class="unit">${distanceUnitLabel(unit)}</span>`;
-	const profile = route.elevation?.key === elevationKey(route) ? route.elevation : null;
+	const profile = elevationFits(route) ? route.elevation : null;
 	const heightUnit = unit === "imperial" ? "ft" : "m";
 	for (const [element, meters] of [
 		[el.planClimb, profile?.climb],

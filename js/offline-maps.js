@@ -140,7 +140,7 @@ export async function saveOfflineArea(map, name = "") {
 		return;
 	}
 
-	const stadiaNote = state.prefs.stadiaKey ? " Saved areas use the free Road, Topo and Bright styles, not Stadia's." : "";
+	const stadiaNote = state.prefs.stadiaKey ? " Saved areas use the free Road, Topo, Bike and Bright styles, not Stadia's." : "";
 	const ok = await confirmWithModal({
 		title: "Save This Area Offline?",
 		message: `The map on screen will be downloaded so it works without a signal: about ${total.toLocaleString()} tiles, roughly ${formatSize(ESTIMATED_BASE_BYTES + total * ESTIMATED_TILE_BYTES)}. Best done on Wi-Fi.${stadiaNote}`,

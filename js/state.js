@@ -250,6 +250,7 @@ export const el = {
 	planStatus: document.getElementById("planStatus"),
 	planUndoBtn: document.getElementById("planUndoBtn"),
 	planRedoBtn: document.getElementById("planRedoBtn"),
+	planReverseBtn: document.getElementById("planReverseBtn"),
 	planImportBtn: document.getElementById("planImportBtn"),
 	planExportBtn: document.getElementById("planExportBtn"),
 	pointSheet: document.getElementById("pointSheet"),
