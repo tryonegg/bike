@@ -298,6 +298,12 @@
               <div id="planChartReadout" class="chart-readout" aria-live="polite" hidden></div>
             </div>
           </div>
+          <!-- The route's points in order, on wide screens only; drag one to reorder the route. -->
+          <section id="planPoints" class="plan-points" aria-labelledby="planPointsLabel" hidden>
+            <h3 id="planPointsLabel" class="label">Points</h3>
+            <ol id="planPointsList" class="plan-points-list"></ol>
+            <p id="planPointsAnnounce" class="visually-hidden" aria-live="polite"></p>
+          </section>
           <p id="planStatus" class="setting-note plan-status" aria-live="polite"></p>
           <div class="plan-actions">
             <button id="planUndoBtn" class="btn plan-icon-btn" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>

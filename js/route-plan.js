@@ -52,6 +52,7 @@ import {
 	isStop,
 	pointIconSvg,
 	pointMarkerContent,
+	pointName,
 	placesOf,
 	normalizePlace,
 	placeMarkerElement,
@@ -434,6 +435,7 @@ export function wirePlanner() {
 		clearTimeout(nameSaveTimer);
 		nameSaveTimer = setTimeout(() => saveRoute(route), NAME_SAVE_DELAY_MS);
 	});
+	wirePointsList();
 	el.planChart.addEventListener("pointerdown", handleChartPointer);
 	el.planChart.addEventListener("pointermove", handleChartPointer);
 	for (const type of ["pointerup", "pointercancel", "pointerleave"]) el.planChart.addEventListener(type, clearChartPointer);
@@ -634,6 +636,35 @@ function removeWaypointNow(index) {
 		route.legs.pop();
 	} else {
 		route.legs.splice(index - 1, 2, routeLeg(route, index - 1));
+	}
+	routeChanged(route);
+}
+
+/**
+ * Moves waypoint `from` to position `to` in the route's order, with its
+ * mark. Legs whose two ends are unchanged are kept; the rest are routed
+ * again between their new neighbours.
+ */
+function reorderWaypoint(from, to) {
+	const route = state.editingRoute;
+	const count = route?.waypoints.length ?? 0;
+	if (!route || route.source === "gpx" || from === to || from < 0 || to < 0 || from >= count || to >= count) return;
+	remember();
+	ensureMarks(route);
+	const oldWaypoints = route.waypoints;
+	const oldLegs = route.legs;
+	const waypoints = [...oldWaypoints];
+	const marks = [...route.marks];
+	const [moved] = waypoints.splice(from, 1);
+	const [mark] = marks.splice(from, 1);
+	waypoints.splice(to, 0, moved);
+	marks.splice(to, 0, mark);
+	route.waypoints = waypoints;
+	route.marks = marks;
+	route.legs = [];
+	for (let i = 0; i + 1 < waypoints.length; i++) {
+		const j = oldWaypoints.indexOf(waypoints[i]);
+		route.legs.push(j >= 0 && oldWaypoints[j + 1] === waypoints[i + 1] && oldLegs[j] ? oldLegs[j] : routeLeg(route, i));
 	}
 	routeChanged(route);
 }
@@ -1356,8 +1387,20 @@ function centerOnRider() {
 	);
 }
 
-/** Keeps the route clear of the planner's top bar and bottom panel. */
+// Wide screens show the planner's panel as a pane down the left (app.css).
+const widePlanner = window.matchMedia("(min-width: 1024px) and (min-height: 560px)");
+
+/** Keeps the route clear of the planner's top bar and bottom panel (or, on a wide screen, its side pane, which holds the top bar). */
 function planPadding() {
+	if (widePlanner.matches) {
+		const pane = el.planBottomPanel;
+		return {
+			top: 60,
+			bottom: 40,
+			left: pane.offsetLeft + pane.offsetWidth + 40,
+			right: 60,
+		};
+	}
 	return {
 		top: el.planTopBar.offsetHeight + 30,
 		bottom: el.planBottomPanel.offsetHeight + 30,
@@ -1469,6 +1512,8 @@ function renderPlan() {
 	const unrouted = route?.legs.some((leg) => !leg.routed && !leg.pending);
 	el.screens.plan.classList.toggle("previewing", !!route?.preview);
 	el.planDoneBtn.textContent = route?.preview ? "Save Route" : "Done";
+	// How-to hints once there's a route, as opposed to news about it; the wide planner leaves them out (app.css).
+	el.planStatus.classList.toggle("is-hint", hasRoute && !pending && !unrouted && !route?.preview && route?.source !== "gpx");
 	el.planStatus.textContent = pending
 		? "Finding roads…"
 		: unrouted
@@ -1481,6 +1526,7 @@ function renderPlan() {
 						? "Tap to add a point, or hold to add a place beside the route. Drag to move, tap to edit."
 						: "Tap the map to add your first point, or hold to add a place, like parking.";
 	renderProfile(route);
+	renderPointsList(route);
 	el.planUndoBtn.disabled = !undoStack.length;
 	el.planRedoBtn.disabled = !redoStack.length;
 	el.planReverseBtn.disabled = !hasRoute;
@@ -1636,6 +1682,150 @@ function createPlaceMarker(map, place, index) {
 		openPlaceSheet(index);
 	});
 	return marker;
+}
+
+// ---- Points list (the side pane on wide screens) ----
+
+// The row being dragged in the points list, and whether the list should be
+// redrawn once the drag ends (a leg finished routing meanwhile).
+let draggingPoint = -1;
+let pointsListStale = false;
+
+/** Can the open route's points be put in a new order? */
+function canReorder(route) {
+	return !!route && !route.preview && route.source !== "gpx";
+}
+
+/**
+ * Lists the route's waypoints in order: each one's marker, its name, and how
+ * far along the route it is. Rows can be dragged (or moved with the arrow
+ * keys on their handle) to reorder the route, and tapped to edit the point.
+ */
+function renderPointsList(route) {
+	if (draggingPoint >= 0) {
+		pointsListStale = true;
+		return;
+	}
+	const count = route?.source === "gpx" ? 0 : (route?.waypoints.length ?? 0);
+	el.planPoints.hidden = count < 2;
+	if (count < 2) {
+		el.planPointsList.replaceChildren();
+		return;
+	}
+	const editable = canReorder(route);
+	const unit = state.prefs.unit;
+	let meters = 0;
+	const rows = route.waypoints.map((_, index) => {
+		if (index > 0) meters += route.legs[index - 1]?.meters ?? 0;
+		const content = pointMarkerContent(route, index);
+		const name = pointName(route, index);
+		const where = index === 0 ? "Start" : `${formatDistance(meters, unit)} ${distanceUnitLabel(unit)}`;
+		const row = document.createElement("li");
+		row.className = "plan-point-row";
+		row.dataset.index = String(index);
+		row.draggable = editable;
+		row.innerHTML =
+			(editable
+				? `<button type="button" class="plan-point-handle" aria-label="Move ${escapeHtml(name)}, point ${index + 1} of ${count}. Use the up and down arrow keys." title="Drag to reorder"><svg viewBox="0 0 14 18" aria-hidden="true" fill="currentColor"><circle cx="4" cy="3" r="1.6"/><circle cx="10" cy="3" r="1.6"/><circle cx="4" cy="9" r="1.6"/><circle cx="10" cy="9" r="1.6"/><circle cx="4" cy="15" r="1.6"/><circle cx="10" cy="15" r="1.6"/></svg></button>`
+				: "") +
+			`<span class="plan-waypoint plan-point-badge ${content.className}" aria-hidden="true"><span>${content.html}</span></span>` +
+			`<button type="button" class="plan-point-name"${editable ? "" : " disabled"}><strong>${escapeHtml(name)}</strong><span>${escapeHtml(where)}</span></button>`;
+		return row;
+	});
+	// A leg finishing its routing redraws the list; keep focus where it was.
+	const focused = el.planPointsList.contains(document.activeElement) ? document.activeElement : null;
+	const focusIndex = focused?.closest(".plan-point-row")?.dataset.index;
+	const focusClass = focused?.classList.contains("plan-point-handle") ? ".plan-point-handle" : ".plan-point-name";
+	el.planPointsList.replaceChildren(...rows);
+	if (focusIndex != null) el.planPointsList.querySelector(`[data-index="${focusIndex}"] ${focusClass}`)?.focus();
+}
+
+/** Drops the drag-over marks from every row. */
+function clearDropMarks() {
+	for (const row of el.planPointsList.querySelectorAll(".drop-before, .drop-after")) row.classList.remove("drop-before", "drop-after");
+}
+
+/** Where a drop at `clientY` over `row` would put the dragged point: its new index. */
+function dropIndex(row, clientY) {
+	const over = Number(row.dataset.index);
+	const rect = row.getBoundingClientRect();
+	const after = clientY > rect.top + rect.height / 2;
+	let to = after ? over + 1 : over;
+	if (draggingPoint < to) to--;
+	return { to, after };
+}
+
+/** Moves point `from` to `to`, says so for screen readers, and keeps focus on its handle when asked. */
+function movePoint(from, to, refocus = false) {
+	const route = state.editingRoute;
+	if (!canReorder(route) || from === to) return;
+	const name = pointName(route, from);
+	queueEdit(() => reorderWaypoint(from, to)).then(() => {
+		el.planPointsAnnounce.textContent = `${name} moved to point ${to + 1} of ${route.waypoints.length}.`;
+		if (refocus) el.planPointsList.querySelector(`[data-index="${to}"] .plan-point-handle`)?.focus();
+	});
+}
+
+/** Wires the points list's dragging, its handles' arrow keys and its rows' taps. Called once from `wirePlanner`. */
+function wirePointsList() {
+	const list = el.planPointsList;
+	list.addEventListener("dragstart", (event) => {
+		const row = event.target.closest?.(".plan-point-row");
+		if (!row || !canReorder(state.editingRoute)) return;
+		draggingPoint = Number(row.dataset.index);
+		event.dataTransfer.effectAllowed = "move";
+		event.dataTransfer.setData("text/plain", row.dataset.index);
+		row.classList.add("dragging");
+	});
+	list.addEventListener("dragover", (event) => {
+		const row = event.target.closest?.(".plan-point-row");
+		if (draggingPoint < 0 || !row) return;
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "move";
+		const { to, after } = dropIndex(row, event.clientY);
+		clearDropMarks();
+		if (to !== draggingPoint) row.classList.add(after ? "drop-after" : "drop-before");
+	});
+	list.addEventListener("drop", (event) => {
+		const row = event.target.closest?.(".plan-point-row");
+		if (draggingPoint < 0 || !row) return;
+		event.preventDefault();
+		const from = draggingPoint;
+		const { to } = dropIndex(row, event.clientY);
+		endPointDrag();
+		movePoint(from, to);
+	});
+	list.addEventListener("dragend", endPointDrag);
+	list.addEventListener("keydown", (event) => {
+		const handle = event.target.closest?.(".plan-point-handle");
+		if (!handle || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+		event.preventDefault();
+		const from = Number(handle.closest(".plan-point-row").dataset.index);
+		const to = from + (event.key === "ArrowUp" ? -1 : 1);
+		if (to < 0 || to >= (state.editingRoute?.waypoints.length ?? 0)) return;
+		movePoint(from, to, true);
+	});
+	list.addEventListener("click", (event) => {
+		const name = event.target.closest?.(".plan-point-name");
+		if (!name || !canReorder(state.editingRoute)) return;
+		openPointSheet(Number(name.closest(".plan-point-row").dataset.index));
+	});
+}
+
+/** Ends a drag in the points list, redrawing it if the route changed meanwhile. */
+function endPointDrag() {
+	if (draggingPoint < 0) return;
+	draggingPoint = -1;
+	clearDropMarks();
+	clearDragging();
+	if (pointsListStale) {
+		pointsListStale = false;
+		renderPointsList(state.editingRoute);
+	}
+}
+
+function clearDragging() {
+	for (const row of el.planPointsList.querySelectorAll(".dragging")) row.classList.remove("dragging");
 }
 
 // ---- Point sheet ----
