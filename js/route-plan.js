@@ -43,6 +43,7 @@ import { saveActiveSessionCheckpoint } from "./live-session.js";
 import { loadPaceIndex } from "./pace.js";
 import { buildShareUrl, isShareHash, parseShareHash, MAX_SHARED_WAYPOINTS } from "./route-share.js";
 import { addGradeLayers, wireGradeOverlay, wireGradeToggle } from "./grade-map.js";
+import { wireLoopPlanner, isLoopPanelOpen, addLoopLayers, closeLoopPanel } from "./loop-plan.js";
 import {
 	POINT_ICONS,
 	MAX_POINT_TITLE_LENGTH,
@@ -302,6 +303,7 @@ export async function openPlanner(routeId = null, mode = "push") {
 
 /** Opens the planner screen on `route`, which becomes the one being edited. */
 function showPlanner(route, mode) {
+	closeLoopPanel();
 	state.editingRoute = route;
 	undoStack = [];
 	redoStack = [];
@@ -408,6 +410,7 @@ async function newRoute() {
 /** Wires up the Routes screen, the planner, and ride setup's route picker. Called once from `wireEvents`. */
 export function wirePlanner() {
 	wirePointSheet();
+	wireLoopPlanner({ request, summarizeProfile, fit: fitCoords, apply: applyLoop });
 	el.routesBackBtn.addEventListener("click", () => history.back());
 	el.newRouteBtn.addEventListener("click", () => openPlanner());
 	el.setupRouteSelect.addEventListener("change", handleSetupRouteChange);
@@ -1213,6 +1216,8 @@ function createPlanMap() {
 	map.on("click", (event) => {
 		// A tap on a waypoint is that marker's own, not a new waypoint.
 		if (event.originalEvent?.target?.closest?.(".plan-waypoint")) return;
+		// Nor while a loop is being made in its place.
+		if (isLoopPanelOpen()) return;
 		// Nor is the end of a press held to put down a place.
 		if (longPressed) {
 			longPressed = false;
@@ -1249,7 +1254,7 @@ function wireLongPress(map) {
 		timer = null;
 	};
 	const place = (lngLat, openNow = false) => {
-		if (state.editingRoute?.preview) return;
+		if (state.editingRoute?.preview || isLoopPanelOpen()) return;
 		const added = addPlace([lngLat.lng, lngLat.lat]);
 		if (openNow) openAddedPlace(added);
 		else held = added;
@@ -1420,6 +1425,35 @@ function fitRoute() {
 	}
 }
 
+/** Fits the planner map to some points, clear of its panel (for the loop maker). */
+function fitCoords(coords) {
+	if (state.planMap && coords.length >= 2) state.planMap.fitBounds(boundsOf(coords), { padding: planPadding(), maxZoom: 16, duration: 300 });
+}
+
+/**
+ * Makes a loop from the loop maker (loop-plan.js) the route being planned:
+ * its turning points become the waypoints and its legs are kept as routed.
+ * Undo brings back the route as it was.
+ */
+function applyLoop(loop, name) {
+	queueEdit(() => {
+		const route = state.editingRoute;
+		if (!route || route.preview) return;
+		remember();
+		route.source = "planned";
+		route.waypoints = [...loop.waypoints];
+		route.marks = loop.waypoints.map(() => null);
+		route.legs = loop.legs.map(({ coords, meters }) => ({ coords, meters, routed: true }));
+		if (route.autoNamed) {
+			route.name = name;
+			route.autoNamed = false;
+			el.planNameInput.value = name;
+		}
+		routeChanged(route);
+		fitRoute();
+	});
+}
+
 /** A route's line along with its places, so a view fitted to it shows them too. */
 function withPlaces(coords) {
 	return [...coords, ...placesOf(state.editingRoute).map((place) => place.at)];
@@ -1476,6 +1510,7 @@ function addPlanLayers(map) {
 		layout: round,
 		paint: { "line-color": ROUTE_COLOR, "line-width": 3, "line-dasharray": [1, 1.5], "line-opacity": 0.7 },
 	});
+	addLoopLayers(map);
 	raiseLabels(map);
 }
 
@@ -1551,6 +1586,7 @@ function renderPlan() {
 	// Not while legs are still straight placeholders.
 	el.planExportBtn.disabled = !hasRoute || pending;
 	el.planShareBtn.disabled = route?.source === "gpx" || (route?.waypoints.length ?? 0) < 2;
+	el.planLoopBtn.disabled = !route || !!route.preview;
 }
 
 /**

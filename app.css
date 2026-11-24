@@ -4300,3 +4300,299 @@ div.session-row {
   align-items: center;
   justify-content: center;
 }
+
+/* ---- Loop maker (js/loop-plan.js) ---- */
+
+/* While a loop is being made its panel stands in for the planner's own, and
+   the route's points are hidden along with its line. */
+.plan-screen.looping .setup-bottom-panel-inner > :not(.loop-panel),
+.plan-screen.looping .plan-waypoint {
+  display: none !important;
+}
+
+.plan-loop-btn:disabled {
+  opacity: 0.55;
+}
+
+.loop-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.loop-panel[hidden] {
+  display: none;
+}
+
+.loop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.loop-head h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.loop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.loop-start {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.loop-start b {
+  color: var(--text);
+}
+
+.loop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loop-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.loop-length {
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.loop-length .unit {
+  font-size: 14px;
+}
+
+.loop-lengths {
+  display: grid;
+  grid-template-columns: 44px repeat(4, minmax(0, 1fr)) 44px;
+  gap: 6px;
+}
+
+.loop-choice,
+.loop-step {
+  min-height: 44px;
+  border: 1px solid var(--btn-border);
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.loop-step {
+  font-size: 20px;
+  color: var(--muted);
+}
+
+.loop-step:disabled {
+  opacity: 0.4;
+}
+
+.loop-choice[aria-pressed="true"] {
+  border: 2px solid var(--primary);
+  color: var(--accent);
+}
+
+.loop-segments {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--track);
+}
+
+.loop-segment {
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.loop-segment[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(20, 24, 26, 0.14);
+}
+
+.loop-go,
+.loop-actions .btn {
+  width: 100%;
+}
+
+.loop-progress {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 15px;
+}
+
+.loop-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.loop-progress-step.is-done,
+.loop-progress-step.is-active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.loop-progress-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--faint);
+}
+
+.is-done .loop-progress-mark {
+  border: 0;
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+
+.is-active .loop-progress-mark {
+  border: 3px solid var(--track);
+  border-top-color: var(--accent);
+  animation: loop-spin 0.8s linear infinite;
+}
+
+@keyframes loop-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-active .loop-progress-mark {
+    animation: none;
+  }
+}
+
+.loop-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loop-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 1px solid var(--btn-border);
+  border-radius: 16px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.loop-option[aria-checked="true"] {
+  border: 2px solid #6d4ad8;
+  box-shadow: 0 4px 14px rgba(109, 74, 216, 0.14);
+}
+
+.loop-option-number {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--track);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.loop-option[aria-checked="true"] .loop-option-number {
+  background: #6d4ad8;
+  color: #ffffff;
+}
+
+.loop-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.loop-option-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.loop-option-stats b {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.loop-option-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.loop-warn {
+  color: #8a5200;
+  font-weight: 700;
+}
+
+:root.dark .loop-warn {
+  color: var(--grade-moderate);
+}
+
+.loop-actions {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+}
+
+.loop-actions-stack {
+  grid-template-columns: 1fr;
+}
+
+.loop-link {
+  align-self: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}

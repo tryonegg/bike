@@ -23,6 +23,11 @@
  * - {id, type: "directions", coords, profile} — turn-by-turn steps along a
  *   line routed elsewhere (a planned route, followed as is), from the road
  *   graph rebuilt around it. Routes from this worker come with theirs.
+ * - {id, type: "loop", start, meters, bearing, corners, clockwise, profile}
+ *   — a loop of about `meters` from `start` back to it, heading out toward
+ *   `bearing` (degrees from north), turning at `corners` points, routed so
+ *   it rides as few roads twice as it can. Missing tiles are downloaded, as
+ *   for a leg. Answers {loop: {waypoints, legs, meters, retraced}|null}.
  * - {id, type: "paceSections", points, pauses} — the road sections
  *   a saved ride covered and how fast, for the best pace map (see
  *   pace-sections.js). `points` are [lng, lat, timestamp, estimated].
@@ -34,7 +39,20 @@
 import { decodeLineLayer } from "./mvt.js";
 import { MAP_DATA_CACHE_PREFIX, MAP_DATA_CACHE_FALLBACK } from "./constants.js";
 import { heightAt } from "./terrain.js";
-import { buildGraph, findRoute, markRetraced, tileFor, toUnits, toLngLat, usableWay, TILE_ZOOM } from "./route-graph.js";
+import {
+	buildGraph,
+	findRoute,
+	markRetraced,
+	setGoal,
+	loopPointNear,
+	clearRetraced,
+	retracedMeters,
+	tileFor,
+	toUnits,
+	toLngLat,
+	usableWay,
+	TILE_ZOOM,
+} from "./route-graph.js";
 import { buildWayIndex, routeSteps } from "./route-steps.js";
 import { rideSections } from "./pace-sections.js";
 
@@ -70,6 +88,26 @@ const ELEVATION_MAX_SAMPLES = 500;
 // the graph rather than stopping short at the edge of the loaded map.
 const PACE_TILE_MARGIN = 1;
 
+// A loop is laid out as a circle through the start whose length is the
+// loop's target divided by LOOP_WINDING, since roads wind and a route between
+// two points is longer than the straight line. Its tiles cover the circle
+// and LOOP_TILE_SHARE of its radius beyond, so the circle can grow on a
+// retry, up to LOOP_MAX_TILES (nearest the circle's middle first). A loop
+// within LOOP_TOLERANCE of its target is kept; otherwise the circle is
+// resized and the loop tried again, up to LOOP_TRIES times in all.
+const LOOP_WINDING = 1.3;
+const LOOP_TILE_SHARE = 0.6;
+const LOOP_MAX_TILES = 220;
+const LOOP_TOLERANCE = 0.1;
+const LOOP_TRIES = 3;
+// Each turning point goes to a way within LOOP_POINT_REACH_M of where the
+// circle puts it (or, failing that, of a spot slid round the circle by
+// LOOP_SLIDE_DEG, then twice that), and to a junction within
+// LOOP_JUNCTION_M of that way.
+const LOOP_POINT_REACH_M = 400;
+const LOOP_JUNCTION_M = 150;
+const LOOP_SLIDE_DEG = 15;
+
 // Beyond the tiles spanning the rider and the start, the search area reaches
 // this far out (a share of that span, but at least one tile) so a route can
 // swing wide of the straight line.
@@ -96,6 +134,7 @@ self.addEventListener("message", async (event) => {
 				snapTrack,
 				directions: routeDirections,
 				paceSections,
+				loop: routeLoop,
 			}[type] ??
 			routeHome;
 		self.postMessage({ id, goalKey, ...(await handler(event.data)) });
@@ -158,6 +197,117 @@ async function routeLeg({ from, to, profile }) {
 		route: findRoute(graph, from),
 		stats: { tiles: tiles.length, fetched, ...graph.stats, ms: Math.round(performance.now() - began) },
 	};
+}
+
+/**
+ * Makes a loop from `start` back to it of about `meters` (see the "loop"
+ * message above). Its turning points are laid out on a circle through the
+ * start, toward `bearing`; each goes to a nearby junction, and the legs
+ * between them are routed in turn on one graph, each steered off the roads
+ * the ones before it used. A loop too far off its target length is tried
+ * again on a resized circle, and the closest one kept.
+ *
+ * @returns {Promise<{loop: {waypoints: Array<[number, number]>, legs: Array<{coords, meters}>, meters: number, retraced: number}|null, stats: Object}>}
+ *   `retraced` is the share of the loop's length that rides a road twice.
+ *   Null when no loop could be routed (no roads near the start, or the turning points).
+ */
+async function routeLoop({ start, meters, bearing, corners = 3, clockwise = true, profile }) {
+	const began = performance.now();
+	const firstRadius = meters / LOOP_WINDING / (2 * Math.PI);
+	const wanted = loopTiles(start, bearing, firstRadius);
+	const cached = await cachedTiles();
+	const fetched = await fetchMissing(wanted, cached);
+	const tiles = [];
+	for (const key of wanted) {
+		const url = cached.get(key);
+		const tile = url && (await loadTile(url));
+		if (tile) tiles.push(tile);
+	}
+	const graph = buildGraph({ tiles, start, profile });
+	const stats = { tiles: tiles.length, fetched, ...graph.stats, tries: 0 };
+
+	let best = null;
+	let radius = firstRadius;
+	if (graph.goal) {
+		for (let attempt = 0; attempt < LOOP_TRIES; attempt++) {
+			stats.tries++;
+			const loop = tryLoop(graph, start, radius, bearing, corners, clockwise);
+			if (!loop) break;
+			if (!best || Math.abs(loop.meters - meters) < Math.abs(best.meters - meters)) best = loop;
+			if (Math.abs(loop.meters - meters) <= meters * LOOP_TOLERANCE) break;
+			// The circle can't grow past the tiles loaded for it.
+			radius = Math.min(firstRadius * (1 + LOOP_TILE_SHARE / 2), Math.max(firstRadius / 2, (radius * meters) / loop.meters));
+		}
+	}
+	stats.ms = Math.round(performance.now() - began);
+	return { loop: best, stats };
+}
+
+/** One loop on a circle of `radius` meters (see `routeLoop`), or null when one of its legs can't be routed. */
+function tryLoop(graph, start, radius, bearing, corners, clockwise) {
+	// The turning points go to the start's own network.
+	if (!setGoal(graph, start)) return null;
+	const center = offsetLngLat(start, bearing, radius);
+	const waypoints = [start];
+	for (let k = 1; k <= corners; k++) {
+		const angle = bearing + 180 + ((clockwise ? 1 : -1) * k * 360) / (corners + 1);
+		let point = null;
+		for (const slide of [0, LOOP_SLIDE_DEG, -LOOP_SLIDE_DEG, 2 * LOOP_SLIDE_DEG, -2 * LOOP_SLIDE_DEG]) {
+			point = loopPointNear(graph, offsetLngLat(center, angle + slide, radius), LOOP_POINT_REACH_M, LOOP_JUNCTION_M);
+			if (point) break;
+		}
+		const last = waypoints[waypoints.length - 1];
+		if (point && (point[0] !== last[0] || point[1] !== last[1])) waypoints.push(point);
+	}
+	// Fewer than two turning points makes an out-and-back, not a loop.
+	if (waypoints.length < 3) return null;
+	waypoints.push(start);
+
+	clearRetraced(graph);
+	const track = [];
+	const legs = [];
+	let total = 0;
+	let retraced = 0;
+	for (let i = 0; i + 1 < waypoints.length; i++) {
+		if (!setGoal(graph, waypoints[i + 1])) return null;
+		const route = findRoute(graph, waypoints[i], { avoidReuse: true });
+		if (!route) return null;
+		retraced += retracedMeters(graph, route.coords);
+		track.push(...(track.length ? route.coords.slice(1) : route.coords));
+		markRetraced(graph, track);
+		legs.push({ coords: route.coords, meters: route.meters });
+		total += route.meters;
+	}
+	return { waypoints, legs, meters: total, retraced: total ? retraced / total : 0 };
+}
+
+/** The point `meters` from `origin` toward `bearing` (degrees from north), as [lng, lat]. Flat-earth, which is close enough across a loop. */
+function offsetLngLat([lng, lat], bearing, meters) {
+	const rad = (bearing * Math.PI) / 180;
+	const metersPerDegree = 111320;
+	return [lng + (meters * Math.sin(rad)) / (metersPerDegree * Math.cos((lat * Math.PI) / 180)), lat + (meters * Math.cos(rad)) / metersPerDegree];
+}
+
+/**
+ * The tiles a loop's circle needs: those within its radius, and
+ * LOOP_TILE_SHARE of it beyond, of its middle, nearest first, as "x/y" keys.
+ * @returns {string[]}
+ */
+function loopTiles(start, bearing, radius) {
+	const center = offsetLngLat(start, bearing, radius);
+	const [cx, cy] = toUnits(center).map((v) => v / 4096);
+	const reach = (radius * (1 + LOOP_TILE_SHARE)) / (metersPerUnitAt(center[1]) * 4096) + Math.SQRT1_2;
+	const found = [];
+	for (let x = Math.floor(cx - reach); x <= cx + reach; x++) {
+		for (let y = Math.floor(cy - reach); y <= cy + reach; y++) {
+			const distance = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+			if (distance <= reach) found.push({ key: `${x}/${y}`, distance });
+		}
+	}
+	return found
+		.sort((p, q) => p.distance - q.distance)
+		.slice(0, LOOP_MAX_TILES)
+		.map((tile) => tile.key);
 }
 
 /**

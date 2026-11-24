@@ -341,23 +341,7 @@ export function buildGraph({ tiles, start, track = [], profile: profileName }) {
 
 	// ---- 6. The goal: a node on the road nearest the start ----
 	labelNetworks(graph);
-	const startUnits = toUnits(start);
-	graph.goal = null;
-	const snap = snapToNetwork(graph, startUnits, graph.inBigNetwork);
-	if (snap) {
-		const goal = graph.addNode(startUnits[0], startUnits[1]);
-		const edge = snap.edge;
-		const ex = graph.edgeA[edge];
-		const eb = graph.edgeB[edge];
-		// Reaching the start from one end of its road means riding the part of
-		// that road between the end and the start, in the edge's own direction.
-		const lengthA = Math.hypot(snap.x - graph.x[ex], snap.y - graph.y[ex]) * metersPerUnit;
-		const lengthB = Math.hypot(snap.x - graph.x[eb], snap.y - graph.y[eb]) * metersPerUnit;
-		const offRoad = snap.distance * metersPerUnit;
-		graph.addArc(ex, goal, lengthA * graph.edgeForward[edge] + offRoad, edge * 2);
-		graph.addArc(eb, goal, lengthB * graph.edgeBackward[edge] + offRoad, edge * 2 + 1);
-		graph.goal = { node: goal, edge, x: snap.x, y: snap.y, units: startUnits };
-	}
+	setGoal(graph, start);
 
 	// Filled in by markRetraced, as the ride goes on.
 	graph.trackDirection = new Uint8Array(graph.edgeA.length);
@@ -365,6 +349,96 @@ export function buildGraph({ tiles, start, track = [], profile: profileName }) {
 
 	graph.stats = { segments: roadSegmentCount, nodes: graph.x.length, edges: graph.edgeA.length };
 	return graph;
+}
+
+/**
+ * Makes `lngLat` the graph's goal, the point `findRoute` routes to: a new
+ * node joined to both ends of the road nearest it (in a big enough network).
+ * A loop routes several legs on one graph, so the goal moves leg by leg; an
+ * earlier goal's node is left behind, reachable but leading nowhere.
+ *
+ * @param {Object} graph - From `buildGraph`.
+ * @param {[number, number]} lngLat
+ * @returns {boolean} Whether a road was found near enough to route to.
+ */
+export function setGoal(graph, lngLat) {
+	const mpu = graph.metersPerUnit;
+	const units = toUnits(lngLat);
+	graph.goal = null;
+	const snap = snapToNetwork(graph, units, graph.inBigNetwork);
+	if (!snap) return false;
+	const goal = graph.addNode(units[0], units[1]);
+	const edge = snap.edge;
+	const ex = graph.edgeA[edge];
+	const eb = graph.edgeB[edge];
+	// Reaching the goal from one end of its road means riding the part of
+	// that road between the end and the goal, in the edge's own direction.
+	const lengthA = Math.hypot(snap.x - graph.x[ex], snap.y - graph.y[ex]) * mpu;
+	const lengthB = Math.hypot(snap.x - graph.x[eb], snap.y - graph.y[eb]) * mpu;
+	const offRoad = snap.distance * mpu;
+	graph.addArc(ex, goal, lengthA * graph.edgeForward[edge] + offRoad, edge * 2);
+	graph.addArc(eb, goal, lengthB * graph.edgeBackward[edge] + offRoad, edge * 2 + 1);
+	graph.goal = { node: goal, edge, x: snap.x, y: snap.y, units };
+	return true;
+}
+
+/**
+ * Where a loop's turning point near `lngLat` should go: a junction (three or
+ * more ways) near the nearest street in the same network as the goal, so the
+ * loop doesn't ride down a dead end to reach it and back out. Streets are
+ * preferred over service roads and paths; any way will do if there's none.
+ *
+ * @param {Object} graph - From `buildGraph`, with its goal at the loop's start.
+ * @param {[number, number]} lngLat
+ * @param {number} reachM - How far from `lngLat` a way may be.
+ * @param {number} junctionM - How far along from that way a junction may be.
+ * @returns {[number, number]|null} [lng, lat], or null when no way is in reach.
+ */
+export function loopPointNear(graph, lngLat, reachM, junctionM) {
+	if (!graph.goal) return null;
+	const mpu = graph.metersPerUnit;
+	const [x, y] = toUnits(lngLat);
+	const network = graph.network(graph.edgeA[graph.goal.edge]);
+	const sameNetwork = (edge) => edge < graph.roadEdgeCount && graph.network(graph.edgeA[edge]) === network;
+	const snap =
+		graph.nearestEdge(x, y, reachM / mpu, (edge) => sameNetwork(edge) && graph.edgeRank[edge] === 0) ??
+		graph.nearestEdge(x, y, reachM / mpu, sameNetwork);
+	if (!snap) return null;
+	const junction = junctionNear(graph, snap.x, snap.y, junctionM / mpu);
+	if (junction && graph.network(junction.node) === network) return toLngLat([graph.x[junction.node], graph.y[junction.node]]);
+	return toLngLat([snap.x, snap.y]);
+}
+
+/** Forgets which edges have been ridden (by `markRetraced`), to start a new loop on the same graph. */
+export function clearRetraced(graph) {
+	graph.trackDirection.fill(0);
+	graph.retraceMarkedTo = 0;
+}
+
+/**
+ * How much of a route (from `findRoute` on this graph) runs along edges
+ * already marked as ridden, in either direction, in meters.
+ *
+ * @param {Object} graph
+ * @param {Array<[number, number]>} coords - [lng, lat] each.
+ * @returns {number}
+ */
+export function retracedMeters(graph, coords) {
+	const mpu = graph.metersPerUnit;
+	// A route on this graph runs node to node, so each step's middle is on its edge.
+	const reach = 2 / mpu;
+	let meters = 0;
+	let prev = toUnits(coords[0]);
+	for (let i = 1; i < coords.length; i++) {
+		const next = toUnits(coords[i]);
+		const length = Math.hypot(next[0] - prev[0], next[1] - prev[1]);
+		if (length) {
+			const hit = graph.nearestEdge((prev[0] + next[0]) / 2, (prev[1] + next[1]) / 2, reach);
+			if (hit && graph.trackDirection[hit.edge]) meters += length * mpu;
+		}
+		prev = next;
+	}
+	return meters;
 }
 
 /**
@@ -909,11 +983,13 @@ export function junctionNear(graph, x, y, radius) {
  * @param {Object} [options]
  * @param {boolean} [options.avoidRetrace] - Make riding back the way the ride
  *   came out (as flagged by `markRetraced`) cost RETRACE_COST times more.
+ * @param {boolean} [options.avoidReuse] - Make riding any flagged edge, in
+ *   either direction, cost RETRACE_COST times more (for loops).
  * @returns {{coords: Array<[number, number]>, meters: number}|null} The route
  *   as [lng, lat] points from the rider to the start, and its length; null
  *   when either end is too far from any known road or no route connects them.
  */
-export function findRoute(graph, rider, { avoidRetrace = false } = {}) {
+export function findRoute(graph, rider, { avoidRetrace = false, avoidReuse = false } = {}) {
 	const goal = graph.goal;
 	if (!goal) return null;
 	// Only a road the start's network reaches can lead back to it.
@@ -947,7 +1023,9 @@ export function findRoute(graph, rider, { avoidRetrace = false } = {}) {
 	// edge the other way.
 	const direction = graph.trackDirection;
 	const penalty = (edgeCode) => {
-		if (!avoidRetrace || edgeCode === undefined) return 1;
+		if (edgeCode === undefined) return 1;
+		if (avoidReuse) return direction[edgeCode >> 1] ? RETRACE_COST : 1;
+		if (!avoidRetrace) return 1;
 		const against = edgeCode & 1 ? WENT_FORWARD : WENT_BACKWARD;
 		return direction[edgeCode >> 1] & against ? RETRACE_COST : 1;
 	};

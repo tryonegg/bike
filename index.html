@@ -268,6 +268,8 @@
       <!-- Colors the roads in view by how steep they are (grade-map.js). -->
       <div class="plan-grades">
         <button id="planGradesBtn" class="map-chip plan-grades-btn" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19h18L14 7l-4 6-2-3z"/></svg>Grades</button>
+        <!-- Makes a loop of a chosen length from the start (loop-plan.js). -->
+        <button id="planLoopBtn" class="map-chip plan-grades-btn plan-loop-btn"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20a8 8 0 1 1 7.4-5"/><path d="m21 11-1.6 4-4-1.5"/></svg>Loop</button>
         <div id="planGradeLegend" class="plan-grade-legend" hidden>
           <ul id="planGradeBands"></ul>
           <p id="planGradeNote" class="plan-grade-note" hidden>Zoom in to see grades</p>
@@ -276,6 +278,14 @@
 
       <div id="planBottomPanel" class="setup-bottom-panel">
         <div class="setup-bottom-panel-inner">
+          <!-- Shown in place of the rest of the panel while a loop is being made (loop-plan.js). -->
+          <section id="loopPanel" class="loop-panel" aria-labelledby="loopTitle" hidden>
+            <div class="loop-head">
+              <h3 id="loopTitle">Make a loop</h3>
+              <button id="loopCloseBtn" class="round-btn" aria-label="Close loop maker">✕</button>
+            </div>
+            <div id="loopBody" class="loop-body"></div>
+          </section>
           <div id="planProfile" class="plan-profile" hidden>
             <dl class="header-stats plan-stats">
               <div>
