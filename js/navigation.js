@@ -26,7 +26,7 @@ import { renderRideCharts, clearChartHighlight } from "./chart.js";
 import { startCountdownFlow, handleStartRideClick, cancelSetupAndReturnHome, abortRideSetup } from "./ride-setup.js";
 import { exportAllData, importAllData, deleteAllRides, deleteCurrentRide } from "./data-io.js";
 import { mergeCurrentRide } from "./ride-merge.js";
-import { importGpxSession, exportCurrentGpx } from "./gpx.js";
+import { importRideFile, exportCurrentGpx } from "./gpx.js";
 import { openPathLab, wirePathLab } from "./path-lab.js";
 import { openPaceMap, wirePaceMap } from "./pace-map-view.js";
 import { wireDestination } from "./destination.js";
@@ -132,7 +132,7 @@ export function wireEvents() {
 	el.importDataBtn.addEventListener("click", () => el.importFileInput.click());
 	el.importFileInput.addEventListener("change", importAllData);
 	el.importGpxBtn.addEventListener("click", () => el.importGpxFileInput.click());
-	el.importGpxFileInput.addEventListener("change", importGpxSession);
+	el.importGpxFileInput.addEventListener("change", importRideFile);
 	el.deleteAllRidesBtn.addEventListener("click", deleteAllRides);
 
 	el.openSettingsBtn.addEventListener("click", openSettings);

@@ -1,7 +1,8 @@
 /**
  * GPX interchange: exporting the currently-viewed ride, or a planned route,
- * as a `.gpx` file, and importing a `.gpx` file (from any source — another
- * device, a different tracking app) as a new saved ride, including deriving
+ * as a `.gpx` file, and importing a `.gpx` or `.fit` file (from any source —
+ * another device, a different tracking app, Zwift; fit.js reads FIT) as a
+ * new saved ride, including deriving
  * speed from consecutive points since GPX files rarely carry it themselves.
  */
 
@@ -38,6 +39,7 @@ export function isTurnCue(node) {
 import { addSession } from "./db.js";
 import { protectStoredData } from "./pwa.js";
 import { renderPastRides } from "./history-view.js";
+import { isFitFile, buildSessionFromFit } from "./fit.js";
 
 /**
  * The post-ride summary screen's "Export GPX" button handler: downloads the
@@ -172,25 +174,31 @@ function buildGpx(session) {
 }
 
 /**
- * The hidden file input's `change` handler for GPX import: parses the file,
- * confirms with the rider, derives every summary stat (distance, moving
- * time, speeds, elevation gain/drop) from the raw points the same way a live
- * ride would accumulate them, and saves it as a new ride.
+ * The hidden file input's `change` handler for ride import: reads a GPX or
+ * FIT file (told apart by FIT's ".FIT" header, not the file name), confirms
+ * with the rider, and saves it as a new ride. Summary stats (distance,
+ * moving time, speeds, elevation gain/drop) are derived from the raw points
+ * the same way a live ride would accumulate them, except where a FIT file
+ * carries the device's own totals, which are kept so the ride matches what
+ * the rider saw there. A virtual ride (Zwift, say) is saved with
+ * `virtual: true`.
  *
  * @param {Event} event - A `change` event on `el.importGpxFileInput`.
  * @returns {Promise<void>}
  */
-export async function importGpxSession(event) {
+export async function importRideFile(event) {
 	const file = event.target.files[0];
 	if (!file) return;
 
 	try {
-		const text = await file.text();
-		const { points, activityType } = buildSessionFromGpx(text);
+		const buffer = await file.arrayBuffer();
+		const fit = isFitFile(buffer);
+		const ride = fit ? rideFromFit(buffer) : rideFromGpx(new TextDecoder().decode(buffer));
+		const noun = `${ride.virtual ? "virtual " : ""}${ACTIVITIES[ride.activityType].noun}`;
 
 		const confirmed = await confirmWithModal({
-			title: "Import GPX Ride",
-			message: `Import a ${ACTIVITIES[activityType].noun} with ${points.length} point(s)?`,
+			title: fit ? "Import FIT Ride" : "Import GPX Ride",
+			message: `Import a ${noun} with ${ride.points.length} point(s)?`,
 			confirmText: "Import",
 			cancelText: "Cancel",
 		});
@@ -199,33 +207,23 @@ export async function importGpxSession(event) {
 
 		if (!confirmed) return;
 
-		const totalDistance = points.reduce((sum, p, i) => {
-			if (i === 0) return 0;
-			return sum + haversineMeters(points[i - 1].lat, points[i - 1].lng, p.lat, p.lng);
-		}, 0);
-		const movingTime = Math.max(0, points[points.length - 1].timestamp - points[0].timestamp);
-		const maxSpeed = points.reduce((max, p) => Math.max(max, p.speed), 0);
-
-		const climb = { altitudeSamples: [], smoothAltitudePrev: null, elevationGain: 0, elevationDrop: 0 };
-		for (const p of points) addAltitudeReading(climb, p.altitude);
-		const { elevationGain, elevationDrop } = climb;
-
 		const session = {
-			date: new Date(points[0].timestamp).toISOString(),
+			date: new Date(ride.points[0].timestamp).toISOString(),
 			unit: state.prefs.unit,
-			activityType,
+			activityType: ride.activityType,
 			keepScreenOn: false,
-			points,
-			totalDistance,
-			movingTime,
-			maxSpeed,
-			avgSpeed: movingTime > 0 ? totalDistance / (movingTime / 1000) : 0,
-			elevationGain,
-			elevationDrop,
+			points: ride.points,
+			totalDistance: ride.totalDistance,
+			movingTime: ride.movingTime,
+			maxSpeed: ride.maxSpeed,
+			avgSpeed: ride.avgSpeed,
+			elevationGain: ride.elevationGain,
+			elevationDrop: ride.elevationDrop,
 			segments: [],
 			segmentMarkers: [],
-			pauses: [],
+			pauses: ride.pauses,
 		};
+		if (ride.virtual) session.virtual = true;
 
 		const id = await addSession(session);
 		session.id = id;
@@ -234,8 +232,62 @@ export async function importGpxSession(event) {
 		await showMessage("Import Success", "The ride has been imported.");
 	} catch (error) {
 		el.importGpxFileInput.value = "";
-		await showMessage("Import Error", `Failed to import GPX file: ${error.message}`);
+		await showMessage("Import Error", `Failed to import the file: ${error.message}`);
 	}
+}
+
+/**
+ * A ride's totals worked out from its points, as a live ride accumulates
+ * them: moving time is first to last point less any pauses.
+ *
+ * @param {Array<Object>} points - Sorted by timestamp, each with a speed.
+ * @param {Array<{start: number, end: number}>} [pauses]
+ * @returns {{totalDistance: number, movingTime: number, maxSpeed: number, avgSpeed: number, elevationGain: number, elevationDrop: number}}
+ */
+function totalsFromPoints(points, pauses = []) {
+	const totalDistance = points.reduce((sum, p, i) => {
+		if (i === 0) return 0;
+		return sum + haversineMeters(points[i - 1].lat, points[i - 1].lng, p.lat, p.lng);
+	}, 0);
+	const paused = pauses.reduce((sum, pause) => sum + Math.max(0, pause.end - pause.start), 0);
+	const movingTime = Math.max(0, points[points.length - 1].timestamp - points[0].timestamp - paused);
+	const maxSpeed = points.reduce((max, p) => Math.max(max, p.speed), 0);
+
+	const climb = { altitudeSamples: [], smoothAltitudePrev: null, elevationGain: 0, elevationDrop: 0 };
+	for (const p of points) addAltitudeReading(climb, p.altitude);
+
+	return {
+		totalDistance,
+		movingTime,
+		maxSpeed,
+		avgSpeed: movingTime > 0 ? totalDistance / (movingTime / 1000) : 0,
+		elevationGain: climb.elevationGain,
+		elevationDrop: climb.elevationDrop,
+	};
+}
+
+/** A GPX file as a ride ready to save: its points, activity and totals. */
+function rideFromGpx(text) {
+	const { points, activityType } = buildSessionFromGpx(text);
+	return { points, activityType, virtual: false, pauses: [], ...totalsFromPoints(points) };
+}
+
+/**
+ * A FIT file as a ride ready to save. Points without the device's speed get
+ * one derived as for GPX, and any total the device didn't record is worked
+ * out from the points.
+ */
+function rideFromFit(buffer) {
+	const { points, pauses, activityType, virtual, totals } = buildSessionFromFit(buffer);
+	if (points.some((p) => p.speed == null)) {
+		const derived = smoothedGpxSpeeds(points);
+		points.forEach((p, i) => {
+			if (p.speed == null) p.speed = derived[i];
+		});
+	}
+	const ride = { ...totalsFromPoints(points, pauses), ...totals };
+	if (totals.avgSpeed == null) ride.avgSpeed = ride.movingTime > 0 ? ride.totalDistance / (ride.movingTime / 1000) : 0;
+	return { points, pauses, activityType, virtual, ...ride };
 }
 
 // Parses a GPX file into track points shaped like a live-recorded session's,

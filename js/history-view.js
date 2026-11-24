@@ -560,6 +560,7 @@ export function buildSessionRow(session, date, { withTime = false, bar = null } 
 	const when = document.createElement("span");
 	when.className = "session-when";
 	when.textContent = withTime ? sessionTimeTitle(session, date) : sessionRowTitle(session, date);
+	if (session.virtual) when.append(" ", virtualBadge());
 
 	const sub = document.createElement("span");
 	sub.className = "session-sub";
@@ -591,6 +592,18 @@ export function buildSessionRow(session, date, { withTime = false, bar = null } 
 	button.append(distance, chevron);
 	button.addEventListener("click", () => openPostSession(session.id, null, "push"));
 	return button;
+}
+
+/**
+ * The small "Virtual" tag beside the title of a ride done in Zwift or
+ * another virtual world, rather than outdoors.
+ * @returns {HTMLSpanElement}
+ */
+export function virtualBadge() {
+	const badge = document.createElement("span");
+	badge.className = "virtual-badge";
+	badge.textContent = "Virtual";
+	return badge;
 }
 
 /**

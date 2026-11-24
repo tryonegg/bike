@@ -533,6 +533,19 @@ button {
   font-weight: 600;
 }
 
+.virtual-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--btn-border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--muted);
+}
+
 .session-sub {
   font-size: 12px;
   font-weight: 500;

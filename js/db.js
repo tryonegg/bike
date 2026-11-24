@@ -413,6 +413,7 @@ export function summarizeSession(session) {
 		elevationGain: Number.isFinite(session.elevationGain) ? session.elevationGain : 0,
 		maxSpeed: Number.isFinite(session.maxSpeed) ? session.maxSpeed : 0,
 		routeId: session.routeId ?? null,
+		virtual: session.virtual === true,
 		startTime: Number.isFinite(first) ? first : null,
 		endTime: Number.isFinite(last) ? last : null,
 	};

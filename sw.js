@@ -7,7 +7,7 @@
  * of that handshake).
  */
 
-const CACHE_VERSION = "v1.37.5";
+const CACHE_VERSION = "v1.38.0";
 const CACHE_PREFIX = "bike-tracker-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const RUNTIME_CACHE = "bike-tracker-runtime-v1";
@@ -56,6 +56,7 @@ const APP_MODULES = [
   "./js/data-io.js",
   "./js/ride-merge.js",
   "./js/gpx.js",
+  "./js/fit.js",
   "./js/path-reduction.js",
   "./js/path-lab.js",
   // Route home: the worker and what it imports load separately from app.js,

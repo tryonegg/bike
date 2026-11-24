@@ -13,7 +13,7 @@ import { findStableStartIndex, maxOf, minOf, haversineMeters, movingMsBetween, f
 import { speedBand, speedBandColor, accuracyBand, accuracyBandColor, paceColor } from "./colors.js";
 import { getSegmentLengthMeters, renderFittedSegmentMarkers, distanceUnitLabel, speedUnitLabel, segmentLabel } from "./map-visuals.js";
 import { getSessionById } from "./db.js";
-import { rideAvgSpeed, sessionTimeTitle } from "./history-view.js";
+import { rideAvgSpeed, sessionTimeTitle, virtualBadge } from "./history-view.js";
 import { showScreen } from "./navigation.js";
 import { renderRideCharts } from "./chart.js";
 
@@ -533,6 +533,7 @@ export function renderPostSummary(session) {
 		? "Unknown date"
 		: date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 	el.postTitle.textContent = sessionTimeTitle(session, date);
+	if (session.virtual) el.postTitle.append(" ", virtualBadge());
 
 	el.postDistance.textContent = formatDistance(session.totalDistance || 0, unit);
 	el.postDistanceUnit.textContent = distanceUnitLabel(unit);
